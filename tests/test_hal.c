@@ -17,6 +17,8 @@ void test_hal_opens_and_configures_sdrplay_stub(void) {
     dab_sdr_device_t *device = 0;
     dab_sdr_stream_t *stream = 0;
     dab_stream_config_t config;
+    dab_sdr_block_view_t block0;
+    dab_sdr_block_view_t block1;
 
     TEST_ASSERT(dab_sdr_device_open(&params, &device) == DAB_SDR_STATUS_OK);
     TEST_ASSERT(device != 0);
@@ -30,7 +32,16 @@ void test_hal_opens_and_configures_sdrplay_stub(void) {
     TEST_ASSERT(device->vtbl->configure(device, &config) == DAB_SDR_STATUS_OK);
     TEST_ASSERT(device->vtbl->open_stream(device, &stream) == DAB_SDR_STATUS_OK);
     TEST_ASSERT(stream != 0);
-    TEST_ASSERT(stream->vtbl->start(stream) == DAB_SDR_STATUS_NOT_IMPLEMENTED);
+    TEST_ASSERT(stream->vtbl->start(stream) == DAB_SDR_STATUS_OK);
+    TEST_ASSERT(stream->vtbl->read(stream, &block0) == DAB_SDR_STATUS_OK);
+    TEST_ASSERT(block0.sample_count == 1024u);
+    TEST_ASSERT(block0.iq_interleaved != 0);
+    TEST_ASSERT(block0.iq_interleaved[0] == 0);
+    TEST_ASSERT(block0.iq_interleaved[1] == 0);
+    TEST_ASSERT(stream->vtbl->read(stream, &block1) == DAB_SDR_STATUS_OK);
+    TEST_ASSERT(block1.sample_count == 1024u);
+    TEST_ASSERT(block1.sample_index >= block0.sample_index + block0.sample_count);
+    TEST_ASSERT(block1.timestamp_ns >= block0.timestamp_ns);
     TEST_ASSERT(stream->vtbl->stop(stream) == DAB_SDR_STATUS_OK);
 
     dab_sdr_stream_close(stream);

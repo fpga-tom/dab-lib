@@ -21,6 +21,7 @@ add_library(dab
     src/core/pc_queue.c
     src/core/receiver.c
     src/hal/sdr_device.c
+    src/hal/sdrplay/sdrplay_adapter_stub.c
     src/hal/sdrplay/sdrplay_device.c
     src/os/os_cond.c
     src/os/os_mutex.c

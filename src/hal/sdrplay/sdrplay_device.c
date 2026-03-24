@@ -3,9 +3,28 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "dab/core/block_pool.h"
+#include "dab/core/pc_queue.h"
+#include "sdrplay_adapter.h"
+
+enum {
+    DAB_SDRPLAY_STREAM_BLOCK_COUNT = 8,
+    DAB_SDRPLAY_STREAM_QUEUE_CAPACITY = 8
+};
+
 typedef struct {
     dab_sdr_stream_t base;
+    dab_sdrplay_adapter_t *adapter;
     dab_stream_config_t config;
+    dab_iq_block_pool_t pool;
+    dab_pc_queue_t filled_blocks;
+    dab_iq_block_t *blocks;
+    void **free_storage;
+    void **filled_storage;
+    dab_iq_block_t *current_block;
+    uint32_t dropped_blocks;
+    int pool_ready;
+    int filled_queue_ready;
     int started;
 } dab_sdrplay_stream_t;
 
@@ -15,32 +34,137 @@ typedef struct {
     int configured;
 } dab_sdrplay_device_t;
 
+static void dab_sdrplay_stream_on_samples(const int16_t *iq_interleaved,
+                                          uint32_t sample_count,
+                                          uint64_t sample_index,
+                                          uint64_t timestamp_ns,
+                                          void *user) {
+    dab_sdrplay_stream_t *stream = (dab_sdrplay_stream_t *)user;
+    dab_iq_block_t *block = NULL;
+    uint32_t copy_count;
+
+    if (stream == NULL || iq_interleaved == NULL || sample_count == 0u) {
+        return;
+    }
+
+    if (dab_pc_queue_try_pop(&stream->pool.free_blocks, (void **)&block) != 0) {
+        stream->dropped_blocks++;
+        return;
+    }
+
+    copy_count = sample_count > DAB_IQ_BLOCK_SAMPLES ? DAB_IQ_BLOCK_SAMPLES : sample_count;
+    memcpy(block->iq, iq_interleaved, sizeof(block->iq[0]) * 2u * copy_count);
+    block->sequence = sample_index / copy_count;
+    block->timestamp_ns = timestamp_ns;
+    block->valid_samples = copy_count;
+    block->flags = 0u;
+
+    if (dab_pc_queue_try_push(&stream->filled_blocks, block) != 0) {
+        stream->dropped_blocks++;
+        (void)dab_iq_block_release(&stream->pool, block);
+    }
+}
+
+static void dab_sdrplay_stream_teardown(dab_sdrplay_stream_t *stream) {
+    if (stream->adapter != NULL) {
+        stream->adapter->vtbl->destroy(stream->adapter);
+        stream->adapter = NULL;
+    }
+    if (stream->filled_queue_ready) {
+        dab_pc_queue_destroy(&stream->filled_blocks);
+        stream->filled_queue_ready = 0;
+    }
+    if (stream->filled_storage != NULL) {
+        free(stream->filled_storage);
+        stream->filled_storage = NULL;
+    }
+    if (stream->pool_ready) {
+        dab_iq_block_pool_destroy(&stream->pool);
+        stream->pool_ready = 0;
+    }
+    if (stream->free_storage != NULL) {
+        free(stream->free_storage);
+        stream->free_storage = NULL;
+    }
+    free(stream->blocks);
+    stream->blocks = NULL;
+    stream->current_block = NULL;
+}
+
 static dab_sdr_status_t dab_sdrplay_stream_start(struct dab_sdr_stream *stream) {
     dab_sdrplay_stream_t *impl = (dab_sdrplay_stream_t *)stream;
     if (impl == NULL) {
         return DAB_SDR_STATUS_INVALID_ARGUMENT;
     }
+    if (impl->started) {
+        return DAB_SDR_STATUS_BUSY;
+    }
+    if (impl->adapter->vtbl->start(impl->adapter, dab_sdrplay_stream_on_samples, impl) != DAB_SDR_STATUS_OK) {
+        return DAB_SDR_STATUS_ERROR;
+    }
     impl->started = 1;
-    return DAB_SDR_STATUS_NOT_IMPLEMENTED;
+    return DAB_SDR_STATUS_OK;
 }
 
 static dab_sdr_status_t dab_sdrplay_stream_stop(struct dab_sdr_stream *stream) {
     dab_sdrplay_stream_t *impl = (dab_sdrplay_stream_t *)stream;
+    dab_sdr_status_t status;
+
     if (impl == NULL) {
         return DAB_SDR_STATUS_INVALID_ARGUMENT;
     }
+    if (!impl->started) {
+        return DAB_SDR_STATUS_OK;
+    }
+
+    status = impl->adapter->vtbl->stop(impl->adapter);
+    dab_pc_queue_stop(&impl->filled_blocks);
     impl->started = 0;
-    return DAB_SDR_STATUS_OK;
+    return status;
 }
 
 static dab_sdr_status_t dab_sdrplay_stream_read(struct dab_sdr_stream *stream, dab_sdr_block_view_t *block) {
-    (void)stream;
-    (void)block;
-    return DAB_SDR_STATUS_NOT_IMPLEMENTED;
+    dab_sdrplay_stream_t *impl = (dab_sdrplay_stream_t *)stream;
+    dab_iq_block_t *next_block = NULL;
+
+    if (impl == NULL || block == NULL) {
+        return DAB_SDR_STATUS_INVALID_ARGUMENT;
+    }
+    if (!impl->started) {
+        return DAB_SDR_STATUS_ERROR;
+    }
+
+    if (impl->current_block != NULL) {
+        (void)dab_iq_block_release(&impl->pool, impl->current_block);
+        impl->current_block = NULL;
+    }
+
+    if (dab_pc_queue_pop(&impl->filled_blocks, (void **)&next_block) != 0) {
+        return DAB_SDR_STATUS_ERROR;
+    }
+
+    impl->current_block = next_block;
+    block->iq_interleaved = next_block->iq;
+    block->sample_count = next_block->valid_samples;
+    block->sample_index = next_block->sequence * next_block->valid_samples;
+    block->timestamp_ns = next_block->timestamp_ns;
+    return DAB_SDR_STATUS_OK;
 }
 
 static void dab_sdrplay_stream_destroy(struct dab_sdr_stream *stream) {
-    free(stream);
+    dab_sdrplay_stream_t *impl = (dab_sdrplay_stream_t *)stream;
+    if (impl == NULL) {
+        return;
+    }
+    if (impl->started) {
+        (void)dab_sdrplay_stream_stop(stream);
+    }
+    if (impl->current_block != NULL) {
+        (void)dab_iq_block_release(&impl->pool, impl->current_block);
+        impl->current_block = NULL;
+    }
+    dab_sdrplay_stream_teardown(impl);
+    free(impl);
 }
 
 static const dab_sdr_stream_vtbl_t DAB_SDRPLAY_STREAM_VTBL = {
@@ -94,6 +218,29 @@ static dab_sdr_status_t dab_sdrplay_open_stream(struct dab_sdr_device *device, d
 
     created = (dab_sdrplay_stream_t *)calloc(1u, sizeof(*created));
     if (created == NULL) {
+        return DAB_SDR_STATUS_ERROR;
+    }
+
+    created->blocks = (dab_iq_block_t *)calloc(DAB_SDRPLAY_STREAM_BLOCK_COUNT, sizeof(*created->blocks));
+    created->free_storage = (void **)calloc(DAB_SDRPLAY_STREAM_BLOCK_COUNT, sizeof(*created->free_storage));
+    created->filled_storage = (void **)calloc(DAB_SDRPLAY_STREAM_QUEUE_CAPACITY, sizeof(*created->filled_storage));
+    if (created->blocks == NULL || created->free_storage == NULL || created->filled_storage == NULL) {
+        dab_sdrplay_stream_destroy(&created->base);
+        return DAB_SDR_STATUS_ERROR;
+    }
+    if (dab_iq_block_pool_init(&created->pool, created->blocks, created->free_storage, DAB_SDRPLAY_STREAM_BLOCK_COUNT) != 0) {
+        dab_sdrplay_stream_destroy(&created->base);
+        return DAB_SDR_STATUS_ERROR;
+    }
+    created->pool_ready = 1;
+    if (dab_pc_queue_init(&created->filled_blocks, created->filled_storage, DAB_SDRPLAY_STREAM_QUEUE_CAPACITY) != 0) {
+        dab_sdrplay_stream_destroy(&created->base);
+        return DAB_SDR_STATUS_ERROR;
+    }
+    created->filled_queue_ready = 1;
+    created->adapter = dab_sdrplay_adapter_create(&impl->config);
+    if (created->adapter == NULL) {
+        dab_sdrplay_stream_destroy(&created->base);
         return DAB_SDR_STATUS_ERROR;
     }
 
