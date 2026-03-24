@@ -6,6 +6,7 @@
 #include "dab/config.h"
 #include "dab/hal/sdr_device.h"
 #include "dab/hal/sdrplay_device.h"
+#include "sdrplay_api.h"
 
 typedef void (*dab_sdrplay_samples_cb_t)(const int16_t *iq_interleaved,
                                          uint32_t sample_count,
@@ -27,6 +28,7 @@ struct dab_sdrplay_adapter {
     const dab_sdrplay_adapter_vtbl_t *vtbl;
     dab_stream_config_t config;
     dab_sdrplay_config_t device_config;
+    int uses_real_api;
 };
 
 dab_sdrplay_adapter_t *dab_sdrplay_adapter_create(const dab_stream_config_t *config,
