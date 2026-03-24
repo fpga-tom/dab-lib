@@ -1,2 +1,4 @@
 ref-impl/
 doc/
+.idea/
+build/
