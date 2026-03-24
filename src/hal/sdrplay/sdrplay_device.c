@@ -6,6 +6,7 @@
 #include "dab/core/block_pool.h"
 #include "dab/core/pc_queue.h"
 #include "sdrplay_adapter.h"
+#include "sdrplay_device.h"
 
 enum {
     DAB_SDRPLAY_STREAM_BLOCK_COUNT = 8,
@@ -31,6 +32,7 @@ typedef struct {
 typedef struct {
     dab_sdr_device_t base;
     dab_stream_config_t config;
+    dab_sdrplay_config_t sdrplay_config;
     int configured;
 } dab_sdrplay_device_t;
 
@@ -174,7 +176,69 @@ static const dab_sdr_stream_vtbl_t DAB_SDRPLAY_STREAM_VTBL = {
     dab_sdrplay_stream_destroy
 };
 
-static int dab_sdrplay_validate_config(const dab_stream_config_t *config, const dab_sdr_capabilities_t *caps) {
+void dab_sdrplay_default_config(dab_sdrplay_config_t *config) {
+    if (config == NULL) {
+        return;
+    }
+    config->gain_mode = DAB_SDRPLAY_GAIN_MODE_AUTO;
+    config->if_mode = DAB_SDRPLAY_IF_MODE_ZERO_IF;
+    config->antenna = DAB_SDRPLAY_ANTENNA_AUTO;
+    config->lna_state = 0u;
+    config->if_gain_db = 0;
+    config->bias_tee_enabled = 0;
+    config->ppm_correction = 0;
+}
+
+int dab_sdrplay_validate_device_config(const dab_sdrplay_config_t *config) {
+    if (config == NULL) {
+        return 0;
+    }
+    if (config->gain_mode != DAB_SDRPLAY_GAIN_MODE_AUTO &&
+        config->gain_mode != DAB_SDRPLAY_GAIN_MODE_MANUAL) {
+        return 0;
+    }
+    if (config->if_mode != DAB_SDRPLAY_IF_MODE_ZERO_IF &&
+        config->if_mode != DAB_SDRPLAY_IF_MODE_LOW_IF) {
+        return 0;
+    }
+    if (config->antenna != DAB_SDRPLAY_ANTENNA_AUTO &&
+        config->antenna != DAB_SDRPLAY_ANTENNA_A &&
+        config->antenna != DAB_SDRPLAY_ANTENNA_B) {
+        return 0;
+    }
+    if (config->lna_state > 15u) {
+        return 0;
+    }
+    if (config->if_gain_db < 0 || config->if_gain_db > 59) {
+        return 0;
+    }
+    if (config->bias_tee_enabled != 0 && config->bias_tee_enabled != 1) {
+        return 0;
+    }
+    if (config->ppm_correction < -200 || config->ppm_correction > 200) {
+        return 0;
+    }
+    return 1;
+}
+
+dab_sdr_status_t dab_sdrplay_configure_device(dab_sdr_device_t *device, const dab_sdrplay_config_t *config) {
+    dab_sdrplay_device_t *impl = (dab_sdrplay_device_t *)device;
+
+    if (impl == NULL || config == NULL) {
+        return DAB_SDR_STATUS_INVALID_ARGUMENT;
+    }
+    if (impl->base.desc.kind != DAB_SDR_DRIVER_SDRPLAY) {
+        return DAB_SDR_STATUS_UNSUPPORTED;
+    }
+    if (!dab_sdrplay_validate_device_config(config)) {
+        return DAB_SDR_STATUS_UNSUPPORTED;
+    }
+
+    impl->sdrplay_config = *config;
+    return DAB_SDR_STATUS_OK;
+}
+
+static int dab_sdrplay_validate_stream_config(const dab_stream_config_t *config, const dab_sdr_capabilities_t *caps) {
     if (config == NULL || caps == NULL) {
         return 0;
     }
@@ -195,7 +259,7 @@ static dab_sdr_status_t dab_sdrplay_configure(struct dab_sdr_device *device, con
     if (impl == NULL || config == NULL) {
         return DAB_SDR_STATUS_INVALID_ARGUMENT;
     }
-    if (!dab_sdrplay_validate_config(config, &impl->base.desc.caps)) {
+    if (!dab_sdrplay_validate_stream_config(config, &impl->base.desc.caps)) {
         return DAB_SDR_STATUS_UNSUPPORTED;
     }
     impl->config = *config;
@@ -238,7 +302,7 @@ static dab_sdr_status_t dab_sdrplay_open_stream(struct dab_sdr_device *device, d
         return DAB_SDR_STATUS_ERROR;
     }
     created->filled_queue_ready = 1;
-    created->adapter = dab_sdrplay_adapter_create(&impl->config);
+    created->adapter = dab_sdrplay_adapter_create(&impl->config, &impl->sdrplay_config);
     if (created->adapter == NULL) {
         dab_sdrplay_stream_destroy(&created->base);
         return DAB_SDR_STATUS_ERROR;
@@ -323,6 +387,7 @@ dab_sdr_status_t dab_sdrplay_device_open(const dab_sdr_open_params_t *params, da
 
     created->base.vtbl = &DAB_SDRPLAY_DEVICE_VTBL;
     created->base.desc = *desc;
+    dab_sdrplay_default_config(&created->sdrplay_config);
     *device = &created->base;
     return DAB_SDR_STATUS_OK;
 }

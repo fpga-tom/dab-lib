@@ -68,6 +68,7 @@ if(DAB_BUILD_TESTS)
         tests/test_main.c
         tests/test_block_pool.c
         tests/test_hal.c
+        tests/test_sdrplay.c
         tests/test_pc_queue.c
         tests/test_simd.c
     )
