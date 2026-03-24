@@ -20,6 +20,8 @@ add_library(dab
     src/core/block_pool.c
     src/core/pc_queue.c
     src/core/receiver.c
+    src/hal/sdr_device.c
+    src/hal/sdrplay/sdrplay_device.c
     src/os/os_cond.c
     src/os/os_mutex.c
     src/os/os_thread.c
@@ -64,6 +66,7 @@ if(DAB_BUILD_TESTS)
     add_executable(dab_tests
         tests/test_main.c
         tests/test_block_pool.c
+        tests/test_hal.c
         tests/test_pc_queue.c
         tests/test_simd.c
     )
