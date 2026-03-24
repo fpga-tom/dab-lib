@@ -14,6 +14,7 @@ typedef struct {
     float slow_alpha;
     uint32_t fast_window_samples;
     uint32_t slow_window_samples;
+    uint32_t sample_decimation;
     float enter_ratio_threshold;
     float exit_ratio_threshold;
     uint32_t min_null_samples;
@@ -37,12 +38,16 @@ typedef struct {
     float slow_power;
     float fast_sum;
     float slow_sum;
+    float fast_inv_window;
+    float slow_inv_window;
     float fast_history[DAB_NULL_DETECT_MAX_WINDOW_SAMPLES];
     float slow_history[DAB_NULL_DETECT_MAX_WINDOW_SAMPLES];
     uint32_t fast_history_pos;
     uint32_t slow_history_pos;
     uint32_t fast_history_count;
     uint32_t slow_history_count;
+    uint32_t fast_history_mask;
+    uint32_t slow_history_mask;
     uint64_t next_sample_index;
     uint64_t run_start_index;
     float run_power_sum;
@@ -61,5 +66,8 @@ void dab_null_detect_reset(dab_null_detect_t *detector);
 int dab_null_detect_process(dab_null_detect_t *detector,
                             const dab_frontend_block_t *block,
                             dab_null_event_t *event);
+int dab_null_detect_process_i16(dab_null_detect_t *detector,
+                                const dab_sdr_block_view_t *block,
+                                dab_null_event_t *event);
 
 #endif

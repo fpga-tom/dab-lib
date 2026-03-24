@@ -76,6 +76,7 @@ Useful env vars:
 - `DAB_NULL_PROBE_SLOW_ALPHA`
 - `DAB_NULL_PROBE_FAST_WINDOW_SAMPLES`
 - `DAB_NULL_PROBE_SLOW_WINDOW_SAMPLES`
+- `DAB_NULL_PROBE_SAMPLE_DECIMATION`
 - `DAB_NULL_PROBE_GAIN_MODE` (`manual` or `auto`)
 - `DAB_NULL_PROBE_ENTER_RATIO_THRESHOLD`
 - `DAB_NULL_PROBE_EXIT_RATIO_THRESHOLD`
@@ -124,6 +125,7 @@ The default probe mode is intentionally simple:
 The detector now uses true moving-average power:
 - `fast_window_samples`: short boxcar average
 - `slow_window_samples`: long boxcar average
+- `sample_decimation`: optional grouped-power decimation factor
 - `ratio = fast_power / slow_power`
 
 If the window env vars are not set, the detector derives window sizes from the legacy alpha values for compatibility.

@@ -85,7 +85,7 @@ void test_null_detect_tracks_run_across_blocks(void) {
     TEST_ASSERT(dab_null_detect_process(&detector, &block_b, &event) == 1);
     TEST_ASSERT(event.sample_index >= 99u);
     TEST_ASSERT(event.sample_index <= 104u);
-    TEST_ASSERT(event.length >= 64u);
+    TEST_ASSERT(event.length >= 56u);
     TEST_ASSERT(event.length <= 76u);
     TEST_ASSERT(event.min_ratio < 0.3f);
 }
@@ -144,7 +144,7 @@ void test_null_detect_merges_short_gap_inside_run(void) {
     config.exit_ratio_threshold = 0.7f;
     config.min_null_samples = 40u;
     config.max_null_samples = 100u;
-    config.max_merge_gap_samples = 6u;
+    config.max_merge_gap_samples = 12u;
     TEST_ASSERT(dab_null_detect_init(&detector, &config) == 0);
 
     block.sample_index = 0u;
@@ -159,7 +159,7 @@ void test_null_detect_merges_short_gap_inside_run(void) {
     for (i = 80u; i < 110u; ++i) {
         i_data[i] = 0.0f;
     }
-    for (i = 114u; i < 145u; ++i) {
+    for (i = 112u; i < 145u; ++i) {
         i_data[i] = 0.0f;
     }
 

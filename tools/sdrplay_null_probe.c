@@ -3,7 +3,6 @@
 #include <string.h>
 
 #include "dab/config.h"
-#include "dab/core/frontend.h"
 #include "dab/core/null_detect.h"
 #include "dab/hal/sdr_device.h"
 #include "dab/hal/sdrplay_device.h"
@@ -93,15 +92,10 @@ int main(void) {
     dab_sdr_stream_t *stream = 0;
     dab_stream_config_t stream_config;
     dab_sdrplay_config_t device_config;
-    dab_frontend_t frontend;
-    dab_frontend_config_t frontend_config;
     dab_null_detect_t detector;
     dab_null_detect_config_t detector_config;
     dab_sdr_block_view_t src_block;
-    dab_frontend_block_t frontend_block;
     dab_null_event_t event;
-    float i_data[DAB_IQ_BLOCK_SAMPLES];
-    float q_data[DAB_IQ_BLOCK_SAMPLES];
     unsigned int blocks_to_read = env_u32("DAB_NULL_PROBE_BLOCKS", 200u);
     unsigned int log_every_blocks = env_u32("DAB_NULL_PROBE_LOG_EVERY_BLOCKS", 0u);
     unsigned int expected_null_interval = env_u32("DAB_NULL_PROBE_EXPECTED_NULL_INTERVAL", 0u);
@@ -126,13 +120,6 @@ int main(void) {
     stream_config.bandwidth_hz = env_u32("DAB_NULL_PROBE_BANDWIDTH_HZ", 1536000u);
     stream_config.gain_db = env_i32("DAB_NULL_PROBE_GAIN_DB", 40);
 
-    dab_frontend_default_config(&frontend_config);
-    frontend_config.dc_alpha = env_f32("DAB_NULL_PROBE_DC_ALPHA", frontend_config.dc_alpha);
-    if (dab_frontend_init(&frontend, &frontend_config) != 0) {
-        fprintf(stderr, "frontend init failed\n");
-        return 2;
-    }
-
     dab_null_detect_default_config(&detector_config);
     detector_config.fast_alpha = env_f32("DAB_NULL_PROBE_FAST_ALPHA", detector_config.fast_alpha);
     detector_config.slow_alpha = env_f32("DAB_NULL_PROBE_SLOW_ALPHA", detector_config.slow_alpha);
@@ -140,6 +127,7 @@ int main(void) {
                                                   detector_config.fast_window_samples);
     detector_config.slow_window_samples = env_u32("DAB_NULL_PROBE_SLOW_WINDOW_SAMPLES",
                                                   detector_config.slow_window_samples);
+    detector_config.sample_decimation = env_u32("DAB_NULL_PROBE_SAMPLE_DECIMATION", 1u);
     detector_config.enter_ratio_threshold = env_f32("DAB_NULL_PROBE_ENTER_RATIO_THRESHOLD", 0.3f);
     detector_config.exit_ratio_threshold = env_f32("DAB_NULL_PROBE_EXIT_RATIO_THRESHOLD", 0.5f);
     detector_config.min_null_samples = env_u32("DAB_NULL_PROBE_MIN_NULL_SAMPLES", 1u);
@@ -152,9 +140,6 @@ int main(void) {
         fprintf(stderr, "null detector init failed\n");
         return 2;
     }
-
-    frontend_block.i_data = i_data;
-    frontend_block.q_data = q_data;
 
     fprintf(stderr, "open device\n");
     if (dab_sdr_device_open(&params, &device) != DAB_SDR_STATUS_OK || device == 0) {
@@ -186,7 +171,7 @@ int main(void) {
         goto cleanup;
     }
 
-    printf("null-probe start sample_rate=%u center_freq_hz=%llu bandwidth_hz=%u blocks=%u gain_mode=%s fast_window=%u slow_window=%u fast_alpha=%.4f slow_alpha=%.4f enter_ratio=%.4f exit_ratio=%.4f expected_null_interval=%u\n",
+    printf("null-probe start sample_rate=%u center_freq_hz=%llu bandwidth_hz=%u blocks=%u gain_mode=%s fast_window=%u slow_window=%u decimation=%u fast_alpha=%.4f slow_alpha=%.4f enter_ratio=%.4f exit_ratio=%.4f expected_null_interval=%u\n",
            stream_config.sample_rate,
            (unsigned long long)stream_config.center_freq_hz,
            stream_config.bandwidth_hz,
@@ -194,6 +179,7 @@ int main(void) {
            device_config.gain_mode == DAB_SDRPLAY_GAIN_MODE_AUTO ? "auto" : "manual",
            detector.config.fast_window_samples,
            detector.config.slow_window_samples,
+           detector.config.sample_decimation,
            detector_config.fast_alpha,
            detector_config.slow_alpha,
            detector_config.enter_ratio_threshold,
@@ -209,12 +195,7 @@ int main(void) {
             fprintf(stderr, "block too large: %u\n", src_block.sample_count);
             goto cleanup;
         }
-        if (dab_frontend_process(&frontend, &src_block, &frontend_block) != 0) {
-            fprintf(stderr, "frontend failed at block %u\n", block_num);
-            goto cleanup;
-        }
-
-        if (dab_null_detect_process(&detector, &frontend_block, &event) < 0) {
+        if (dab_null_detect_process_i16(&detector, &src_block, &event) < 0) {
             fprintf(stderr, "null detector failed at block %u\n", block_num);
             goto cleanup;
         }
@@ -231,8 +212,8 @@ int main(void) {
         if (log_every_blocks != 0u && (block_num % log_every_blocks) == 0u) {
             printf("status block=%u sample_index=%llu samples=%u fast_power=%.3f slow_power=%.3f ratio=%.6f run_length=%u\n",
                    block_num,
-                   (unsigned long long)frontend_block.sample_index,
-                   frontend_block.sample_count,
+                   (unsigned long long)src_block.sample_index,
+                   src_block.sample_count,
                    detector.fast_power,
                    detector.slow_power,
                    detector.slow_power > 1e-12f ? (detector.fast_power / detector.slow_power) : 0.0f,
@@ -270,7 +251,7 @@ int main(void) {
         } else if (was_in_run != 0u && detector.run_length == 0u) {
             printf("drop-end block=%u sample_index=%llu\n",
                    block_num,
-                   (unsigned long long)(frontend_block.sample_index + frontend_block.sample_count));
+                   (unsigned long long)(src_block.sample_index + src_block.sample_count));
         }
 
         was_in_run = detector.run_length != 0u;
