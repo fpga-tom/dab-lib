@@ -22,6 +22,8 @@ add_library(dab
     src/core/receiver.c
     src/hal/sdr_device.c
     src/hal/sdrplay/sdrplay_api.c
+    src/hal/sdrplay/sdrplay_adapter.c
+    src/hal/sdrplay/sdrplay_adapter_real.c
     src/hal/sdrplay/sdrplay_adapter_stub.c
     src/hal/sdrplay/sdrplay_device.c
     src/os/os_cond.c
@@ -71,12 +73,14 @@ if(DAB_BUILD_TESTS)
         tests/test_block_pool.c
         tests/test_hal.c
         tests/test_os_shared_lib.c
+        tests/test_sdrplay_api.c
         tests/test_sdrplay.c
         tests/test_pc_queue.c
         tests/test_simd.c
     )
 
     target_link_libraries(dab_tests PRIVATE dab)
+    target_include_directories(dab_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/hal/sdrplay)
 
     add_test(NAME dab_tests COMMAND dab_tests)
 endif()

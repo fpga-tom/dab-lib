@@ -5,7 +5,6 @@
 
 #include "dab/os/os_thread.h"
 #include "dab/os/os_time.h"
-#include "sdrplay_api.h"
 
 enum {
     DAB_SDRPLAY_STUB_SAMPLES_PER_CALLBACK = 1024
@@ -13,7 +12,6 @@ enum {
 
 typedef struct {
     dab_sdrplay_adapter_t base;
-    dab_sdrplay_api_t api;
     dab_thread_t thread;
     dab_sdrplay_samples_cb_t callback;
     void *user;
@@ -136,7 +134,6 @@ static void dab_sdrplay_stub_destroy(dab_sdrplay_adapter_t *base) {
     if (adapter->running) {
         (void)dab_sdrplay_stub_stop(base);
     }
-    dab_sdrplay_api_unload(&adapter->api);
     free(adapter);
 }
 
@@ -146,8 +143,8 @@ static const dab_sdrplay_adapter_vtbl_t DAB_SDRPLAY_STUB_VTBL = {
     dab_sdrplay_stub_destroy
 };
 
-dab_sdrplay_adapter_t *dab_sdrplay_adapter_create(const dab_stream_config_t *config,
-                                                  const dab_sdrplay_config_t *device_config) {
+dab_sdrplay_adapter_t *dab_sdrplay_stub_adapter_create(const dab_stream_config_t *config,
+                                                       const dab_sdrplay_config_t *device_config) {
     dab_sdrplay_stub_adapter_t *adapter;
 
     if (config == NULL || device_config == NULL) {
@@ -162,10 +159,5 @@ dab_sdrplay_adapter_t *dab_sdrplay_adapter_create(const dab_stream_config_t *con
     adapter->base.vtbl = &DAB_SDRPLAY_STUB_VTBL;
     adapter->base.config = *config;
     adapter->base.device_config = *device_config;
-    if (dab_sdrplay_api_try_load(&adapter->api) == 0 &&
-        adapter->api.has_open_api &&
-        adapter->api.has_close_api) {
-        adapter->base.uses_real_api = 1;
-    }
     return &adapter->base;
 }

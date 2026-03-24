@@ -33,5 +33,10 @@ struct dab_sdrplay_adapter {
 
 dab_sdrplay_adapter_t *dab_sdrplay_adapter_create(const dab_stream_config_t *config,
                                                   const dab_sdrplay_config_t *device_config);
+dab_sdrplay_adapter_t *dab_sdrplay_stub_adapter_create(const dab_stream_config_t *config,
+                                                       const dab_sdrplay_config_t *device_config);
+dab_sdrplay_adapter_t *dab_sdrplay_real_adapter_create(const dab_stream_config_t *config,
+                                                       const dab_sdrplay_config_t *device_config,
+                                                       const dab_sdrplay_api_t *api);
 
 #endif

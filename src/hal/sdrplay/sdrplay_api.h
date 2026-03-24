@@ -3,15 +3,37 @@
 
 #include "dab/os/os_shared_lib.h"
 
+typedef struct dab_sdrplay_api_device dab_sdrplay_api_device_t;
+typedef struct dab_sdrplay_api_callbacks dab_sdrplay_api_callbacks_t;
+
+typedef int (*dab_sdrplay_api_open_fn)(void);
+typedef int (*dab_sdrplay_api_close_fn)(void);
+typedef int (*dab_sdrplay_api_api_version_fn)(float *api_version);
+typedef int (*dab_sdrplay_api_get_devices_fn)(dab_sdrplay_api_device_t *devices,
+                                              unsigned int *num_devices,
+                                              unsigned int max_devices);
+typedef int (*dab_sdrplay_api_select_device_fn)(dab_sdrplay_api_device_t *device);
+typedef int (*dab_sdrplay_api_release_device_fn)(dab_sdrplay_api_device_t *device);
+typedef int (*dab_sdrplay_api_init_fn)(dab_sdrplay_api_device_t *device,
+                                       dab_sdrplay_api_callbacks_t *callbacks,
+                                       void *context);
+typedef int (*dab_sdrplay_api_uninit_fn)(dab_sdrplay_api_device_t *device);
+
 typedef struct {
     dab_shared_lib_t lib;
     int loaded;
-    int has_open_api;
-    int has_close_api;
-    int has_api_version;
+    dab_sdrplay_api_open_fn open_api;
+    dab_sdrplay_api_close_fn close_api;
+    dab_sdrplay_api_api_version_fn api_version;
+    dab_sdrplay_api_get_devices_fn get_devices;
+    dab_sdrplay_api_select_device_fn select_device;
+    dab_sdrplay_api_release_device_fn release_device;
+    dab_sdrplay_api_init_fn init;
+    dab_sdrplay_api_uninit_fn uninit;
 } dab_sdrplay_api_t;
 
 int dab_sdrplay_api_try_load(dab_sdrplay_api_t *api);
+int dab_sdrplay_api_is_usable(const dab_sdrplay_api_t *api);
 void dab_sdrplay_api_unload(dab_sdrplay_api_t *api);
 
 #endif
