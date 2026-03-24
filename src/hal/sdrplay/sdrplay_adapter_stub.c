@@ -20,16 +20,20 @@ typedef struct {
     int stop_requested;
 } dab_sdrplay_stub_adapter_t;
 
-static void dab_sdrplay_stub_fill_iq(int16_t *dst, uint32_t sample_count, uint64_t sample_index) {
+static void dab_sdrplay_stub_fill_iq(int16_t *i_dst,
+                                     int16_t *q_dst,
+                                     uint32_t sample_count,
+                                     uint64_t sample_index) {
     uint32_t i;
     for (i = 0u; i < sample_count; ++i) {
         int16_t value = (int16_t)((sample_index + i) & 0x7fff);
-        dst[2u * i] = value;
-        dst[(2u * i) + 1u] = (int16_t)(-value);
+        i_dst[i] = value;
+        q_dst[i] = (int16_t)(-value);
     }
 }
 
-static void dab_sdrplay_stub_apply_config(int16_t *dst,
+static void dab_sdrplay_stub_apply_config(int16_t *i_dst,
+                                          int16_t *q_dst,
                                           uint32_t sample_count,
                                           const dab_sdrplay_config_t *config) {
     uint32_t i;
@@ -51,24 +55,30 @@ static void dab_sdrplay_stub_apply_config(int16_t *dst,
     }
 
     for (i = 0u; i < sample_count; ++i) {
-        dst[2u * i] = (int16_t)(dst[2u * i] + dc_offset);
+        i_dst[i] = (int16_t)(i_dst[i] + dc_offset);
         if (config->if_mode == DAB_SDRPLAY_IF_MODE_LOW_IF) {
-            dst[(2u * i) + 1u] = (int16_t)(-dst[(2u * i) + 1u]);
+            q_dst[i] = (int16_t)(-q_dst[i]);
         }
     }
 }
 
 static int dab_sdrplay_stub_thread(void *arg) {
     dab_sdrplay_stub_adapter_t *adapter = (dab_sdrplay_stub_adapter_t *)arg;
-    int16_t iq[2u * DAB_SDRPLAY_STUB_SAMPLES_PER_CALLBACK];
+    int16_t i_samples[DAB_SDRPLAY_STUB_SAMPLES_PER_CALLBACK];
+    int16_t q_samples[DAB_SDRPLAY_STUB_SAMPLES_PER_CALLBACK];
 
     while (!adapter->stop_requested) {
-        dab_sdrplay_stub_fill_iq(iq, DAB_SDRPLAY_STUB_SAMPLES_PER_CALLBACK, adapter->sample_index);
-        dab_sdrplay_stub_apply_config(iq,
+        dab_sdrplay_stub_fill_iq(i_samples,
+                                 q_samples,
+                                 DAB_SDRPLAY_STUB_SAMPLES_PER_CALLBACK,
+                                 adapter->sample_index);
+        dab_sdrplay_stub_apply_config(i_samples,
+                                      q_samples,
                                       DAB_SDRPLAY_STUB_SAMPLES_PER_CALLBACK,
                                       &adapter->base.device_config);
         if (adapter->callback != NULL) {
-            adapter->callback(iq,
+            adapter->callback(i_samples,
+                              q_samples,
                               DAB_SDRPLAY_STUB_SAMPLES_PER_CALLBACK,
                               adapter->sample_index,
                               dab_time_monotonic_ns(),

@@ -8,7 +8,8 @@
 #include "dab/hal/sdrplay_device.h"
 #include "sdrplay_api.h"
 
-typedef void (*dab_sdrplay_samples_cb_t)(const int16_t *iq_interleaved,
+typedef void (*dab_sdrplay_samples_cb_t)(const int16_t *i_samples,
+                                         const int16_t *q_samples,
                                          uint32_t sample_count,
                                          uint64_t sample_index,
                                          uint64_t timestamp_ns,

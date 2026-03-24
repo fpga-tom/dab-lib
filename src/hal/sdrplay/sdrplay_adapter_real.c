@@ -156,8 +156,6 @@ static void dab_sdrplay_real_stream_a_cb(short *xi,
                                          uint32_t reset,
                                          void *cb_context) {
     dab_sdrplay_real_adapter_t *adapter = (dab_sdrplay_real_adapter_t *)cb_context;
-    int16_t *iq_interleaved;
-    uint32_t i;
 
     (void)reset;
 
@@ -165,22 +163,12 @@ static void dab_sdrplay_real_stream_a_cb(short *xi,
         return;
     }
 
-    iq_interleaved = (int16_t *)malloc(sizeof(int16_t) * 2u * num_samples);
-    if (iq_interleaved == 0) {
-        return;
-    }
-
-    for (i = 0u; i < num_samples; ++i) {
-        iq_interleaved[2u * i] = xi[i];
-        iq_interleaved[(2u * i) + 1u] = xq[i];
-    }
-
-    adapter->callback(iq_interleaved,
+    adapter->callback(xi,
+                      xq,
                       num_samples,
                       params != 0 ? params->firstSampleNum : 0u,
                       dab_time_monotonic_ns(),
                       adapter->user);
-    free(iq_interleaved);
 }
 
 static void dab_sdrplay_real_event_cb(uint32_t event_id,

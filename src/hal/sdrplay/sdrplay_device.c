@@ -9,8 +9,8 @@
 #include "sdrplay_device.h"
 
 enum {
-    DAB_SDRPLAY_STREAM_BLOCK_COUNT = 8,
-    DAB_SDRPLAY_STREAM_QUEUE_CAPACITY = 8
+    DAB_SDRPLAY_STREAM_BLOCK_COUNT = 6400,
+    DAB_SDRPLAY_STREAM_QUEUE_CAPACITY = 6400
 };
 
 typedef struct {
@@ -36,7 +36,8 @@ typedef struct {
     int configured;
 } dab_sdrplay_device_t;
 
-static void dab_sdrplay_stream_on_samples(const int16_t *iq_interleaved,
+static void dab_sdrplay_stream_on_samples(const int16_t *i_samples,
+                                          const int16_t *q_samples,
                                           uint32_t sample_count,
                                           uint64_t sample_index,
                                           uint64_t timestamp_ns,
@@ -44,8 +45,9 @@ static void dab_sdrplay_stream_on_samples(const int16_t *iq_interleaved,
     dab_sdrplay_stream_t *stream = (dab_sdrplay_stream_t *)user;
     dab_iq_block_t *block = NULL;
     uint32_t copy_count;
+    uint32_t i;
 
-    if (stream == NULL || iq_interleaved == NULL || sample_count == 0u) {
+    if (stream == NULL || i_samples == NULL || q_samples == NULL || sample_count == 0u) {
         return;
     }
 
@@ -55,7 +57,10 @@ static void dab_sdrplay_stream_on_samples(const int16_t *iq_interleaved,
     }
 
     copy_count = sample_count > DAB_IQ_BLOCK_SAMPLES ? DAB_IQ_BLOCK_SAMPLES : sample_count;
-    memcpy(block->iq, iq_interleaved, sizeof(block->iq[0]) * 2u * copy_count);
+    for (i = 0u; i < copy_count; ++i) {
+        block->iq[2u * i] = i_samples[i];
+        block->iq[(2u * i) + 1u] = q_samples[i];
+    }
     block->sequence = sample_index / copy_count;
     block->timestamp_ns = timestamp_ns;
     block->valid_samples = copy_count;
@@ -236,6 +241,15 @@ dab_sdr_status_t dab_sdrplay_configure_device(dab_sdr_device_t *device, const da
 
     impl->sdrplay_config = *config;
     return DAB_SDR_STATUS_OK;
+}
+
+uint32_t dab_sdrplay_stream_dropped_blocks(const dab_sdr_stream_t *stream) {
+    const dab_sdrplay_stream_t *impl = (const dab_sdrplay_stream_t *)stream;
+
+    if (impl == NULL) {
+        return 0u;
+    }
+    return impl->dropped_blocks;
 }
 
 static int dab_sdrplay_validate_stream_config(const dab_stream_config_t *config, const dab_sdr_capabilities_t *caps) {

@@ -33,5 +33,6 @@ typedef struct {
 
 void dab_sdrplay_default_config(dab_sdrplay_config_t *config);
 dab_sdr_status_t dab_sdrplay_configure_device(dab_sdr_device_t *device, const dab_sdrplay_config_t *config);
+uint32_t dab_sdrplay_stream_dropped_blocks(const dab_sdr_stream_t *stream);
 
 #endif

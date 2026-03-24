@@ -19,6 +19,7 @@ endif()
 add_library(dab
     src/core/block_pool.c
     src/core/frontend.c
+    src/core/null_detect.c
     src/core/pc_queue.c
     src/core/receiver.c
     src/hal/sdr_device.c
@@ -46,6 +47,12 @@ add_executable(dab_sdrplay_probe
 )
 
 target_link_libraries(dab_sdrplay_probe PRIVATE dab)
+
+add_executable(dab_sdrplay_null_probe
+    tools/sdrplay_null_probe.c
+)
+
+target_link_libraries(dab_sdrplay_null_probe PRIVATE dab)
 
 target_compile_definitions(dab
     PRIVATE
@@ -80,6 +87,7 @@ if(DAB_BUILD_TESTS)
         tests/test_block_pool.c
         tests/test_frontend.c
         tests/test_hal.c
+        tests/test_null_detect.c
         tests/test_os_shared_lib.c
         tests/test_sdrplay_api.c
         tests/test_sdrplay.c
