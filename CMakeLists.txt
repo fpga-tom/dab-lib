@@ -40,6 +40,12 @@ target_include_directories(dab
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+add_executable(dab_sdrplay_probe
+    tools/sdrplay_probe.c
+)
+
+target_link_libraries(dab_sdrplay_probe PRIVATE dab)
+
 target_compile_definitions(dab
     PRIVATE
         $<$<BOOL:${DAB_ENABLE_AVX2}>:DAB_ENABLE_AVX2=1>

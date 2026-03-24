@@ -41,8 +41,11 @@ int dab_sdrplay_api_try_load(dab_sdrplay_api_t *api) {
     api->get_devices = (dab_sdrplay_api_get_devices_fn)dab_shared_lib_symbol(&api->lib, "sdrplay_api_GetDevices");
     api->select_device = (dab_sdrplay_api_select_device_fn)dab_shared_lib_symbol(&api->lib, "sdrplay_api_SelectDevice");
     api->release_device = (dab_sdrplay_api_release_device_fn)dab_shared_lib_symbol(&api->lib, "sdrplay_api_ReleaseDevice");
+    api->get_device_params = (dab_sdrplay_api_get_device_params_fn)dab_shared_lib_symbol(&api->lib, "sdrplay_api_GetDeviceParams");
     api->init = (dab_sdrplay_api_init_fn)dab_shared_lib_symbol(&api->lib, "sdrplay_api_Init");
     api->uninit = (dab_sdrplay_api_uninit_fn)dab_shared_lib_symbol(&api->lib, "sdrplay_api_Uninit");
+    api->update = (dab_sdrplay_api_update_fn)dab_shared_lib_symbol(&api->lib, "sdrplay_api_Update");
+    api->get_error_string = (dab_sdrplay_api_get_error_string_fn)dab_shared_lib_symbol(&api->lib, "sdrplay_api_GetErrorString");
     return 0;
 }
 
@@ -56,8 +59,10 @@ int dab_sdrplay_api_is_usable(const dab_sdrplay_api_t *api) {
            api->get_devices != 0 &&
            api->select_device != 0 &&
            api->release_device != 0 &&
+           api->get_device_params != 0 &&
            api->init != 0 &&
-           api->uninit != 0;
+           api->uninit != 0 &&
+           api->update != 0;
 }
 
 void dab_sdrplay_api_unload(dab_sdrplay_api_t *api) {
