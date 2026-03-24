@@ -4,6 +4,8 @@
 void test_pc_queue_basic(void);
 void test_pc_queue_stop_wakes_waiter(void);
 void test_block_pool_acquire_release(void);
+void test_frontend_converts_iq_and_preserves_metadata(void);
+void test_frontend_dc_removal_reduces_constant_offset(void);
 void test_hal_enumerates_sdrplay_stub(void);
 void test_hal_opens_and_configures_sdrplay_stub(void);
 void test_hal_rejects_unknown_driver(void);
@@ -18,6 +20,8 @@ int main(void) {
     test_pc_queue_basic();
     test_pc_queue_stop_wakes_waiter();
     test_block_pool_acquire_release();
+    test_frontend_converts_iq_and_preserves_metadata();
+    test_frontend_dc_removal_reduces_constant_offset();
     test_hal_enumerates_sdrplay_stub();
     test_hal_opens_and_configures_sdrplay_stub();
     test_hal_rejects_unknown_driver();

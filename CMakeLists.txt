@@ -18,6 +18,7 @@ endif()
 
 add_library(dab
     src/core/block_pool.c
+    src/core/frontend.c
     src/core/pc_queue.c
     src/core/receiver.c
     src/hal/sdr_device.c
@@ -77,6 +78,7 @@ if(DAB_BUILD_TESTS)
     add_executable(dab_tests
         tests/test_main.c
         tests/test_block_pool.c
+        tests/test_frontend.c
         tests/test_hal.c
         tests/test_os_shared_lib.c
         tests/test_sdrplay_api.c
