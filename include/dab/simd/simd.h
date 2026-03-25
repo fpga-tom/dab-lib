@@ -13,6 +13,7 @@ typedef struct {
     dab_simd_kind_t kind;
     const char *name;
     void (*complex_i16_to_f32)(float *dst_i, float *dst_q, const int16_t *src, uint32_t count);
+    void (*power_i16_interleaved_f32)(float *dst_power, const int16_t *src, uint32_t count);
     float (*dot_f32)(const float *a, const float *b, uint32_t count);
 } dab_simd_ops_t;
 

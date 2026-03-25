@@ -102,18 +102,18 @@ static void dab_sdrplay_apply_stream_params(dab_sdrplay_real_adapter_t *adapter)
     rx->ctrlParams.dcOffset.DCenable = 1u;
     rx->ctrlParams.dcOffset.IQenable = 1u;
 
-    dev_params->rsp1aParams.rfDabNotchEnable = 1u;
+    dev_params->rsp1aParams.rfDabNotchEnable = 0u;
     rx->rsp1aTunerParams.biasTEnable = (unsigned char)adapter->base.device_config.bias_tee_enabled;
 
     rx->rsp2TunerParams.biasTEnable = (unsigned char)adapter->base.device_config.bias_tee_enabled;
     rx->rsp2TunerParams.antennaSel = dab_sdrplay_map_rsp2_antenna(adapter->base.device_config.antenna);
 
     rx->rspDuoTunerParams.biasTEnable = (unsigned char)adapter->base.device_config.bias_tee_enabled;
-    rx->rspDuoTunerParams.rfDabNotchEnable = 1u;
+    rx->rspDuoTunerParams.rfDabNotchEnable = 0u;
 
     dev_params->rspDxParams.biasTEnable = (unsigned char)adapter->base.device_config.bias_tee_enabled;
     dev_params->rspDxParams.antennaSel = dab_sdrplay_map_rspdx_antenna(adapter->base.device_config.antenna);
-    dev_params->rspDxParams.rfDabNotchEnable = 1u;
+    dev_params->rspDxParams.rfDabNotchEnable = 0u;
 }
 
 static dab_sdr_status_t dab_sdrplay_apply_updates(dab_sdrplay_real_adapter_t *adapter) {

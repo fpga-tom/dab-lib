@@ -2,6 +2,8 @@
 
 #include <string.h>
 
+#include "dab/simd/simd.h"
+
 static uint32_t dab_null_detect_alpha_to_window(float alpha) {
     uint32_t window;
 
@@ -329,6 +331,7 @@ static float dab_null_detect_next_power_f32(void *ctx, uint32_t index, uint32_t 
 
 typedef struct {
     const dab_sdr_block_view_t *block;
+    float power[DAB_IQ_BLOCK_SAMPLES];
 } dab_null_detect_i16_ctx_t;
 
 static float dab_null_detect_next_power_i16(void *ctx, uint32_t index, uint32_t count) {
@@ -337,9 +340,7 @@ static float dab_null_detect_next_power_i16(void *ctx, uint32_t index, uint32_t 
     float sum = 0.0f;
 
     for (i = 0u; i < count; ++i) {
-        const float ii = (float)i16->block->iq_interleaved[2u * (index + i)];
-        const float qq = (float)i16->block->iq_interleaved[(2u * (index + i)) + 1u];
-        sum += (ii * ii) + (qq * qq);
+        sum += i16->power[index + i];
     }
     return sum / (float)count;
 }
@@ -378,6 +379,7 @@ int dab_null_detect_process_i16(dab_null_detect_t *detector,
     }
 
     ctx.block = block;
+    dab_simd_get_ops()->power_i16_interleaved_f32(ctx.power, block->iq_interleaved, block->sample_count);
     return dab_null_detect_process_power(detector,
                                          block->sample_index,
                                          block->sample_count,

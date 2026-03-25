@@ -8,6 +8,15 @@ static void dab_scalar_complex_i16_to_f32(float *dst_i, float *dst_q, const int1
     }
 }
 
+static void dab_scalar_power_i16_interleaved_f32(float *dst_power, const int16_t *src, uint32_t count) {
+    uint32_t i;
+    for (i = 0u; i < count; ++i) {
+        const float ii = (float)src[2u * i];
+        const float qq = (float)src[(2u * i) + 1u];
+        dst_power[i] = (ii * ii) + (qq * qq);
+    }
+}
+
 static float dab_scalar_dot_f32(const float *a, const float *b, uint32_t count) {
     float sum = 0.0f;
     uint32_t i;
@@ -21,6 +30,7 @@ static const dab_simd_ops_t DAB_SCALAR_OPS = {
     DAB_SIMD_KIND_SCALAR,
     "scalar",
     dab_scalar_complex_i16_to_f32,
+    dab_scalar_power_i16_interleaved_f32,
     dab_scalar_dot_f32
 };
 
