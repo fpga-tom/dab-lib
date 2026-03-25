@@ -1,0 +1,467 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "dab/config.h"
+#include "dab/core/null_detect.h"
+#include "dab/core/prs_acquire.h"
+#include "dab/core/prs_fft.h"
+#include "dab/core/prs_score.h"
+#include "dab/core/sync.h"
+#include "dab/hal/sdr_device.h"
+#include "dab/hal/sdrplay_device.h"
+#include "dab/simd/simd.h"
+
+typedef struct {
+    int16_t *iq;
+    uint32_t capacity_samples;
+    uint32_t sample_count;
+    uint64_t start_sample_index;
+} history_buffer_t;
+
+typedef struct {
+    int pending;
+    dab_null_event_t event;
+    dab_prs_candidate_t candidate;
+} pending_candidate_t;
+
+static unsigned int env_u32(const char *name, unsigned int fallback) {
+    const char *value = getenv(name);
+    char *end = 0;
+    unsigned long parsed;
+
+    if (value == 0 || value[0] == '\0') {
+        return fallback;
+    }
+    parsed = strtoul(value, &end, 10);
+    if (end == value || *end != '\0') {
+        return fallback;
+    }
+    return (unsigned int)parsed;
+}
+
+static int env_i32(const char *name, int fallback) {
+    const char *value = getenv(name);
+    char *end = 0;
+    long parsed;
+
+    if (value == 0 || value[0] == '\0') {
+        return fallback;
+    }
+    parsed = strtol(value, &end, 10);
+    if (end == value || *end != '\0') {
+        return fallback;
+    }
+    return (int)parsed;
+}
+
+static unsigned long long env_u64(const char *name, unsigned long long fallback) {
+    const char *value = getenv(name);
+    char *end = 0;
+    unsigned long long parsed;
+
+    if (value == 0 || value[0] == '\0') {
+        return fallback;
+    }
+    parsed = strtoull(value, &end, 10);
+    if (end == value || *end != '\0') {
+        return fallback;
+    }
+    return parsed;
+}
+
+static float env_f32(const char *name, float fallback) {
+    const char *value = getenv(name);
+    char *end = 0;
+    float parsed;
+
+    if (value == 0 || value[0] == '\0') {
+        return fallback;
+    }
+    parsed = strtof(value, &end);
+    if (end == value || *end != '\0') {
+        return fallback;
+    }
+    return parsed;
+}
+
+static dab_sdrplay_gain_mode_t env_gain_mode(const char *name, dab_sdrplay_gain_mode_t fallback) {
+    const char *value = getenv(name);
+
+    if (value == 0 || value[0] == '\0') {
+        return fallback;
+    }
+    if (strcmp(value, "auto") == 0) {
+        return DAB_SDRPLAY_GAIN_MODE_AUTO;
+    }
+    if (strcmp(value, "manual") == 0) {
+        return DAB_SDRPLAY_GAIN_MODE_MANUAL;
+    }
+    return fallback;
+}
+
+static int history_init(history_buffer_t *history, uint32_t capacity_samples) {
+    if (history == 0 || capacity_samples == 0u) {
+        return -1;
+    }
+    history->iq = (int16_t *)calloc((size_t)capacity_samples * 2u, sizeof(*history->iq));
+    if (history->iq == 0) {
+        return -1;
+    }
+    history->capacity_samples = capacity_samples;
+    history->sample_count = 0u;
+    history->start_sample_index = 0u;
+    return 0;
+}
+
+static void history_destroy(history_buffer_t *history) {
+    if (history == 0) {
+        return;
+    }
+    free(history->iq);
+    history->iq = 0;
+    history->capacity_samples = 0u;
+    history->sample_count = 0u;
+    history->start_sample_index = 0u;
+}
+
+static void history_reset(history_buffer_t *history, const dab_sdr_block_view_t *block) {
+    uint32_t keep;
+
+    if (history == 0 || block == 0 || history->iq == 0 || block->iq_interleaved == 0) {
+        return;
+    }
+
+    keep = block->sample_count > history->capacity_samples ? history->capacity_samples : block->sample_count;
+    memcpy(history->iq,
+           block->iq_interleaved + (2u * (block->sample_count - keep)),
+           sizeof(*history->iq) * 2u * keep);
+    history->sample_count = keep;
+    history->start_sample_index = block->sample_index + (block->sample_count - keep);
+}
+
+static void history_append(history_buffer_t *history, const dab_sdr_block_view_t *block) {
+    uint32_t drop;
+    uint32_t keep;
+    uint64_t expected_next;
+
+    if (history == 0 || block == 0 || history->iq == 0 || block->iq_interleaved == 0) {
+        return;
+    }
+    if (history->sample_count == 0u) {
+        history_reset(history, block);
+        return;
+    }
+
+    expected_next = history->start_sample_index + history->sample_count;
+    if (block->sample_index != expected_next) {
+        history_reset(history, block);
+        return;
+    }
+
+    keep = block->sample_count;
+    if (keep > history->capacity_samples) {
+        history_reset(history, block);
+        return;
+    }
+
+    if ((history->sample_count + keep) > history->capacity_samples) {
+        drop = (history->sample_count + keep) - history->capacity_samples;
+        memmove(history->iq,
+                history->iq + (2u * drop),
+                sizeof(*history->iq) * 2u * (history->sample_count - drop));
+        history->sample_count -= drop;
+        history->start_sample_index += drop;
+    }
+
+    memcpy(history->iq + (2u * history->sample_count),
+           block->iq_interleaved,
+           sizeof(*history->iq) * 2u * keep);
+    history->sample_count += keep;
+}
+
+static dab_sdr_block_view_t history_view(const history_buffer_t *history) {
+    dab_sdr_block_view_t view = {0};
+
+    if (history == 0) {
+        return view;
+    }
+    view.iq_interleaved = history->iq;
+    view.sample_count = history->sample_count;
+    view.sample_index = history->start_sample_index;
+    view.timestamp_ns = 0u;
+    return view;
+}
+
+static int history_contains_sample_range(const history_buffer_t *history,
+                                         uint64_t start_sample,
+                                         uint64_t end_sample) {
+    uint64_t history_end;
+
+    if (history == 0 || history->sample_count == 0u) {
+        return 0;
+    }
+    history_end = history->start_sample_index + history->sample_count;
+    return start_sample >= history->start_sample_index && end_sample <= history_end;
+}
+
+int main(void) {
+    dab_sdr_open_params_t params = {"sdrplay", NULL, NULL};
+    dab_sdr_device_t *device = 0;
+    dab_sdr_stream_t *stream = 0;
+    dab_stream_config_t stream_config;
+    dab_sdrplay_config_t device_config;
+    dab_null_detect_t detector;
+    dab_null_detect_config_t detector_config;
+    dab_prs_acquire_t acquire;
+    dab_prs_acquire_config_t acquire_config;
+    dab_prs_score_t cp_score;
+    dab_prs_score_config_t score_config;
+    dab_prs_fft_t fft;
+    dab_prs_fft_config_t fft_config;
+    dab_sync_t sync;
+    dab_sync_config_t sync_config;
+    history_buffer_t history = {0};
+    pending_candidate_t pending = {0};
+    dab_sdr_block_view_t src_block;
+    dab_null_event_t event;
+    const dab_simd_ops_t *simd_ops = dab_simd_get_ops();
+    float *fft_i = 0;
+    float *fft_q = 0;
+    unsigned int blocks_to_read = env_u32("DAB_SYNC_PROBE_BLOCKS", 400u);
+    unsigned int block_num;
+    unsigned int dropped_blocks = 0u;
+    float ref_threshold = env_f32("DAB_SYNC_PROBE_REF_SCORE_THRESHOLD", 0.10f);
+    int rc = 1;
+
+    dab_sdrplay_default_config(&device_config);
+    device_config.gain_mode = env_gain_mode("DAB_SYNC_PROBE_GAIN_MODE", DAB_SDRPLAY_GAIN_MODE_MANUAL);
+    device_config.if_mode = DAB_SDRPLAY_IF_MODE_ZERO_IF;
+    device_config.antenna = DAB_SDRPLAY_ANTENNA_A;
+    device_config.lna_state = (unsigned char)env_u32("DAB_SYNC_PROBE_LNA_STATE", 0u);
+    device_config.if_gain_db = env_i32("DAB_SYNC_PROBE_IF_GAIN_DB", 0);
+    device_config.bias_tee_enabled = env_i32("DAB_SYNC_PROBE_BIAS_TEE", 0);
+    device_config.ppm_correction = env_i32("DAB_SYNC_PROBE_PPM", 0);
+
+    stream_config.sample_rate = env_u32("DAB_SYNC_PROBE_SAMPLE_RATE", 2048000u);
+    stream_config.center_freq_hz = env_u64("DAB_SYNC_PROBE_CENTER_FREQ_HZ", 220352000ull);
+    stream_config.bandwidth_hz = env_u32("DAB_SYNC_PROBE_BANDWIDTH_HZ", 1536000u);
+    stream_config.gain_db = env_i32("DAB_SYNC_PROBE_GAIN_DB", 40);
+
+    dab_null_detect_default_config(&detector_config);
+    detector_config.fast_window_samples = env_u32("DAB_SYNC_PROBE_FAST_WINDOW_SAMPLES", 128u);
+    detector_config.slow_window_samples = env_u32("DAB_SYNC_PROBE_SLOW_WINDOW_SAMPLES", 8192u);
+    detector_config.sample_decimation = env_u32("DAB_SYNC_PROBE_SAMPLE_DECIMATION", 4u);
+    detector_config.enter_ratio_threshold = env_f32("DAB_SYNC_PROBE_ENTER_RATIO_THRESHOLD", 0.35f);
+    detector_config.exit_ratio_threshold = env_f32("DAB_SYNC_PROBE_EXIT_RATIO_THRESHOLD", 0.55f);
+    detector_config.min_null_samples = env_u32("DAB_SYNC_PROBE_MIN_NULL_SAMPLES", 1800u);
+    detector_config.max_null_samples = env_u32("DAB_SYNC_PROBE_MAX_NULL_SAMPLES", 4000u);
+    detector_config.startup_ignore_samples = env_u32("DAB_SYNC_PROBE_STARTUP_IGNORE_SAMPLES", 0u);
+    detector_config.max_merge_gap_samples = env_u32("DAB_SYNC_PROBE_MAX_MERGE_GAP_SAMPLES", 0u);
+    if (dab_null_detect_init(&detector, &detector_config) != 0) {
+        fprintf(stderr, "null detector init failed\n");
+        return 2;
+    }
+
+    dab_prs_acquire_default_config(&acquire_config);
+    acquire_config.acquire_window_samples = env_u32("DAB_SYNC_PROBE_ACQUIRE_WINDOW_SAMPLES",
+                                                    acquire_config.acquire_window_samples);
+    if (dab_prs_acquire_init(&acquire, &acquire_config) != 0) {
+        fprintf(stderr, "prs acquire init failed\n");
+        return 2;
+    }
+
+    dab_prs_score_default_config(&score_config);
+    score_config.sample_rate = stream_config.sample_rate;
+    score_config.guard_samples = acquire_config.guard_samples;
+    score_config.fft_samples = acquire_config.fft_samples;
+    if (dab_prs_score_init(&cp_score, &score_config) != 0) {
+        fprintf(stderr, "prs score init failed\n");
+        return 2;
+    }
+
+    dab_prs_fft_default_config(&fft_config);
+    fft_config.fft_samples = acquire_config.fft_samples;
+    if (dab_prs_fft_init(&fft, &fft_config) != 0) {
+        fprintf(stderr, "prs fft init failed\n");
+        return 2;
+    }
+
+    dab_sync_default_config(&sync_config);
+    sync_config.acquire_timing_window_samples = acquire_config.acquire_window_samples;
+    sync_config.track_timing_window_samples = env_u32("DAB_SYNC_PROBE_TRACK_WINDOW_SAMPLES",
+                                                      sync_config.track_timing_window_samples);
+    sync_config.acquire_prs_score_threshold = env_f32("DAB_SYNC_PROBE_ACQUIRE_PRS_SCORE_THRESHOLD",
+                                                      ref_threshold);
+    sync_config.track_prs_score_threshold = env_f32("DAB_SYNC_PROBE_TRACK_PRS_SCORE_THRESHOLD",
+                                                    ref_threshold * 0.8f);
+    if (dab_sync_init(&sync, &sync_config) != 0) {
+        fprintf(stderr, "sync init failed\n");
+        return 2;
+    }
+
+    fft_i = (float *)calloc(acquire_config.fft_samples, sizeof(*fft_i));
+    fft_q = (float *)calloc(acquire_config.fft_samples, sizeof(*fft_q));
+    if (fft_i == 0 || fft_q == 0) {
+        fprintf(stderr, "alloc failed\n");
+        goto cleanup;
+    }
+
+    if (history_init(&history, env_u32("DAB_SYNC_PROBE_HISTORY_SAMPLES", 32768u)) != 0) {
+        fprintf(stderr, "history init failed\n");
+        goto cleanup;
+    }
+
+    fprintf(stderr, "open device\n");
+    if (dab_sdr_device_open(&params, &device) != DAB_SDR_STATUS_OK || device == 0) {
+        fprintf(stderr, "open failed\n");
+        goto cleanup;
+    }
+    fprintf(stderr, "configure device\n");
+    if (dab_sdrplay_configure_device(device, &device_config) != DAB_SDR_STATUS_OK) {
+        fprintf(stderr, "device config failed\n");
+        goto cleanup;
+    }
+    fprintf(stderr, "configure stream\n");
+    if (device->vtbl->configure(device, &stream_config) != DAB_SDR_STATUS_OK) {
+        fprintf(stderr, "stream config failed\n");
+        goto cleanup;
+    }
+    fprintf(stderr, "open stream\n");
+    if (device->vtbl->open_stream(device, &stream) != DAB_SDR_STATUS_OK || stream == 0) {
+        fprintf(stderr, "open stream failed\n");
+        goto cleanup;
+    }
+    fprintf(stderr, "start stream\n");
+    if (stream->vtbl->start(stream) != DAB_SDR_STATUS_OK) {
+        fprintf(stderr, "start failed\n");
+        goto cleanup;
+    }
+
+    printf("sync-probe start sample_rate=%u center_freq_hz=%llu blocks=%u simd=%s fft=%s ref_threshold=%.3f\n",
+           stream_config.sample_rate,
+           (unsigned long long)stream_config.center_freq_hz,
+           blocks_to_read,
+           simd_ops != 0 ? simd_ops->name : "unknown",
+           fft.backend_name != 0 ? fft.backend_name : "unknown",
+           ref_threshold);
+
+    for (block_num = 0u; block_num < blocks_to_read; ++block_num) {
+        dab_sdr_block_view_t hist_view;
+
+        if (stream->vtbl->read(stream, &src_block) != DAB_SDR_STATUS_OK) {
+            fprintf(stderr, "read failed at block %u\n", block_num);
+            goto cleanup;
+        }
+        history_append(&history, &src_block);
+
+        if (dab_null_detect_process_i16(&detector, &src_block, &event) < 0) {
+            fprintf(stderr, "null detector failed at block %u\n", block_num);
+            goto cleanup;
+        }
+
+        if (event.length != 0u) {
+            if (dab_prs_candidate_from_null(&acquire, &event, &pending.candidate) == 0) {
+                if (sync.state.locked) {
+                    pending.candidate.timing_search_start_offset = sync.config.track_timing_window_samples / 2u;
+                    pending.candidate.timing_search_length = sync.config.track_timing_window_samples;
+                }
+                pending.pending = 1;
+                pending.event = event;
+                printf("null sample_index=%llu length=%u candidate_fft=%llu search_start=%llu search_end=%llu\n",
+                       (unsigned long long)event.sample_index,
+                       event.length,
+                       (unsigned long long)pending.candidate.prs_fft_start_sample,
+                       (unsigned long long)dab_prs_candidate_search_start_sample(&pending.candidate),
+                       (unsigned long long)dab_prs_candidate_search_end_sample(&pending.candidate));
+            }
+        }
+
+        if (!pending.pending) {
+            continue;
+        }
+
+        if (!history_contains_sample_range(&history,
+                                           dab_prs_candidate_search_start_sample(&pending.candidate),
+                                           dab_prs_candidate_search_end_sample(&pending.candidate) + acquire_config.fft_samples)) {
+            continue;
+        }
+
+        hist_view = history_view(&history);
+        {
+            dab_prs_result_t coarse = {0};
+            dab_prs_reference_score_t ref_score = {0};
+            int coarse_rc = dab_prs_score_search_i16(&cp_score, &hist_view, &pending.candidate, &coarse);
+
+            if (coarse_rc == 1) {
+                if (dab_prs_score_symbol_i16_mode_i_diff(&fft,
+                                                         &hist_view,
+                                                         coarse.prs_fft_start_sample,
+                                                         fft_i,
+                                                         fft_q,
+                                                         &ref_score) == 0) {
+                    int sync_rc;
+                    printf("prs fft_start=%llu cp_score=%.6f ref_score=%.6f ifo=%d cfo=%d mode=%d locked=%d\n",
+                           (unsigned long long)coarse.prs_fft_start_sample,
+                           coarse.prs_score,
+                           ref_score.score,
+                           ref_score.carrier_offset_bins,
+                           coarse.coarse_freq_error_hz,
+                           sync.state.mode,
+                           sync.state.locked);
+
+                    if (sync.state.locked) {
+                        sync_rc = dab_sync_on_prs_track(&sync,
+                                                        coarse.prs_fft_start_sample,
+                                                        ref_score.score,
+                                                        0.0f);
+                    } else {
+                        dab_sync_on_null_candidate(&sync, &pending.event);
+                        sync_rc = dab_sync_on_prs_acquire(&sync,
+                                                          coarse.prs_fft_start_sample,
+                                                          ref_score.score,
+                                                          coarse.coarse_freq_error_hz);
+                    }
+
+                    if (ref_score.score >= ref_threshold) {
+                        printf("sync-update rc=%d frame_start=%llu prs_score=%.6f bad=%u good=%u mode=%d locked=%d timing_error=%d cfo=%d\n",
+                               sync_rc,
+                               (unsigned long long)sync.state.frame_start_sample,
+                               sync.state.prs_score,
+                               sync.state.bad_frames,
+                               sync.state.good_frames,
+                               sync.state.mode,
+                               sync.state.locked,
+                               sync.state.timing_error_samples,
+                               sync.state.coarse_freq_error_hz);
+                    }
+                }
+            }
+        }
+
+        pending.pending = 0;
+    }
+
+    dropped_blocks = dab_sdrplay_stream_dropped_blocks(stream);
+    printf("summary blocks=%u dropped_blocks=%u mode=%d locked=%d frame_start=%llu prs_score=%.6f\n",
+           blocks_to_read,
+           dropped_blocks,
+           sync.state.mode,
+           sync.state.locked,
+           (unsigned long long)sync.state.frame_start_sample,
+           sync.state.prs_score);
+    rc = 0;
+
+cleanup:
+    if (stream != 0) {
+        (void)stream->vtbl->stop(stream);
+        dab_sdr_stream_close(stream);
+    }
+    if (device != 0) {
+        dab_sdr_device_close(device);
+    }
+    history_destroy(&history);
+    free(fft_q);
+    free(fft_i);
+    return rc;
+}

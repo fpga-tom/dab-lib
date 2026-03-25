@@ -19,6 +19,19 @@ void test_sdrplay_device_specific_config_propagates_to_samples(void);
 void test_sdrplay_rejects_invalid_device_specific_config(void);
 void test_simd_scalar_fallback(void);
 void test_simd_convert_and_dot(void);
+void test_sync_acquires_and_tracks(void);
+void test_sync_falls_back_to_acquire_after_bad_tracking(void);
+void test_prs_candidate_from_null_uses_mode_i_boundaries(void);
+void test_prs_score_search_i16_finds_cp_aligned_fft_start(void);
+void test_prs_reference_score_f32_distinguishes_match_from_mismatch(void);
+void test_prs_reference_template_f32_scores_only_active_bins(void);
+void test_prs_template_tracks_active_bins(void);
+void test_prs_template_load_bins_populates_multiple_entries(void);
+void test_prs_template_load_mode_i_populates_real_table(void);
+void test_prs_fft_execute_i16_detects_single_bin_tone(void);
+void test_prs_score_symbol_i16_scores_fft_bins_against_template(void);
+void test_prs_reference_bins_diff_f32_recovers_integer_bin_offset(void);
+void test_prs_score_symbol_i16_mode_i_diff_rejects_missing_window(void);
 
 int main(void) {
     test_pc_queue_basic();
@@ -39,6 +52,19 @@ int main(void) {
     test_sdrplay_rejects_invalid_device_specific_config();
     test_simd_scalar_fallback();
     test_simd_convert_and_dot();
+    test_sync_acquires_and_tracks();
+    test_sync_falls_back_to_acquire_after_bad_tracking();
+    test_prs_candidate_from_null_uses_mode_i_boundaries();
+    test_prs_score_search_i16_finds_cp_aligned_fft_start();
+    test_prs_reference_score_f32_distinguishes_match_from_mismatch();
+    test_prs_reference_template_f32_scores_only_active_bins();
+    test_prs_fft_execute_i16_detects_single_bin_tone();
+    test_prs_score_symbol_i16_scores_fft_bins_against_template();
+    test_prs_reference_bins_diff_f32_recovers_integer_bin_offset();
+    test_prs_score_symbol_i16_mode_i_diff_rejects_missing_window();
+    test_prs_template_tracks_active_bins();
+    test_prs_template_load_bins_populates_multiple_entries();
+    test_prs_template_load_mode_i_populates_real_table();
     puts("all tests passed");
     return EXIT_SUCCESS;
 }
