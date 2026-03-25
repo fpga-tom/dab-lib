@@ -36,3 +36,17 @@ void test_prs_fft_execute_i16_detects_single_bin_tone(void) {
     mag_bin_0 = out_i[0] * out_i[0] + out_q[0] * out_q[0];
     TEST_ASSERT(mag_bin_1 > (1000.0f * mag_bin_0));
 }
+
+void test_prs_fft_apply_bin_shift_rotates_bins(void) {
+    float re[8] = {0};
+    float im[8] = {0};
+
+    re[1] = 5.0f;
+    im[1] = -2.0f;
+
+    TEST_ASSERT(dab_prs_fft_apply_bin_shift(re, im, 8u, 2) == 0);
+    TEST_ASSERT(re[3] == 5.0f);
+    TEST_ASSERT(im[3] == -2.0f);
+    TEST_ASSERT(re[1] == 0.0f);
+    TEST_ASSERT(im[1] == 0.0f);
+}

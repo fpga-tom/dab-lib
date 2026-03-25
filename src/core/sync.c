@@ -62,7 +62,8 @@ void dab_sync_on_null_candidate(dab_sync_t *sync, const dab_null_event_t *event)
 int dab_sync_on_prs_acquire(dab_sync_t *sync,
                             uint64_t prs_peak_sample,
                             float prs_score,
-                            int32_t coarse_freq_error_hz) {
+                            int32_t coarse_freq_error_hz,
+                            int32_t carrier_offset_bins) {
     if (sync == 0 || sync->state.mode != DAB_SYNC_MODE_ACQUIRE) {
         return -1;
     }
@@ -75,6 +76,7 @@ int dab_sync_on_prs_acquire(dab_sync_t *sync,
 
     sync->state.frame_start_sample = prs_peak_sample;
     sync->state.coarse_freq_error_hz = coarse_freq_error_hz;
+    sync->state.carrier_offset_bins = carrier_offset_bins;
     sync->state.fine_freq_error_hz = 0.0f;
     sync->state.good_frames = 1u;
     sync->state.bad_frames = 0u;
@@ -86,7 +88,8 @@ int dab_sync_on_prs_acquire(dab_sync_t *sync,
 int dab_sync_on_prs_track(dab_sync_t *sync,
                           uint64_t prs_peak_sample,
                           float prs_score,
-                          float fine_freq_error_hz) {
+                          float fine_freq_error_hz,
+                          int32_t carrier_offset_bins) {
     int64_t predicted;
     int64_t error;
 
@@ -109,6 +112,7 @@ int dab_sync_on_prs_track(dab_sync_t *sync,
     error = (int64_t)prs_peak_sample - predicted;
     sync->state.frame_start_sample = prs_peak_sample;
     sync->state.timing_error_samples = (int32_t)error;
+    sync->state.carrier_offset_bins = carrier_offset_bins;
     sync->state.fine_freq_error_hz = fine_freq_error_hz;
     sync->state.good_frames++;
     sync->state.bad_frames = 0u;

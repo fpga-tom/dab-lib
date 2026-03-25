@@ -25,6 +25,7 @@ typedef struct {
     uint64_t frame_start_sample;
     int32_t timing_error_samples;
     int32_t coarse_freq_error_hz;
+    int32_t carrier_offset_bins;
     float fine_freq_error_hz;
     float prs_score;
     uint32_t good_frames;
@@ -46,11 +47,13 @@ void dab_sync_on_null_candidate(dab_sync_t *sync, const dab_null_event_t *event)
 int dab_sync_on_prs_acquire(dab_sync_t *sync,
                             uint64_t prs_peak_sample,
                             float prs_score,
-                            int32_t coarse_freq_error_hz);
+                            int32_t coarse_freq_error_hz,
+                            int32_t carrier_offset_bins);
 int dab_sync_on_prs_track(dab_sync_t *sync,
                           uint64_t prs_peak_sample,
                           float prs_score,
-                          float fine_freq_error_hz);
+                          float fine_freq_error_hz,
+                          int32_t carrier_offset_bins);
 uint64_t dab_sync_predict_next_frame_start(const dab_sync_t *sync);
 
 #endif

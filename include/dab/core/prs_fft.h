@@ -41,5 +41,9 @@ int dab_prs_fft_execute_i16(const dab_prs_fft_t *fft,
                             uint64_t fft_start_sample,
                             float *out_i,
                             float *out_q);
+int dab_prs_fft_apply_bin_shift(float *re,
+                                float *im,
+                                uint32_t count,
+                                int32_t shift_bins);
 
 #endif

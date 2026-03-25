@@ -434,6 +434,12 @@ int main(void) {
                                                          fft_q,
                                                          &ref_score) == 0) {
                     int sync_rc;
+                    if (ref_score.carrier_offset_bins != 0) {
+                        (void)dab_prs_fft_apply_bin_shift(fft_i,
+                                                          fft_q,
+                                                          acquire_config.fft_samples,
+                                                          -ref_score.carrier_offset_bins);
+                    }
                     printf("prs fft_start=%llu cp_score=%.6f ref_score=%.6f ifo=%d cfo=%d mode=%d locked=%d\n",
                            (unsigned long long)coarse.prs_fft_start_sample,
                            coarse.prs_score,
@@ -447,21 +453,29 @@ int main(void) {
                         sync_rc = dab_sync_on_prs_track(&sync,
                                                         coarse.prs_fft_start_sample,
                                                         ref_score.score,
-                                                        0.0f);
+                                                        0.0f,
+                                                        ref_score.carrier_offset_bins);
                     } else {
                         dab_sync_on_null_candidate(&sync, &pending.event);
                         sync_rc = dab_sync_on_prs_acquire(&sync,
                                                           coarse.prs_fft_start_sample,
                                                           ref_score.score,
-                                                          coarse.coarse_freq_error_hz);
+                                                          coarse.coarse_freq_error_hz,
+                                                          ref_score.carrier_offset_bins);
                     }
 
                     if (!sync.state.locked) {
                         last_predicted_fft_start = 0u;
+                        if (pending.predicted) {
+                            printf("track-loss source=predict bad=%u mode=%d locked=%d\n",
+                                   sync.state.bad_frames,
+                                   sync.state.mode,
+                                   sync.state.locked);
+                        }
                     }
 
                     if (ref_score.score >= ref_threshold) {
-                        printf("sync-update rc=%d source=%s frame_start=%llu prs_score=%.6f bad=%u good=%u mode=%d locked=%d timing_error=%d cfo=%d\n",
+                        printf("sync-update rc=%d source=%s frame_start=%llu prs_score=%.6f bad=%u good=%u mode=%d locked=%d timing_error=%d cfo=%d ifo=%d\n",
                                sync_rc,
                                pending.predicted ? "predict" : "null",
                                (unsigned long long)sync.state.frame_start_sample,
@@ -471,7 +485,8 @@ int main(void) {
                                sync.state.mode,
                                sync.state.locked,
                                sync.state.timing_error_samples,
-                               sync.state.coarse_freq_error_hz);
+                               sync.state.coarse_freq_error_hz,
+                               sync.state.carrier_offset_bins);
                     }
                 }
             }
@@ -482,13 +497,15 @@ int main(void) {
     }
 
     dropped_blocks = dab_sdrplay_stream_dropped_blocks(stream);
-    printf("summary blocks=%u dropped_blocks=%u mode=%d locked=%d frame_start=%llu prs_score=%.6f\n",
+    printf("summary blocks=%u dropped_blocks=%u mode=%d locked=%d frame_start=%llu prs_score=%.6f cfo=%d ifo=%d\n",
            blocks_to_read,
            dropped_blocks,
            sync.state.mode,
            sync.state.locked,
            (unsigned long long)sync.state.frame_start_sample,
-           sync.state.prs_score);
+           sync.state.prs_score,
+           sync.state.coarse_freq_error_hz,
+           sync.state.carrier_offset_bins);
     rc = 0;
 
 cleanup:

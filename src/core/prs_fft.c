@@ -157,3 +157,34 @@ int dab_prs_fft_execute_i16(const dab_prs_fft_t *fft,
 
     return 0;
 }
+
+int dab_prs_fft_apply_bin_shift(float *re,
+                                float *im,
+                                uint32_t count,
+                                int32_t shift_bins) {
+    uint32_t i;
+    uint32_t shift;
+    float tmp_re[DAB_PRS_FFT_MAX_SAMPLES];
+    float tmp_im[DAB_PRS_FFT_MAX_SAMPLES];
+
+    if (re == 0 || im == 0 || count == 0u || count > DAB_PRS_FFT_MAX_SAMPLES) {
+        return -1;
+    }
+
+    if (shift_bins == 0) {
+        return 0;
+    }
+
+    shift = (uint32_t)(((shift_bins % (int32_t)count) + (int32_t)count) % (int32_t)count);
+    for (i = 0u; i < count; ++i) {
+        const uint32_t dst = (i + shift) % count;
+        tmp_re[dst] = re[i];
+        tmp_im[dst] = im[i];
+    }
+    for (i = 0u; i < count; ++i) {
+        re[i] = tmp_re[i];
+        im[i] = tmp_im[i];
+    }
+
+    return 0;
+}
