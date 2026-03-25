@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "dab/config.h"
+#include "dab/core/fic.h"
 #include "dab/core/null_detect.h"
 #include "dab/core/ofdm.h"
 #include "dab/core/prs_acquire.h"
@@ -10,6 +11,7 @@
 #include "dab/core/prs_score.h"
 #include "dab/core/sync.h"
 #include "dab/core/tframe.h"
+#include "dab/core/msc.h"
 #include "dab/hal/sdr_device.h"
 #include "dab/hal/sdrplay_device.h"
 #include "dab/simd/simd.h"
@@ -245,6 +247,8 @@ int main(void) {
     dab_sync_config_t sync_config;
     dab_tframe_t tframe;
     dab_tframe_buffers_t tframe_buffers;
+    dab_fic_state_t fic;
+    dab_msc_state_t msc;
     history_buffer_t history = {0};
     pending_candidate_t pending = {0};
     dab_sdr_block_view_t src_block;
@@ -336,6 +340,10 @@ int main(void) {
                                                     ref_threshold * 0.8f);
     if (dab_sync_init(&sync, &sync_config) != 0) {
         fprintf(stderr, "sync init failed\n");
+        return 2;
+    }
+    if (dab_fic_init(&fic) != 0 || dab_msc_init(&msc) != 0) {
+        fprintf(stderr, "fic/msc init failed\n");
         return 2;
     }
 
@@ -623,11 +631,11 @@ int main(void) {
                                        diff_q[0],
                                        diff_power);
                                 if (ofdm_result.have_softbits) {
-                                    printf(" soft0=(%d,%d) soft1=(%d,%d)",
-                                           (int)soft_a[0],
-                                           (int)soft_b[0],
-                                           (int)soft_a[1],
-                                           (int)soft_b[1]);
+                                        printf(" soft0=(%d,%d) soft1=(%d,%d)",
+                                               (int)soft_a[0],
+                                               (int)soft_b[0],
+                                               (int)soft_a[1],
+                                               (int)soft_b[1]);
                                     if (dab_tframe_push_symbol(&tframe,
                                                                data_fft_start,
                                                                soft_a,
@@ -636,6 +644,24 @@ int main(void) {
                                         printf(" tframe_symbol=%u frame_complete=%d",
                                                tframe_result.symbol_index,
                                                tframe_result.frame_complete);
+                                        if (tframe_result.frame_complete) {
+                                            if (dab_fic_process_frame(&fic,
+                                                                      tframe_result.frame_start_sample,
+                                                                      fic_softbits,
+                                                                      DAB_TFRAME_FIC_SOFTBITS) == 0 &&
+                                                dab_msc_process_frame(&msc,
+                                                                      tframe_result.frame_start_sample,
+                                                                      msc_softbits,
+                                                                      DAB_TFRAME_MSC_SOFTBITS) == 0) {
+                                                printf(" fic_frames=%u fic_edge=(%d,%d) msc_frames=%u msc_edge=(%d,%d)",
+                                                       fic.frames_seen,
+                                                       (int)fic.first_softbit,
+                                                       (int)fic.last_softbit,
+                                                       msc.frames_seen,
+                                                       (int)msc.first_softbit,
+                                                       (int)msc.last_softbit);
+                                            }
+                                        }
                                     }
                                 }
                                 printf("\n");

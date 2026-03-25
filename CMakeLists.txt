@@ -19,6 +19,8 @@ endif()
 add_library(dab
     src/core/block_pool.c
     src/core/frontend.c
+    src/core/fic.c
+    src/core/msc.c
     src/core/null_detect.c
     src/core/ofdm.c
     src/core/prs_acquire.c
@@ -107,7 +109,9 @@ if(DAB_BUILD_TESTS)
         tests/test_main.c
         tests/test_block_pool.c
         tests/test_frontend.c
+        tests/test_fic.c
         tests/test_hal.c
+        tests/test_msc.c
         tests/test_null_detect.c
         tests/test_ofdm.c
         tests/test_os_shared_lib.c
