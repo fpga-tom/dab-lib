@@ -21,9 +21,27 @@ typedef struct {
 
 typedef struct {
     int pending;
+    int predicted;
     dab_null_event_t event;
     dab_prs_candidate_t candidate;
 } pending_candidate_t;
+
+static void init_predicted_candidate(const dab_prs_acquire_t *acquire,
+                                     const dab_sync_t *sync,
+                                     dab_prs_candidate_t *candidate) {
+    uint64_t prs_fft_start_sample;
+
+    if (acquire == 0 || sync == 0 || candidate == 0) {
+        return;
+    }
+
+    prs_fft_start_sample = dab_sync_predict_next_frame_start(sync);
+    candidate->prs_fft_start_sample = prs_fft_start_sample;
+    candidate->prs_symbol_start_sample = prs_fft_start_sample - acquire->config.guard_samples;
+    candidate->null_start_sample = candidate->prs_symbol_start_sample - acquire->config.null_samples;
+    candidate->timing_search_start_offset = sync->config.track_timing_window_samples / 2u;
+    candidate->timing_search_length = sync->config.track_timing_window_samples;
+}
 
 static unsigned int env_u32(const char *name, unsigned int fallback) {
     const char *value = getenv(name);
@@ -231,6 +249,7 @@ int main(void) {
     unsigned int blocks_to_read = env_u32("DAB_SYNC_PROBE_BLOCKS", 400u);
     unsigned int block_num;
     unsigned int dropped_blocks = 0u;
+    uint64_t last_predicted_fft_start = 0u;
     float ref_threshold = env_f32("DAB_SYNC_PROBE_REF_SCORE_THRESHOLD", 0.10f);
     int rc = 1;
 
@@ -360,17 +379,31 @@ int main(void) {
             goto cleanup;
         }
 
-        if (event.length != 0u) {
+        if (event.length != 0u && !sync.state.locked) {
             if (dab_prs_candidate_from_null(&acquire, &event, &pending.candidate) == 0) {
-                if (sync.state.locked) {
-                    pending.candidate.timing_search_start_offset = sync.config.track_timing_window_samples / 2u;
-                    pending.candidate.timing_search_length = sync.config.track_timing_window_samples;
-                }
                 pending.pending = 1;
+                pending.predicted = 0;
                 pending.event = event;
                 printf("null sample_index=%llu length=%u candidate_fft=%llu search_start=%llu search_end=%llu\n",
                        (unsigned long long)event.sample_index,
                        event.length,
+                       (unsigned long long)pending.candidate.prs_fft_start_sample,
+                       (unsigned long long)dab_prs_candidate_search_start_sample(&pending.candidate),
+                       (unsigned long long)dab_prs_candidate_search_end_sample(&pending.candidate));
+            }
+        }
+
+        if (!pending.pending && sync.state.locked) {
+            dab_prs_candidate_t predicted_candidate = {0};
+
+            init_predicted_candidate(&acquire, &sync, &predicted_candidate);
+            if (predicted_candidate.prs_fft_start_sample != last_predicted_fft_start) {
+                pending.pending = 1;
+                pending.predicted = 1;
+                pending.candidate = predicted_candidate;
+                pending.event = (dab_null_event_t){0};
+                last_predicted_fft_start = predicted_candidate.prs_fft_start_sample;
+                printf("predict candidate_fft=%llu search_start=%llu search_end=%llu\n",
                        (unsigned long long)pending.candidate.prs_fft_start_sample,
                        (unsigned long long)dab_prs_candidate_search_start_sample(&pending.candidate),
                        (unsigned long long)dab_prs_candidate_search_end_sample(&pending.candidate));
@@ -423,9 +456,14 @@ int main(void) {
                                                           coarse.coarse_freq_error_hz);
                     }
 
+                    if (!sync.state.locked) {
+                        last_predicted_fft_start = 0u;
+                    }
+
                     if (ref_score.score >= ref_threshold) {
-                        printf("sync-update rc=%d frame_start=%llu prs_score=%.6f bad=%u good=%u mode=%d locked=%d timing_error=%d cfo=%d\n",
+                        printf("sync-update rc=%d source=%s frame_start=%llu prs_score=%.6f bad=%u good=%u mode=%d locked=%d timing_error=%d cfo=%d\n",
                                sync_rc,
+                               pending.predicted ? "predict" : "null",
                                (unsigned long long)sync.state.frame_start_sample,
                                sync.state.prs_score,
                                sync.state.bad_frames,
@@ -440,6 +478,7 @@ int main(void) {
         }
 
         pending.pending = 0;
+        pending.predicted = 0;
     }
 
     dropped_blocks = dab_sdrplay_stream_dropped_blocks(stream);
