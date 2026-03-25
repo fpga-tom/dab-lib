@@ -12,7 +12,8 @@ void test_null_detect_rejects_startup_and_bad_cadence_runs(void);
 void test_null_detect_merges_short_gap_inside_run(void);
 void test_ofdm_extract_active_carriers_mode_i_reorders_fft_bins(void);
 void test_ofdm_diff_demodulate_mode_i_multiplies_by_previous_conjugate(void);
-void test_ofdm_process_mode_i_prs_resets_and_second_data_symbol_produces_diff(void);
+void test_ofdm_process_mode_i_prs_seeds_reference_and_first_data_symbol_produces_diff(void);
+void test_ofdm_qpsk_soft_decode_mode_i_scales_to_signed_softbits(void);
 void test_hal_enumerates_sdrplay_stub(void);
 void test_hal_opens_and_configures_sdrplay_stub(void);
 void test_hal_rejects_unknown_driver(void);
@@ -36,6 +37,7 @@ void test_prs_fft_apply_bin_shift_rotates_bins(void);
 void test_prs_score_symbol_i16_scores_fft_bins_against_template(void);
 void test_prs_reference_bins_diff_f32_recovers_integer_bin_offset(void);
 void test_prs_score_symbol_i16_mode_i_diff_rejects_missing_window(void);
+void test_tframe_push_symbol_partitions_fic_and_msc_and_wraps_frame(void);
 
 int main(void) {
     test_pc_queue_basic();
@@ -49,7 +51,8 @@ int main(void) {
     test_null_detect_merges_short_gap_inside_run();
     test_ofdm_extract_active_carriers_mode_i_reorders_fft_bins();
     test_ofdm_diff_demodulate_mode_i_multiplies_by_previous_conjugate();
-    test_ofdm_process_mode_i_prs_resets_and_second_data_symbol_produces_diff();
+    test_ofdm_process_mode_i_prs_seeds_reference_and_first_data_symbol_produces_diff();
+    test_ofdm_qpsk_soft_decode_mode_i_scales_to_signed_softbits();
     test_hal_enumerates_sdrplay_stub();
     test_hal_opens_and_configures_sdrplay_stub();
     test_hal_rejects_unknown_driver();
@@ -70,6 +73,7 @@ int main(void) {
     test_prs_score_symbol_i16_scores_fft_bins_against_template();
     test_prs_reference_bins_diff_f32_recovers_integer_bin_offset();
     test_prs_score_symbol_i16_mode_i_diff_rejects_missing_window();
+    test_tframe_push_symbol_partitions_fic_and_msc_and_wraps_frame();
     test_prs_template_tracks_active_bins();
     test_prs_template_load_bins_populates_multiple_entries();
     test_prs_template_load_mode_i_populates_real_table();

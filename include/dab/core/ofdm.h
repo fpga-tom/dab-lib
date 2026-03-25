@@ -28,12 +28,17 @@ typedef struct {
     float *active_q;
     float *diff_i;
     float *diff_q;
+    float *deintl_i;
+    float *deintl_q;
+    int8_t *soft_a;
+    int8_t *soft_b;
 } dab_ofdm_buffers_t;
 
 typedef struct {
     uint64_t fft_start_sample;
     dab_ofdm_symbol_kind_t kind;
     int have_diff;
+    int have_softbits;
 } dab_ofdm_result_t;
 
 typedef struct {
@@ -41,6 +46,7 @@ typedef struct {
     float *prev_active_i;
     float *prev_active_q;
     int have_prev_symbol;
+    uint16_t deintl_map[DAB_MODE_I_DATA_CARRIERS];
 } dab_ofdm_t;
 
 void dab_ofdm_default_config(dab_ofdm_config_t *config);
@@ -57,6 +63,15 @@ int dab_ofdm_diff_demodulate_mode_i(const float *prev_i,
                                     const float *curr_q,
                                     float *diff_i,
                                     float *diff_q);
+int dab_ofdm_frequency_deinterleave_mode_i(const dab_ofdm_t *ofdm,
+                                           const float *diff_i,
+                                           const float *diff_q,
+                                           float *deintl_i,
+                                           float *deintl_q);
+int dab_ofdm_qpsk_soft_decode_mode_i(const float *deintl_i,
+                                     const float *deintl_q,
+                                     int8_t *soft_a,
+                                     int8_t *soft_b);
 int dab_ofdm_process_mode_i(dab_ofdm_t *ofdm,
                             const float *fft_i,
                             const float *fft_q,

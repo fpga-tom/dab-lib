@@ -9,6 +9,7 @@
 #include "dab/core/prs_fft.h"
 #include "dab/core/prs_score.h"
 #include "dab/core/sync.h"
+#include "dab/core/tframe.h"
 #include "dab/hal/sdr_device.h"
 #include "dab/hal/sdrplay_device.h"
 #include "dab/simd/simd.h"
@@ -242,6 +243,8 @@ int main(void) {
     dab_ofdm_config_t ofdm_config;
     dab_sync_t sync;
     dab_sync_config_t sync_config;
+    dab_tframe_t tframe;
+    dab_tframe_buffers_t tframe_buffers;
     history_buffer_t history = {0};
     pending_candidate_t pending = {0};
     dab_sdr_block_view_t src_block;
@@ -255,6 +258,13 @@ int main(void) {
     float *prev_active_q = 0;
     float *diff_i = 0;
     float *diff_q = 0;
+    float *deintl_i = 0;
+    float *deintl_q = 0;
+    int8_t *soft_a = 0;
+    int8_t *soft_b = 0;
+    int8_t *fic_softbits = 0;
+    int8_t *msc_softbits = 0;
+    int8_t *frame_softbits = 0;
     unsigned int blocks_to_read = env_u32("DAB_SYNC_PROBE_BLOCKS", 400u);
     unsigned int block_num;
     unsigned int dropped_blocks = 0u;
@@ -343,15 +353,31 @@ int main(void) {
     prev_active_q = (float *)calloc(DAB_MODE_I_ACTIVE_CARRIERS, sizeof(*prev_active_q));
     diff_i = (float *)calloc(DAB_MODE_I_DATA_CARRIERS, sizeof(*diff_i));
     diff_q = (float *)calloc(DAB_MODE_I_DATA_CARRIERS, sizeof(*diff_q));
+    deintl_i = (float *)calloc(DAB_MODE_I_DATA_CARRIERS, sizeof(*deintl_i));
+    deintl_q = (float *)calloc(DAB_MODE_I_DATA_CARRIERS, sizeof(*deintl_q));
+    soft_a = (int8_t *)calloc(DAB_MODE_I_DATA_CARRIERS, sizeof(*soft_a));
+    soft_b = (int8_t *)calloc(DAB_MODE_I_DATA_CARRIERS, sizeof(*soft_b));
+    fic_softbits = (int8_t *)calloc(DAB_TFRAME_FIC_SOFTBITS, sizeof(*fic_softbits));
+    msc_softbits = (int8_t *)calloc(DAB_TFRAME_MSC_SOFTBITS, sizeof(*msc_softbits));
+    frame_softbits = (int8_t *)calloc(DAB_TFRAME_TOTAL_SOFTBITS, sizeof(*frame_softbits));
     if (fft_i == 0 || fft_q == 0 || active_i == 0 || active_q == 0 ||
-        prev_active_i == 0 || prev_active_q == 0 || diff_i == 0 || diff_q == 0) {
+        prev_active_i == 0 || prev_active_q == 0 || diff_i == 0 || diff_q == 0 ||
+        deintl_i == 0 || deintl_q == 0 || soft_a == 0 || soft_b == 0 ||
+        fic_softbits == 0 || msc_softbits == 0 || frame_softbits == 0) {
         fprintf(stderr, "alloc failed\n");
         goto cleanup;
     }
     ofdm.prev_active_i = prev_active_i;
     ofdm.prev_active_q = prev_active_q;
+    tframe_buffers.fic_softbits = fic_softbits;
+    tframe_buffers.msc_softbits = msc_softbits;
+    tframe_buffers.frame_softbits = frame_softbits;
+    if (dab_tframe_init(&tframe, &tframe_buffers) != 0) {
+        fprintf(stderr, "tframe init failed\n");
+        goto cleanup;
+    }
 
-    if (history_init(&history, env_u32("DAB_SYNC_PROBE_HISTORY_SAMPLES", 32768u)) != 0) {
+    if (history_init(&history, env_u32("DAB_SYNC_PROBE_HISTORY_SAMPLES", 262144u)) != 0) {
         fprintf(stderr, "history init failed\n");
         goto cleanup;
     }
@@ -442,7 +468,7 @@ int main(void) {
         {
             uint64_t required_end = dab_prs_candidate_search_end_sample(&pending.candidate) + acquire_config.fft_samples;
             if (sync.state.locked) {
-                required_end += (2u * acquire_config.symbol_samples);
+                required_end += ((uint64_t)DAB_TFRAME_TOTAL_SYMBOLS * acquire_config.symbol_samples);
             }
             if (!history_contains_sample_range(&history,
                                                dab_prs_candidate_search_start_sample(&pending.candidate),
@@ -508,6 +534,7 @@ int main(void) {
                     if (!sync.state.locked) {
                         last_predicted_fft_start = 0u;
                         dab_ofdm_reset(&ofdm);
+                        dab_tframe_reset(&tframe);
                         if (pending.predicted) {
                             printf("track-loss source=predict bad=%u mode=%d locked=%d\n",
                                    sync.state.bad_frames,
@@ -535,13 +562,20 @@ int main(void) {
                         dab_ofdm_buffers_t ofdm_buffers;
                         dab_ofdm_result_t ofdm_result;
                         uint64_t data_fft_start;
+                        dab_tframe_result_t tframe_result;
                         unsigned int symbol_idx;
 
                         ofdm_buffers.active_i = active_i;
                         ofdm_buffers.active_q = active_q;
                         ofdm_buffers.diff_i = diff_i;
                         ofdm_buffers.diff_q = diff_q;
+                        ofdm_buffers.deintl_i = deintl_i;
+                        ofdm_buffers.deintl_q = deintl_q;
+                        ofdm_buffers.soft_a = soft_a;
+                        ofdm_buffers.soft_b = soft_b;
 
+                        dab_ofdm_reset(&ofdm);
+                        dab_tframe_reset(&tframe);
                         (void)dab_ofdm_process_mode_i(&ofdm,
                                                       fft_i,
                                                       fft_q,
@@ -550,7 +584,7 @@ int main(void) {
                                                       &ofdm_buffers,
                                                       &ofdm_result);
 
-                        for (symbol_idx = 0u; symbol_idx < 2u; ++symbol_idx) {
+                        for (symbol_idx = 0u; symbol_idx < DAB_TFRAME_TOTAL_SYMBOLS; ++symbol_idx) {
                             data_fft_start = coarse.prs_fft_start_sample +
                                              ((uint64_t)(symbol_idx + 1u) * acquire_config.symbol_samples);
                             if (!history_contains_sample_range(&history,
@@ -583,11 +617,28 @@ int main(void) {
                             }
                             if (ofdm_result.have_diff) {
                                 const float diff_power = (diff_i[0] * diff_i[0]) + (diff_q[0] * diff_q[0]);
-                                printf("ofdm data_fft_start=%llu diff0_re=%.6f diff0_im=%.6f diff0_power=%.6f\n",
+                                printf("ofdm data_fft_start=%llu diff0_re=%.6f diff0_im=%.6f diff0_power=%.6f",
                                        (unsigned long long)data_fft_start,
                                        diff_i[0],
                                        diff_q[0],
                                        diff_power);
+                                if (ofdm_result.have_softbits) {
+                                    printf(" soft0=(%d,%d) soft1=(%d,%d)",
+                                           (int)soft_a[0],
+                                           (int)soft_b[0],
+                                           (int)soft_a[1],
+                                           (int)soft_b[1]);
+                                    if (dab_tframe_push_symbol(&tframe,
+                                                               data_fft_start,
+                                                               soft_a,
+                                                               soft_b,
+                                                               &tframe_result) == 0) {
+                                        printf(" tframe_symbol=%u frame_complete=%d",
+                                               tframe_result.symbol_index,
+                                               tframe_result.frame_complete);
+                                    }
+                                }
+                                printf("\n");
                             }
                         }
                     }
@@ -620,6 +671,13 @@ cleanup:
         dab_sdr_device_close(device);
     }
     history_destroy(&history);
+    free(frame_softbits);
+    free(msc_softbits);
+    free(fic_softbits);
+    free(soft_b);
+    free(soft_a);
+    free(deintl_q);
+    free(deintl_i);
     free(diff_q);
     free(diff_i);
     free(prev_active_q);

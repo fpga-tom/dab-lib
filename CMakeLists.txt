@@ -29,6 +29,7 @@ add_library(dab
     src/core/pc_queue.c
     src/core/receiver.c
     src/core/sync.c
+    src/core/tframe.c
     src/hal/sdr_device.c
     src/hal/sdrplay/sdrplay_api.c
     src/hal/sdrplay/sdrplay_adapter.c
@@ -119,6 +120,7 @@ if(DAB_BUILD_TESTS)
         tests/test_prs_score.c
         tests/test_prs_template.c
         tests/test_sync.c
+        tests/test_tframe.c
     )
 
     target_link_libraries(dab_tests PRIVATE dab)
