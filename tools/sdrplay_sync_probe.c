@@ -4,6 +4,7 @@
 
 #include "dab/config.h"
 #include "dab/core/null_detect.h"
+#include "dab/core/ofdm.h"
 #include "dab/core/prs_acquire.h"
 #include "dab/core/prs_fft.h"
 #include "dab/core/prs_score.h"
@@ -237,6 +238,8 @@ int main(void) {
     dab_prs_score_config_t score_config;
     dab_prs_fft_t fft;
     dab_prs_fft_config_t fft_config;
+    dab_ofdm_t ofdm;
+    dab_ofdm_config_t ofdm_config;
     dab_sync_t sync;
     dab_sync_config_t sync_config;
     history_buffer_t history = {0};
@@ -246,9 +249,16 @@ int main(void) {
     const dab_simd_ops_t *simd_ops = dab_simd_get_ops();
     float *fft_i = 0;
     float *fft_q = 0;
+    float *active_i = 0;
+    float *active_q = 0;
+    float *prev_active_i = 0;
+    float *prev_active_q = 0;
+    float *diff_i = 0;
+    float *diff_q = 0;
     unsigned int blocks_to_read = env_u32("DAB_SYNC_PROBE_BLOCKS", 400u);
     unsigned int block_num;
     unsigned int dropped_blocks = 0u;
+    int have_prev_active = 0;
     uint64_t last_predicted_fft_start = 0u;
     float ref_threshold = env_f32("DAB_SYNC_PROBE_REF_SCORE_THRESHOLD", 0.10f);
     int rc = 1;
@@ -320,9 +330,22 @@ int main(void) {
         return 2;
     }
 
+    dab_ofdm_default_config(&ofdm_config);
+    if (dab_ofdm_init(&ofdm, &ofdm_config) != 0) {
+        fprintf(stderr, "ofdm init failed\n");
+        return 2;
+    }
+
     fft_i = (float *)calloc(acquire_config.fft_samples, sizeof(*fft_i));
     fft_q = (float *)calloc(acquire_config.fft_samples, sizeof(*fft_q));
-    if (fft_i == 0 || fft_q == 0) {
+    active_i = (float *)calloc(DAB_MODE_I_ACTIVE_CARRIERS, sizeof(*active_i));
+    active_q = (float *)calloc(DAB_MODE_I_ACTIVE_CARRIERS, sizeof(*active_q));
+    prev_active_i = (float *)calloc(DAB_MODE_I_ACTIVE_CARRIERS, sizeof(*prev_active_i));
+    prev_active_q = (float *)calloc(DAB_MODE_I_ACTIVE_CARRIERS, sizeof(*prev_active_q));
+    diff_i = (float *)calloc(DAB_MODE_I_DATA_CARRIERS, sizeof(*diff_i));
+    diff_q = (float *)calloc(DAB_MODE_I_DATA_CARRIERS, sizeof(*diff_q));
+    if (fft_i == 0 || fft_q == 0 || active_i == 0 || active_q == 0 ||
+        prev_active_i == 0 || prev_active_q == 0 || diff_i == 0 || diff_q == 0) {
         fprintf(stderr, "alloc failed\n");
         goto cleanup;
     }
@@ -446,6 +469,11 @@ int main(void) {
                                                           acquire_config.fft_samples,
                                                           -ref_score.carrier_offset_bins);
                     }
+                    if (dab_ofdm_extract_active_carriers_mode_i(fft_i, fft_q, active_i, active_q) != 0) {
+                        pending.pending = 0;
+                        pending.predicted = 0;
+                        continue;
+                    }
                     printf("prs fft_start=%llu cp_score=%.6f ref_score=%.6f ifo=%d cfo=%d mode=%d locked=%d\n",
                            (unsigned long long)coarse.prs_fft_start_sample,
                            coarse.prs_score,
@@ -494,6 +522,24 @@ int main(void) {
                                sync.state.coarse_freq_error_hz,
                                sync.state.carrier_offset_bins);
                     }
+
+                    if (have_prev_active &&
+                        dab_ofdm_diff_demodulate_mode_i(prev_active_i,
+                                                        prev_active_q,
+                                                        active_i,
+                                                        active_q,
+                                                        diff_i,
+                                                        diff_q) == 0) {
+                        const float diff_power = (diff_i[0] * diff_i[0]) + (diff_q[0] * diff_q[0]);
+                        printf("ofdm diff0_re=%.6f diff0_im=%.6f diff0_power=%.6f\n",
+                               diff_i[0],
+                               diff_q[0],
+                               diff_power);
+                    }
+
+                    memcpy(prev_active_i, active_i, sizeof(*prev_active_i) * DAB_MODE_I_ACTIVE_CARRIERS);
+                    memcpy(prev_active_q, active_q, sizeof(*prev_active_q) * DAB_MODE_I_ACTIVE_CARRIERS);
+                    have_prev_active = 1;
                 }
             }
         }
@@ -523,6 +569,12 @@ cleanup:
         dab_sdr_device_close(device);
     }
     history_destroy(&history);
+    free(diff_q);
+    free(diff_i);
+    free(prev_active_q);
+    free(prev_active_i);
+    free(active_q);
+    free(active_i);
     free(fft_q);
     free(fft_i);
     return rc;

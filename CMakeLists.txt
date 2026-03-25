@@ -20,6 +20,7 @@ add_library(dab
     src/core/block_pool.c
     src/core/frontend.c
     src/core/null_detect.c
+    src/core/ofdm.c
     src/core/prs_acquire.c
     src/core/prs_fft.c
     src/core/prs_fft_scalar.c
@@ -107,6 +108,7 @@ if(DAB_BUILD_TESTS)
         tests/test_frontend.c
         tests/test_hal.c
         tests/test_null_detect.c
+        tests/test_ofdm.c
         tests/test_os_shared_lib.c
         tests/test_sdrplay_api.c
         tests/test_sdrplay.c
