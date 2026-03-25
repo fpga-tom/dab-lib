@@ -258,7 +258,6 @@ int main(void) {
     unsigned int blocks_to_read = env_u32("DAB_SYNC_PROBE_BLOCKS", 400u);
     unsigned int block_num;
     unsigned int dropped_blocks = 0u;
-    int have_prev_active = 0;
     uint64_t last_predicted_fft_start = 0u;
     float ref_threshold = env_f32("DAB_SYNC_PROBE_REF_SCORE_THRESHOLD", 0.10f);
     int rc = 1;
@@ -349,6 +348,8 @@ int main(void) {
         fprintf(stderr, "alloc failed\n");
         goto cleanup;
     }
+    ofdm.prev_active_i = prev_active_i;
+    ofdm.prev_active_q = prev_active_q;
 
     if (history_init(&history, env_u32("DAB_SYNC_PROBE_HISTORY_SAMPLES", 32768u)) != 0) {
         fprintf(stderr, "history init failed\n");
@@ -438,10 +439,16 @@ int main(void) {
             continue;
         }
 
-        if (!history_contains_sample_range(&history,
-                                           dab_prs_candidate_search_start_sample(&pending.candidate),
-                                           dab_prs_candidate_search_end_sample(&pending.candidate) + acquire_config.fft_samples)) {
-            continue;
+        {
+            uint64_t required_end = dab_prs_candidate_search_end_sample(&pending.candidate) + acquire_config.fft_samples;
+            if (sync.state.locked) {
+                required_end += (2u * acquire_config.symbol_samples);
+            }
+            if (!history_contains_sample_range(&history,
+                                               dab_prs_candidate_search_start_sample(&pending.candidate),
+                                               required_end)) {
+                continue;
+            }
         }
 
         hist_view = history_view(&history);
@@ -500,6 +507,7 @@ int main(void) {
 
                     if (!sync.state.locked) {
                         last_predicted_fft_start = 0u;
+                        dab_ofdm_reset(&ofdm);
                         if (pending.predicted) {
                             printf("track-loss source=predict bad=%u mode=%d locked=%d\n",
                                    sync.state.bad_frames,
@@ -523,23 +531,66 @@ int main(void) {
                                sync.state.carrier_offset_bins);
                     }
 
-                    if (have_prev_active &&
-                        dab_ofdm_diff_demodulate_mode_i(prev_active_i,
-                                                        prev_active_q,
-                                                        active_i,
-                                                        active_q,
-                                                        diff_i,
-                                                        diff_q) == 0) {
-                        const float diff_power = (diff_i[0] * diff_i[0]) + (diff_q[0] * diff_q[0]);
-                        printf("ofdm diff0_re=%.6f diff0_im=%.6f diff0_power=%.6f\n",
-                               diff_i[0],
-                               diff_q[0],
-                               diff_power);
-                    }
+                    {
+                        dab_ofdm_buffers_t ofdm_buffers;
+                        dab_ofdm_result_t ofdm_result;
+                        uint64_t data_fft_start;
+                        unsigned int symbol_idx;
 
-                    memcpy(prev_active_i, active_i, sizeof(*prev_active_i) * DAB_MODE_I_ACTIVE_CARRIERS);
-                    memcpy(prev_active_q, active_q, sizeof(*prev_active_q) * DAB_MODE_I_ACTIVE_CARRIERS);
-                    have_prev_active = 1;
+                        ofdm_buffers.active_i = active_i;
+                        ofdm_buffers.active_q = active_q;
+                        ofdm_buffers.diff_i = diff_i;
+                        ofdm_buffers.diff_q = diff_q;
+
+                        (void)dab_ofdm_process_mode_i(&ofdm,
+                                                      fft_i,
+                                                      fft_q,
+                                                      coarse.prs_fft_start_sample,
+                                                      DAB_OFDM_SYMBOL_PRS,
+                                                      &ofdm_buffers,
+                                                      &ofdm_result);
+
+                        for (symbol_idx = 0u; symbol_idx < 2u; ++symbol_idx) {
+                            data_fft_start = coarse.prs_fft_start_sample +
+                                             ((uint64_t)(symbol_idx + 1u) * acquire_config.symbol_samples);
+                            if (!history_contains_sample_range(&history,
+                                                               data_fft_start,
+                                                               data_fft_start + acquire_config.fft_samples)) {
+                                break;
+                            }
+                            if (dab_prs_fft_execute_i16_cfo(&fft,
+                                                            &hist_view,
+                                                            data_fft_start,
+                                                            cfo_for_fft,
+                                                            fft_i,
+                                                            fft_q) != 0) {
+                                break;
+                            }
+                            if (ref_score.carrier_offset_bins != 0) {
+                                (void)dab_prs_fft_apply_bin_shift(fft_i,
+                                                                  fft_q,
+                                                                  acquire_config.fft_samples,
+                                                                  -ref_score.carrier_offset_bins);
+                            }
+                            if (dab_ofdm_process_mode_i(&ofdm,
+                                                        fft_i,
+                                                        fft_q,
+                                                        data_fft_start,
+                                                        DAB_OFDM_SYMBOL_DATA,
+                                                        &ofdm_buffers,
+                                                        &ofdm_result) != 0) {
+                                break;
+                            }
+                            if (ofdm_result.have_diff) {
+                                const float diff_power = (diff_i[0] * diff_i[0]) + (diff_q[0] * diff_q[0]);
+                                printf("ofdm data_fft_start=%llu diff0_re=%.6f diff0_im=%.6f diff0_power=%.6f\n",
+                                       (unsigned long long)data_fft_start,
+                                       diff_i[0],
+                                       diff_q[0],
+                                       diff_power);
+                            }
+                        }
+                    }
                 }
             }
         }

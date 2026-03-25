@@ -25,11 +25,18 @@ int dab_ofdm_init(dab_ofdm_t *ofdm, const dab_ofdm_config_t *config) {
         return -1;
     }
 
+    ofdm->prev_active_i = 0;
+    ofdm->prev_active_q = 0;
+    ofdm->have_prev_symbol = 0;
+
     return 0;
 }
 
 void dab_ofdm_reset(dab_ofdm_t *ofdm) {
-    (void)ofdm;
+    if (ofdm == 0) {
+        return;
+    }
+    ofdm->have_prev_symbol = 0;
 }
 
 int dab_ofdm_extract_active_carriers_mode_i(const float *fft_i,
@@ -49,6 +56,62 @@ int dab_ofdm_extract_active_carriers_mode_i(const float *fft_i,
     for (i = DAB_MODE_I_ACTIVE_CARRIER_HALF; i < DAB_MODE_I_ACTIVE_CARRIERS; ++i) {
         active_i[i] = fft_i[i - DAB_MODE_I_ACTIVE_CARRIER_HALF];
         active_q[i] = fft_q[i - DAB_MODE_I_ACTIVE_CARRIER_HALF];
+    }
+
+    return 0;
+}
+
+int dab_ofdm_process_mode_i(dab_ofdm_t *ofdm,
+                            const float *fft_i,
+                            const float *fft_q,
+                            uint64_t fft_start_sample,
+                            dab_ofdm_symbol_kind_t kind,
+                            const dab_ofdm_buffers_t *buffers,
+                            dab_ofdm_result_t *result) {
+    if (ofdm == 0 || fft_i == 0 || fft_q == 0 || buffers == 0 || result == 0 ||
+        buffers->active_i == 0 || buffers->active_q == 0 ||
+        buffers->diff_i == 0 || buffers->diff_q == 0) {
+        return -1;
+    }
+
+    if (dab_ofdm_extract_active_carriers_mode_i(fft_i,
+                                                fft_q,
+                                                buffers->active_i,
+                                                buffers->active_q) != 0) {
+        return -1;
+    }
+
+    result->fft_start_sample = fft_start_sample;
+    result->kind = kind;
+    result->have_diff = 0;
+
+    if (kind == DAB_OFDM_SYMBOL_DATA &&
+        ofdm->have_prev_symbol &&
+        ofdm->prev_active_i != 0 &&
+        ofdm->prev_active_q != 0) {
+        if (dab_ofdm_diff_demodulate_mode_i(ofdm->prev_active_i,
+                                            ofdm->prev_active_q,
+                                            buffers->active_i,
+                                            buffers->active_q,
+                                            buffers->diff_i,
+                                            buffers->diff_q) != 0) {
+            return -1;
+        }
+        result->have_diff = 1;
+    }
+
+    if (kind == DAB_OFDM_SYMBOL_PRS) {
+        ofdm->have_prev_symbol = 0;
+        return 0;
+    }
+
+    if (ofdm->prev_active_i != 0 && ofdm->prev_active_q != 0) {
+        uint32_t i;
+        for (i = 0u; i < DAB_MODE_I_ACTIVE_CARRIERS; ++i) {
+            ofdm->prev_active_i[i] = buffers->active_i[i];
+            ofdm->prev_active_q[i] = buffers->active_q[i];
+        }
+        ofdm->have_prev_symbol = 1;
     }
 
     return 0;

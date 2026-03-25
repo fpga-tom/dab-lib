@@ -45,3 +45,61 @@ void test_ofdm_diff_demodulate_mode_i_multiplies_by_previous_conjugate(void) {
     TEST_ASSERT(diff_i[0] == 0.0f);
     TEST_ASSERT(diff_q[0] == -2.0f);
 }
+
+void test_ofdm_process_mode_i_prs_resets_and_second_data_symbol_produces_diff(void) {
+    dab_ofdm_t ofdm;
+    dab_ofdm_buffers_t buffers;
+    dab_ofdm_result_t result;
+    float fft_i[DAB_MODE_I_FFT_SAMPLES] = {0};
+    float fft_q[DAB_MODE_I_FFT_SAMPLES] = {0};
+    float active_i[DAB_MODE_I_ACTIVE_CARRIERS] = {0};
+    float active_q[DAB_MODE_I_ACTIVE_CARRIERS] = {0};
+    float prev_i[DAB_MODE_I_ACTIVE_CARRIERS] = {0};
+    float prev_q[DAB_MODE_I_ACTIVE_CARRIERS] = {0};
+    float diff_i[DAB_MODE_I_DATA_CARRIERS] = {0};
+    float diff_q[DAB_MODE_I_DATA_CARRIERS] = {0};
+
+    TEST_ASSERT(dab_ofdm_init(&ofdm, 0) == 0);
+    ofdm.prev_active_i = prev_i;
+    ofdm.prev_active_q = prev_q;
+
+    buffers.active_i = active_i;
+    buffers.active_q = active_q;
+    buffers.diff_i = diff_i;
+    buffers.diff_q = diff_q;
+
+    fft_i[DAB_MODE_I_FFT_SAMPLES - DAB_MODE_I_ACTIVE_CARRIER_HALF] = 1.0f;
+    TEST_ASSERT(dab_ofdm_process_mode_i(&ofdm,
+                                        fft_i,
+                                        fft_q,
+                                        100u,
+                                        DAB_OFDM_SYMBOL_PRS,
+                                        &buffers,
+                                        &result) == 0);
+    TEST_ASSERT(result.have_diff == 0);
+    TEST_ASSERT(ofdm.have_prev_symbol == 0);
+
+    fft_q[DAB_MODE_I_FFT_SAMPLES - DAB_MODE_I_ACTIVE_CARRIER_HALF] = 1.0f;
+    TEST_ASSERT(dab_ofdm_process_mode_i(&ofdm,
+                                        fft_i,
+                                        fft_q,
+                                        200u,
+                                        DAB_OFDM_SYMBOL_DATA,
+                                        &buffers,
+                                        &result) == 0);
+    TEST_ASSERT(result.have_diff == 0);
+    TEST_ASSERT(ofdm.have_prev_symbol == 1);
+
+    fft_i[DAB_MODE_I_FFT_SAMPLES - DAB_MODE_I_ACTIVE_CARRIER_HALF] = 1.0f;
+    fft_q[DAB_MODE_I_FFT_SAMPLES - DAB_MODE_I_ACTIVE_CARRIER_HALF] = -1.0f;
+    TEST_ASSERT(dab_ofdm_process_mode_i(&ofdm,
+                                        fft_i,
+                                        fft_q,
+                                        300u,
+                                        DAB_OFDM_SYMBOL_DATA,
+                                        &buffers,
+                                        &result) == 0);
+    TEST_ASSERT(result.have_diff == 1);
+    TEST_ASSERT(diff_i[0] == 0.0f);
+    TEST_ASSERT(diff_q[0] == -2.0f);
+}

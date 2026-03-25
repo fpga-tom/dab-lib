@@ -12,6 +12,7 @@ void test_null_detect_rejects_startup_and_bad_cadence_runs(void);
 void test_null_detect_merges_short_gap_inside_run(void);
 void test_ofdm_extract_active_carriers_mode_i_reorders_fft_bins(void);
 void test_ofdm_diff_demodulate_mode_i_multiplies_by_previous_conjugate(void);
+void test_ofdm_process_mode_i_prs_resets_and_second_data_symbol_produces_diff(void);
 void test_hal_enumerates_sdrplay_stub(void);
 void test_hal_opens_and_configures_sdrplay_stub(void);
 void test_hal_rejects_unknown_driver(void);
@@ -48,6 +49,7 @@ int main(void) {
     test_null_detect_merges_short_gap_inside_run();
     test_ofdm_extract_active_carriers_mode_i_reorders_fft_bins();
     test_ofdm_diff_demodulate_mode_i_multiplies_by_previous_conjugate();
+    test_ofdm_process_mode_i_prs_resets_and_second_data_symbol_produces_diff();
     test_hal_enumerates_sdrplay_stub();
     test_hal_opens_and_configures_sdrplay_stub();
     test_hal_rejects_unknown_driver();
