@@ -44,6 +44,7 @@ void dab_prs_fft_default_config(dab_prs_fft_config_t *config) {
         return;
     }
     config->fft_samples = 2048u;
+    config->sample_rate = 2048000u;
 }
 
 int dab_prs_fft_init(dab_prs_fft_t *fft, const dab_prs_fft_config_t *config) {
@@ -61,6 +62,7 @@ int dab_prs_fft_init(dab_prs_fft_t *fft, const dab_prs_fft_config_t *config) {
     dab_prs_fft_default_config(&defaults);
     fft->config = config != 0 ? *config : defaults;
     if (fft->config.fft_samples == 0u ||
+        fft->config.sample_rate == 0u ||
         fft->config.fft_samples > DAB_PRS_FFT_MAX_SAMPLES ||
         !dab_prs_fft_is_power_of_two(fft->config.fft_samples)) {
         return -1;
@@ -118,11 +120,12 @@ static void dab_prs_fft_bit_reverse_permute(const dab_prs_fft_t *fft, float *re,
     }
 }
 
-int dab_prs_fft_execute_i16(const dab_prs_fft_t *fft,
-                            const dab_sdr_block_view_t *block,
-                            uint64_t fft_start_sample,
-                            float *out_i,
-                            float *out_q) {
+int dab_prs_fft_execute_i16_cfo(const dab_prs_fft_t *fft,
+                                const dab_sdr_block_view_t *block,
+                                uint64_t fft_start_sample,
+                                float cfo_hz,
+                                float *out_i,
+                                float *out_q) {
     const dab_prs_fft_backend_t *backend = dab_prs_fft_select_backend();
     const uint64_t block_start = block != 0 ? block->sample_index : 0u;
     uint32_t offset;
@@ -144,6 +147,21 @@ int dab_prs_fft_execute_i16(const dab_prs_fft_t *fft,
                                            out_q,
                                            block->iq_interleaved + (2u * offset),
                                            fft->config.fft_samples);
+    if (cfo_hz != 0.0f) {
+        const float step = -DAB_TWO_PI_F * cfo_hz / (float)fft->config.sample_rate;
+        uint32_t n;
+
+        for (n = 0u; n < fft->config.fft_samples; ++n) {
+            const float phase = step * (float)n;
+            const float rot_re = cosf(phase);
+            const float rot_im = sinf(phase);
+            const float in_re = out_i[n];
+            const float in_im = out_q[n];
+
+            out_i[n] = (in_re * rot_re) - (in_im * rot_im);
+            out_q[n] = (in_re * rot_im) + (in_im * rot_re);
+        }
+    }
     dab_prs_fft_bit_reverse_permute(fft, out_i, out_q);
 
     for (stage = 0u; stage < fft->stage_count; ++stage) {
@@ -156,6 +174,14 @@ int dab_prs_fft_execute_i16(const dab_prs_fft_t *fft,
     }
 
     return 0;
+}
+
+int dab_prs_fft_execute_i16(const dab_prs_fft_t *fft,
+                            const dab_sdr_block_view_t *block,
+                            uint64_t fft_start_sample,
+                            float *out_i,
+                            float *out_q) {
+    return dab_prs_fft_execute_i16_cfo(fft, block, fft_start_sample, 0.0f, out_i, out_q);
 }
 
 int dab_prs_fft_apply_bin_shift(float *re,

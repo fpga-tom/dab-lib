@@ -366,10 +366,26 @@ int dab_prs_score_symbol_i16_mode_i_diff(const dab_prs_fft_t *fft,
                                          float *fft_i,
                                          float *fft_q,
                                          dab_prs_reference_score_t *result) {
+    return dab_prs_score_symbol_i16_mode_i_diff_cfo(fft,
+                                                    block,
+                                                    fft_start_sample,
+                                                    0.0f,
+                                                    fft_i,
+                                                    fft_q,
+                                                    result);
+}
+
+int dab_prs_score_symbol_i16_mode_i_diff_cfo(const dab_prs_fft_t *fft,
+                                             const dab_sdr_block_view_t *block,
+                                             uint64_t fft_start_sample,
+                                             float cfo_hz,
+                                             float *fft_i,
+                                             float *fft_q,
+                                             dab_prs_reference_score_t *result) {
     if (fft == 0 || block == 0 || fft_i == 0 || fft_q == 0 || result == 0) {
         return -1;
     }
-    if (dab_prs_fft_execute_i16(fft, block, fft_start_sample, fft_i, fft_q) != 0) {
+    if (dab_prs_fft_execute_i16_cfo(fft, block, fft_start_sample, cfo_hz, fft_i, fft_q) != 0) {
         return -1;
     }
     return dab_prs_score_reference_mode_i_diff_f32(fft_i, fft_q, result);

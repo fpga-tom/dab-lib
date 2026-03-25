@@ -18,6 +18,7 @@ typedef enum {
 
 typedef struct {
     uint32_t fft_samples;
+    uint32_t sample_rate;
 } dab_prs_fft_config_t;
 
 typedef struct {
@@ -41,6 +42,12 @@ int dab_prs_fft_execute_i16(const dab_prs_fft_t *fft,
                             uint64_t fft_start_sample,
                             float *out_i,
                             float *out_q);
+int dab_prs_fft_execute_i16_cfo(const dab_prs_fft_t *fft,
+                                const dab_sdr_block_view_t *block,
+                                uint64_t fft_start_sample,
+                                float cfo_hz,
+                                float *out_i,
+                                float *out_q);
 int dab_prs_fft_apply_bin_shift(float *re,
                                 float *im,
                                 uint32_t count,

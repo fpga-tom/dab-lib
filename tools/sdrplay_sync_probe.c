@@ -301,6 +301,7 @@ int main(void) {
 
     dab_prs_fft_default_config(&fft_config);
     fft_config.fft_samples = acquire_config.fft_samples;
+    fft_config.sample_rate = stream_config.sample_rate;
     if (dab_prs_fft_init(&fft, &fft_config) != 0) {
         fprintf(stderr, "prs fft init failed\n");
         return 2;
@@ -427,12 +428,17 @@ int main(void) {
             int coarse_rc = dab_prs_score_search_i16(&cp_score, &hist_view, &pending.candidate, &coarse);
 
             if (coarse_rc == 1) {
-                if (dab_prs_score_symbol_i16_mode_i_diff(&fft,
-                                                         &hist_view,
-                                                         coarse.prs_fft_start_sample,
-                                                         fft_i,
-                                                         fft_q,
-                                                         &ref_score) == 0) {
+                float cfo_for_fft = (float)coarse.coarse_freq_error_hz;
+                if (sync.state.locked && sync.state.bad_frames == 0u) {
+                    cfo_for_fft = (float)sync.state.coarse_freq_error_hz;
+                }
+                if (dab_prs_score_symbol_i16_mode_i_diff_cfo(&fft,
+                                                             &hist_view,
+                                                             coarse.prs_fft_start_sample,
+                                                             cfo_for_fft,
+                                                             fft_i,
+                                                             fft_q,
+                                                             &ref_score) == 0) {
                     int sync_rc;
                     if (ref_score.carrier_offset_bins != 0) {
                         (void)dab_prs_fft_apply_bin_shift(fft_i,

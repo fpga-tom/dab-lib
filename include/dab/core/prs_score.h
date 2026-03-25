@@ -68,5 +68,12 @@ int dab_prs_score_symbol_i16_mode_i_diff(const dab_prs_fft_t *fft,
                                          float *fft_i,
                                          float *fft_q,
                                          dab_prs_reference_score_t *result);
+int dab_prs_score_symbol_i16_mode_i_diff_cfo(const dab_prs_fft_t *fft,
+                                             const dab_sdr_block_view_t *block,
+                                             uint64_t fft_start_sample,
+                                             float cfo_hz,
+                                             float *fft_i,
+                                             float *fft_q,
+                                             dab_prs_reference_score_t *result);
 
 #endif
