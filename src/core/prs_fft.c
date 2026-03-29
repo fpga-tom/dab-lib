@@ -148,18 +148,26 @@ int dab_prs_fft_execute_i16_cfo(const dab_prs_fft_t *fft,
                                            block->iq_interleaved + (2u * offset),
                                            fft->config.fft_samples);
     if (cfo_hz != 0.0f) {
-        const float step = -DAB_TWO_PI_F * cfo_hz / (float)fft->config.sample_rate;
+        const double step = -(2.0 * 3.14159265358979323846 * (double)cfo_hz) /
+                            (double)fft->config.sample_rate;
+        const double base_phase =
+            remainder(step * (double)fft_start_sample, 2.0 * 3.14159265358979323846);
+        const float step_re = (float)cos(step);
+        const float step_im = (float)sin(step);
+        float rot_re = (float)cos(base_phase);
+        float rot_im = (float)sin(base_phase);
         uint32_t n;
 
         for (n = 0u; n < fft->config.fft_samples; ++n) {
-            const float phase = step * (float)n;
-            const float rot_re = cosf(phase);
-            const float rot_im = sinf(phase);
             const float in_re = out_i[n];
             const float in_im = out_q[n];
+            const float next_re = (rot_re * step_re) - (rot_im * step_im);
+            const float next_im = (rot_re * step_im) + (rot_im * step_re);
 
             out_i[n] = (in_re * rot_re) - (in_im * rot_im);
             out_q[n] = (in_re * rot_im) + (in_im * rot_re);
+            rot_re = next_re;
+            rot_im = next_im;
         }
     }
     dab_prs_fft_bit_reverse_permute(fft, out_i, out_q);

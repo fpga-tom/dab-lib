@@ -1,5 +1,7 @@
 #include "dab/core/sync.h"
 
+#include <stdio.h>
+
 void dab_sync_default_config(dab_sync_config_t *config) {
     if (config == 0) {
         return;
@@ -12,6 +14,9 @@ void dab_sync_default_config(dab_sync_config_t *config) {
     config->max_consecutive_bad_frames = 4u;
     config->acquire_prs_score_threshold = 0.75f;
     config->track_prs_score_threshold = 0.50f;
+    config->cfo_pi_proportional_gain = 0.25f;
+    config->cfo_pi_integral_gain = 0.05f;
+    config->cfo_pi_integral_limit_hz = 4000.0f;
 }
 
 int dab_sync_init(dab_sync_t *sync, const dab_sync_config_t *config) {
@@ -33,7 +38,10 @@ int dab_sync_init(dab_sync_t *sync, const dab_sync_config_t *config) {
     if (sync->config.acquire_prs_score_threshold <= 0.0f ||
         sync->config.acquire_prs_score_threshold > 1.0f ||
         sync->config.track_prs_score_threshold <= 0.0f ||
-        sync->config.track_prs_score_threshold > 1.0f) {
+        sync->config.track_prs_score_threshold > 1.0f ||
+        sync->config.cfo_pi_proportional_gain < 0.0f ||
+        sync->config.cfo_pi_integral_gain < 0.0f ||
+        sync->config.cfo_pi_integral_limit_hz < 0.0f) {
         return -1;
     }
 
@@ -62,7 +70,7 @@ void dab_sync_on_null_candidate(dab_sync_t *sync, const dab_null_event_t *event)
 int dab_sync_on_prs_acquire(dab_sync_t *sync,
                             uint64_t prs_peak_sample,
                             float prs_score,
-                            int32_t coarse_freq_error_hz,
+                            float coarse_freq_error_hz,
                             int32_t carrier_offset_bins) {
     if (sync == 0 || sync->state.mode != DAB_SYNC_MODE_ACQUIRE) {
         return -1;
@@ -78,6 +86,7 @@ int dab_sync_on_prs_acquire(dab_sync_t *sync,
     sync->state.coarse_freq_error_hz = coarse_freq_error_hz;
     sync->state.carrier_offset_bins = carrier_offset_bins;
     sync->state.fine_freq_error_hz = 0.0f;
+    sync->state.cfo_integrator_hz = coarse_freq_error_hz;
     sync->state.good_frames = 1u;
     sync->state.bad_frames = 0u;
     sync->state.mode = DAB_SYNC_MODE_TRACK;
@@ -88,7 +97,7 @@ int dab_sync_on_prs_acquire(dab_sync_t *sync,
 int dab_sync_on_prs_track(dab_sync_t *sync,
                           uint64_t prs_peak_sample,
                           float prs_score,
-                          float fine_freq_error_hz,
+                          float measured_freq_error_hz,
                           int32_t carrier_offset_bins) {
     int64_t predicted;
     int64_t error;
@@ -113,7 +122,16 @@ int dab_sync_on_prs_track(dab_sync_t *sync,
     sync->state.frame_start_sample = prs_peak_sample;
     sync->state.timing_error_samples = (int32_t)error;
     sync->state.carrier_offset_bins = carrier_offset_bins;
-    sync->state.fine_freq_error_hz = fine_freq_error_hz;
+    sync->state.fine_freq_error_hz = measured_freq_error_hz - sync->state.coarse_freq_error_hz;
+    sync->state.cfo_integrator_hz += sync->config.cfo_pi_integral_gain * sync->state.fine_freq_error_hz;
+    if (sync->state.cfo_integrator_hz > sync->config.cfo_pi_integral_limit_hz) {
+        sync->state.cfo_integrator_hz = sync->config.cfo_pi_integral_limit_hz;
+    } else if (sync->state.cfo_integrator_hz < -sync->config.cfo_pi_integral_limit_hz) {
+        sync->state.cfo_integrator_hz = -sync->config.cfo_pi_integral_limit_hz;
+    }
+    sync->state.coarse_freq_error_hz =
+        sync->state.cfo_integrator_hz +
+        (sync->config.cfo_pi_proportional_gain * sync->state.fine_freq_error_hz);
     sync->state.good_frames++;
     sync->state.bad_frames = 0u;
     return 1;

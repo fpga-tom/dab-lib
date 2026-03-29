@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <stdio.h>
 
 #include "dab_api.h"
 
@@ -34,6 +35,7 @@ void SDRBackend_processSNR(void *cbContext, float snr) {
 void SDRBackend_processCFO(void *cbContext, float cfo) {
     (void)cbContext;
     (void)cfo;
+    printf("CFO: %f\n", cfo);
 }
 
 void SDRBackend_processBER(void *cbContext, float BER) {

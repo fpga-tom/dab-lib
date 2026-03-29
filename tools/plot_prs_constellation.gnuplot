@@ -1,6 +1,7 @@
 if (!exists("file")) file = "/tmp/prs_fft.gnuplot.dat"
 if (!exists("frames")) frames = 100
 if (!exists("pause_s")) pause_s = 0.05
+if (!exists("datasets_per_frame")) datasets_per_frame = 151
 if (!exists("start")) start = 0
 if (!exists("stop")) stop = frames - 1
 
@@ -12,7 +13,7 @@ set xlabel "Re"
 set ylabel "Im"
 
 do for [i=start:stop] {
-    dataset = 2 * i
+    dataset = datasets_per_frame * i
     stats file index dataset using 2 nooutput
     x_min = STATS_min
     x_max = STATS_max

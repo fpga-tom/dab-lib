@@ -26,7 +26,7 @@ typedef struct {
     uint64_t prs_symbol_start_sample;
     uint64_t prs_fft_start_sample;
     float prs_score;
-    int32_t coarse_freq_error_hz;
+    float coarse_freq_error_hz;
     int valid;
 } dab_prs_result_t;
 

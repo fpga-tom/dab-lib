@@ -50,7 +50,7 @@ int dab_prs_score_cp_metric_i16(const dab_prs_score_t *score,
                                 const dab_sdr_block_view_t *block,
                                 uint64_t fft_start_sample,
                                 float *score_out,
-                                int32_t *coarse_freq_error_hz_out) {
+                                float *coarse_freq_error_hz_out) {
     const uint32_t guard = score->config.guard_samples;
     const uint32_t fft = score->config.fft_samples;
     const uint64_t block_start = block->sample_index;
@@ -96,11 +96,11 @@ int dab_prs_score_cp_metric_i16(const dab_prs_score_t *score,
 
     score_value = ((corr_re * corr_re) + (corr_im * corr_im)) / (energy_a * energy_b);
     phase = atan2(corr_im, corr_re);
-    cfo_hz = -phase * ((double)score->config.sample_rate /
-                       (2.0 * 3.14159265358979323846 * (double)fft));
+    cfo_hz = -phase * (double)score->config.sample_rate  /
+                       (2.0 * 3.14159265358979323846 * (double)fft);
 
     *score_out = (float)score_value;
-    *coarse_freq_error_hz_out = (int32_t)(cfo_hz >= 0.0 ? (cfo_hz + 0.5) : (cfo_hz - 0.5));
+    *coarse_freq_error_hz_out = (float)cfo_hz;
     return 0;
 }
 
@@ -112,7 +112,7 @@ int dab_prs_score_search_i16(const dab_prs_score_t *score,
     const uint64_t search_end = dab_prs_candidate_search_end_sample(candidate);
     uint64_t fft_start_sample;
     float best_score = -1.0f;
-    int32_t best_cfo = 0;
+    float best_cfo = 0.0f;
 
     if (score == 0 || block == 0 || candidate == 0 || result == 0) {
         return -1;
@@ -125,7 +125,7 @@ int dab_prs_score_search_i16(const dab_prs_score_t *score,
 
     for (fft_start_sample = search_start; fft_start_sample < search_end; ++fft_start_sample) {
         float candidate_score;
-        int32_t candidate_cfo;
+        float candidate_cfo;
 
         if (dab_prs_score_cp_metric_i16(score,
                                         block,

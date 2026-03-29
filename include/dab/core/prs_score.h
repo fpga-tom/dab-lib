@@ -35,7 +35,7 @@ int dab_prs_score_cp_metric_i16(const dab_prs_score_t *score,
                                 const dab_sdr_block_view_t *block,
                                 uint64_t fft_start_sample,
                                 float *score_out,
-                                int32_t *coarse_freq_error_hz_out);
+                                float *coarse_freq_error_hz_out);
 
 int dab_prs_score_search_i16(const dab_prs_score_t *score,
                              const dab_sdr_block_view_t *block,

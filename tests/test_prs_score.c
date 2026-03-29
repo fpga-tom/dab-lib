@@ -59,7 +59,7 @@ void test_prs_score_cp_metric_i16_estimates_positive_cfo_with_positive_sign(void
     int16_t iq[2u * 96u] = {0};
     uint32_t i;
     float metric = 0.0f;
-    int32_t cfo_hz = 0;
+    float cfo_hz = 0.0f;
     const uint32_t sample_rate = 32000u;
     const uint32_t guard = 8u;
     const uint32_t fft = 32u;
@@ -97,7 +97,7 @@ void test_prs_score_cp_metric_i16_estimates_positive_cfo_with_positive_sign(void
                                             &metric,
                                             &cfo_hz) == 0);
     TEST_ASSERT(metric > 0.95f);
-    TEST_ASSERT(cfo_hz == (int32_t)expected_cfo_hz);
+    TEST_ASSERT(fabsf(cfo_hz - expected_cfo_hz) <= 1.0e-3f);
 }
 
 void test_prs_reference_score_f32_distinguishes_match_from_mismatch(void) {

@@ -143,6 +143,96 @@ static int append_fft_gnuplot_frame(FILE *fp,
     return fflush(fp) == 0 ? 0 : -1;
 }
 
+static void phase_correct_prs_for_plot(const dab_ofdm_t *ofdm,
+                                       const float *carrier_i,
+                                       const float *carrier_q,
+                                       float *out_i,
+                                       float *out_q) {
+    double corr_re = 0.0;
+    double corr_im = 0.0;
+    float rot_re;
+    float rot_im;
+    uint32_t carrier;
+
+    if (ofdm == 0 || carrier_i == 0 || carrier_q == 0 || out_i == 0 || out_q == 0) {
+        return;
+    }
+
+    for (carrier = 0u; carrier < DAB_MODE_I_ACTIVE_CARRIERS; ++carrier) {
+        if (carrier == DAB_MODE_I_ACTIVE_CARRIER_HALF) {
+            continue;
+        }
+        corr_re += ((double)carrier_i[carrier] * (double)ofdm->prs_ref_i[carrier]) +
+                   ((double)carrier_q[carrier] * (double)ofdm->prs_ref_q[carrier]);
+        corr_im += ((double)carrier_q[carrier] * (double)ofdm->prs_ref_i[carrier]) -
+                   ((double)carrier_i[carrier] * (double)ofdm->prs_ref_q[carrier]);
+    }
+
+    if (corr_re == 0.0 && corr_im == 0.0) {
+        memcpy(out_i, carrier_i, sizeof(*out_i) * DAB_MODE_I_ACTIVE_CARRIERS);
+        memcpy(out_q, carrier_q, sizeof(*out_q) * DAB_MODE_I_ACTIVE_CARRIERS);
+        return;
+    }
+
+    {
+        const float phase = atan2f((float)corr_im, (float)corr_re);
+        rot_re = cosf(-phase);
+        rot_im = sinf(-phase);
+    }
+
+    for (carrier = 0u; carrier < DAB_MODE_I_ACTIVE_CARRIERS; ++carrier) {
+        const float re = carrier_i[carrier];
+        const float im = carrier_q[carrier];
+
+        out_i[carrier] = (re * rot_re) - (im * rot_im);
+        out_q[carrier] = (re * rot_im) + (im * rot_re);
+    }
+    out_i[DAB_MODE_I_ACTIVE_CARRIER_HALF] = 0.0f;
+    out_q[DAB_MODE_I_ACTIVE_CARRIER_HALF] = 0.0f;
+}
+
+static float decision_directed_phase_error_deg(const float *re, const float *im, uint32_t count) {
+    double corr_re = 0.0;
+    double corr_im = 0.0;
+    uint32_t i;
+
+    if (re == 0 || im == 0 || count == 0u) {
+        return 0.0f;
+    }
+
+    for (i = 0u; i < count; ++i) {
+        const float dec_re = re[i] >= 0.0f ? 1.0f : -1.0f;
+        const float dec_im = im[i] >= 0.0f ? 1.0f : -1.0f;
+
+        corr_re += ((double)re[i] * (double)dec_re) + ((double)im[i] * (double)dec_im);
+        corr_im += ((double)im[i] * (double)dec_re) - ((double)re[i] * (double)dec_im);
+    }
+
+    if (corr_re == 0.0 && corr_im == 0.0) {
+        return 0.0f;
+    }
+
+    return (float)(atan2(corr_im, corr_re) * (180.0 / 3.14159265358979323846));
+}
+
+static void rotate_complex_f32(float *re, float *im, uint32_t count, float phase_deg) {
+    const float phase_rad = phase_deg * (float)(3.14159265358979323846 / 180.0);
+    const float rot_re = cosf(phase_rad);
+    const float rot_im = sinf(phase_rad);
+    uint32_t i;
+
+    if (re == 0 || im == 0) {
+        return;
+    }
+
+    for (i = 0u; i < count; ++i) {
+        const float in_re = re[i];
+        const float in_im = im[i];
+        re[i] = (in_re * rot_re) - (in_im * rot_im);
+        im[i] = (in_re * rot_im) + (in_im * rot_re);
+    }
+}
+
 static const char *default_path(void) {
     const char *env = getenv("DAB_SYNC_FILE_REPLAY_PATH");
 
@@ -220,11 +310,11 @@ static int refine_symbol_fft_start_cp(const dab_prs_score_t *cp_score,
                                       int window_samples,
                                       uint64_t *best_fft_start_out,
                                       float *best_metric_out,
-                                      int32_t *best_cfo_hz_out) {
+                                      float *best_cfo_hz_out) {
     int offset;
     int found = 0;
     float best_metric = -1.0f;
-    int32_t best_cfo_hz = 0;
+    float best_cfo_hz = 0.0f;
     uint64_t best_fft_start = predicted_fft_start;
 
     if (cp_score == 0 || block == 0 || best_fft_start_out == 0 ||
@@ -235,7 +325,7 @@ static int refine_symbol_fft_start_cp(const dab_prs_score_t *cp_score,
     for (offset = -window_samples; offset <= window_samples; ++offset) {
         uint64_t candidate_fft_start;
         float candidate_metric = 0.0f;
-        int32_t candidate_cfo_hz = 0;
+        float candidate_cfo_hz = 0.0f;
 
         if (offset < 0) {
             uint64_t abs_offset = (uint64_t)(-offset);
@@ -496,10 +586,11 @@ int main(int argc, char **argv) {
     uint64_t last_predicted_fft_start = 0u;
     float ref_threshold = env_f32("DAB_SYNC_PROBE_REF_SCORE_THRESHOLD", 0.10f);
     int fft_start_bias_samples = env_i32("DAB_SYNC_PROBE_FFT_START_BIAS_SAMPLES", 0);
-    int use_symbol_cp_cfo = env_i32("DAB_SYNC_PROBE_USE_SYMBOL_CP_CFO", 1);
+    int use_symbol_cp_cfo = env_i32("DAB_SYNC_PROBE_USE_SYMBOL_CP_CFO", 0);
     int symbol_cp_timing_window = env_i32("DAB_SYNC_PROBE_SYMBOL_CP_TIMING_WINDOW", 0);
     int skip_initial_data_symbols = env_i32("DAB_SYNC_PROBE_SKIP_INITIAL_DATA_SYMBOLS", 0);
     int data_symbol_start_offset = env_i32("DAB_SYNC_PROBE_DATA_SYMBOL_START_OFFSET", 0);
+    int apply_data_cpe_correction = env_i32("DAB_SYNC_PROBE_APPLY_DATA_CPE_CORRECTION", 0);
     float prs_fine_timing_limit = env_f32("DAB_SYNC_PROBE_PRS_FINE_TIMING_LIMIT", 32.0f);
     uint32_t sample_rate = env_u32("DAB_SYNC_PROBE_SAMPLE_RATE", 2048000u);
     const char *dump_fic_path = getenv("DAB_SYNC_PROBE_DUMP_FIC_PATH");
@@ -575,6 +666,12 @@ int main(int argc, char **argv) {
                                                       ref_threshold);
     sync_config.track_prs_score_threshold = env_f32("DAB_SYNC_PROBE_TRACK_PRS_SCORE_THRESHOLD",
                                                     ref_threshold * 0.8f);
+    sync_config.cfo_pi_proportional_gain = env_f32("DAB_SYNC_PROBE_CFO_PI_KP",
+                                                   sync_config.cfo_pi_proportional_gain);
+    sync_config.cfo_pi_integral_gain = env_f32("DAB_SYNC_PROBE_CFO_PI_KI",
+                                               sync_config.cfo_pi_integral_gain);
+    sync_config.cfo_pi_integral_limit_hz = env_f32("DAB_SYNC_PROBE_CFO_PI_I_LIMIT_HZ",
+                                                   sync_config.cfo_pi_integral_limit_hz);
     if (dab_sync_init(&sync, &sync_config) != 0) {
         fprintf(stderr, "sync init failed\n");
         return 2;
@@ -722,13 +819,15 @@ int main(int argc, char **argv) {
         {
             dab_prs_result_t coarse = {0};
             dab_prs_reference_score_t ref_score = {0};
+            float prs_plot_i[DAB_MODE_I_ACTIVE_CARRIERS];
+            float prs_plot_q[DAB_MODE_I_ACTIVE_CARRIERS];
             int coarse_rc = dab_prs_score_search_i16(&cp_score, &hist_view, &pending.candidate, &coarse);
 
             if (coarse_rc == 1) {
-                float cfo_for_fft = (float)coarse.coarse_freq_error_hz;
+                float cfo_for_fft = coarse.coarse_freq_error_hz;
                 uint64_t prs_fft_start_sample;
                 if (sync.state.locked && sync.state.bad_frames == 0u) {
-                    cfo_for_fft = (float)sync.state.coarse_freq_error_hz;
+                    cfo_for_fft = sync.state.coarse_freq_error_hz;
                 }
                 if ((int64_t)coarse.prs_fft_start_sample + (int64_t)fft_start_bias_samples < 0) {
                     pending.pending = 0;
@@ -785,18 +884,19 @@ int main(int argc, char **argv) {
                         pending.predicted = 0;
                         continue;
                     }
+                    phase_correct_prs_for_plot(&ofdm, active_i, active_q, prs_plot_i, prs_plot_q);
                     if (prs_fft_gnuplot_fp != 0 &&
                         append_fft_gnuplot_frame(prs_fft_gnuplot_fp,
                                                  prs_fft_gnuplot_frame++,
                                                  "prs",
                                                  prs_fft_start_sample,
-                                                 active_i,
-                                                 active_q,
+                                                 prs_plot_i,
+                                                 prs_plot_q,
                                                  DAB_MODE_I_ACTIVE_CARRIERS) != 0) {
                         fprintf(stderr, "failed to append prs fft gnuplot dump\n");
                         goto cleanup;
                     }
-                    printf("prs fft_start=%llu cp_score=%.6f ref_score=%.6f ifo=%d cfo=%d fine_timing=%.3f applied=%.0f mode=%d locked=%d\n",
+                    printf("prs fft_start=%llu cp_score=%.6f ref_score=%.6f ifo=%d cfo_meas=%.3f fine_timing=%.3f applied=%.0f mode=%d locked=%d\n",
                            (unsigned long long)prs_fft_start_sample,
                            coarse.prs_score,
                            ref_score.score,
@@ -811,7 +911,7 @@ int main(int argc, char **argv) {
                         sync_rc = dab_sync_on_prs_track(&sync,
                                                         prs_fft_start_sample,
                                                         ref_score.score,
-                                                        0.0f,
+                                                        coarse.coarse_freq_error_hz,
                                                         ref_score.carrier_offset_bins);
                     } else {
                         dab_sync_on_null_candidate(&sync, &pending.event);
@@ -829,7 +929,7 @@ int main(int argc, char **argv) {
                     }
 
                     if (ref_score.score >= ref_threshold) {
-                        printf("sync-update rc=%d source=%s frame_start=%llu prs_score=%.6f bad=%u good=%u mode=%d locked=%d timing_error=%d cfo=%d ifo=%d\n",
+                        printf("sync-update rc=%d source=%s frame_start=%llu prs_score=%.6f bad=%u good=%u mode=%d locked=%d timing_error=%d cfo_out=%.3f cfo_pi=%.3f cfo_err=%.3f ifo=%d\n",
                                sync_rc,
                                pending.predicted ? "predict" : "null",
                                (unsigned long long)sync.state.frame_start_sample,
@@ -840,14 +940,18 @@ int main(int argc, char **argv) {
                                sync.state.locked,
                                sync.state.timing_error_samples,
                                sync.state.coarse_freq_error_hz,
+                               sync.state.cfo_integrator_hz,
+                               sync.state.fine_freq_error_hz,
                                sync.state.carrier_offset_bins);
-                    }
+                    /*}
 
-                    {
+                    {*/
                         dab_ofdm_buffers_t ofdm_buffers;
                         dab_ofdm_result_t ofdm_result;
                         uint64_t data_fft_start;
                         dab_tframe_result_t tframe_result;
+                        char data_kind[32];
+                        char diff_kind[32];
                         unsigned int symbol_idx;
 
                         ofdm_buffers.active_i = active_i;
@@ -888,7 +992,7 @@ int main(int argc, char **argv) {
                                              ((uint64_t)logical_symbol_index * acquire_config.symbol_samples);
                             if (symbol_cp_timing_window > 0) {
                                 float cp_metric = 0.0f;
-                                int32_t cp_cfo_hz = 0;
+                                float cp_cfo_hz = 0.0f;
                                 uint64_t refined_fft_start = data_fft_start;
                                 int refine_rc = refine_symbol_fft_start_cp(&cp_score,
                                                                            &hist_view,
@@ -900,7 +1004,7 @@ int main(int argc, char **argv) {
                                 if (refine_rc > 0) {
                                     data_fft_start = refined_fft_start;
                                     if (use_symbol_cp_cfo) {
-                                        symbol_cfo_hz = (float)cp_cfo_hz;
+                                        symbol_cfo_hz = cp_cfo_hz;
                                     }
                                 }
                             }
@@ -911,13 +1015,13 @@ int main(int argc, char **argv) {
                             }
                             if (use_symbol_cp_cfo) {
                                 float cp_metric = 0.0f;
-                                int32_t cp_cfo_hz = 0;
+                                float cp_cfo_hz = 0.0f;
                                 if (dab_prs_score_cp_metric_i16(&cp_score,
                                                                 &hist_view,
                                                                 data_fft_start,
                                                                 &cp_metric,
                                                                 &cp_cfo_hz) == 0) {
-                                    symbol_cfo_hz = (float)cp_cfo_hz;
+                                    symbol_cfo_hz = cp_cfo_hz;
                                 }
                             }
                             if (dab_prs_fft_execute_i16_cfo(&fft,
@@ -950,21 +1054,57 @@ int main(int argc, char **argv) {
                                                         &ofdm_result) != 0) {
                                 break;
                             }
-                            if (symbol_idx == 0u &&
-                                prs_fft_gnuplot_fp != 0 &&
+                            if (prs_fft_gnuplot_fp != 0) {
+                                snprintf(data_kind, sizeof(data_kind), "data%u", symbol_idx);
+                            }
+                            if (prs_fft_gnuplot_fp != 0 &&
                                 append_fft_gnuplot_frame(prs_fft_gnuplot_fp,
                                                          prs_fft_gnuplot_frame++,
-                                                         "data0",
+                                                         data_kind,
                                                          data_fft_start,
                                                          active_i,
                                                          active_q,
                                                          DAB_MODE_I_ACTIVE_CARRIERS) != 0) {
-                                fprintf(stderr, "failed to append first data fft gnuplot dump\n");
+                                fprintf(stderr, "failed to append data fft gnuplot dump\n");
                                 goto cleanup;
+                            }
+                            if (prs_fft_gnuplot_fp != 0 && ofdm_result.have_diff) {
+                                snprintf(diff_kind, sizeof(diff_kind), "diff%u", symbol_idx);
+                                if (append_fft_gnuplot_frame(prs_fft_gnuplot_fp,
+                                                             prs_fft_gnuplot_frame++,
+                                                             diff_kind,
+                                                             data_fft_start,
+                                                             diff_i,
+                                                             diff_q,
+                                                             DAB_MODE_I_DATA_CARRIERS) != 0) {
+                                    fprintf(stderr, "failed to append diff fft gnuplot dump\n");
+                                    goto cleanup;
+                                }
                             }
                             (void)dab_ofdm_extract_active_carriers_mode_i(fft_i, fft_q, raw_active_i, raw_active_q);
                             if (!ofdm_result.have_diff) {
                                 continue;
+                            }
+                            if (ofdm_result.have_softbits) {
+                                const float data_cpe_deg =
+                                    decision_directed_phase_error_deg(deintl_i,
+                                                                      deintl_q,
+                                                                      DAB_MODE_I_DATA_CARRIERS);
+                                if (apply_data_cpe_correction) {
+                                    rotate_complex_f32(deintl_i,
+                                                       deintl_q,
+                                                       DAB_MODE_I_DATA_CARRIERS,
+                                                       -data_cpe_deg);
+                                    if (dab_ofdm_qpsk_soft_decode_mode_i(deintl_i,
+                                                                         deintl_q,
+                                                                         soft_a,
+                                                                         soft_b) != 0) {
+                                        break;
+                                    }
+                                }
+                                printf(" data_cpe_deg=%.3f data_cpe_corr=%d",
+                                       data_cpe_deg,
+                                       apply_data_cpe_correction);
                             }
                             if ((int)symbol_idx < skip_initial_data_symbols) {
                                 continue;
@@ -1093,7 +1233,7 @@ int main(int argc, char **argv) {
         pending.predicted = 0;
     }
 
-    printf("summary blocks=%llu mode=%d locked=%d frame_start=%llu prs_score=%.6f cfo=%d ifo=%d fic_frames=%u fic_total_valid_fibs=%u\n",
+    printf("summary blocks=%llu mode=%d locked=%d frame_start=%llu prs_score=%.6f cfo=%.3f ifo=%d fic_frames=%u fic_total_valid_fibs=%u\n",
            (unsigned long long)blocks_read,
            sync.state.mode,
            sync.state.locked,
