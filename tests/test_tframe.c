@@ -31,10 +31,11 @@ void test_tframe_push_symbol_partitions_fic_and_msc_and_wraps_frame(void) {
     }
 
     TEST_ASSERT(fic[0] == 0);
-    TEST_ASSERT(fic[1] == 0);
+    TEST_ASSERT(fic[1536u] == 0);
     TEST_ASSERT(fic[2u * DAB_TFRAME_SOFTBITS_PER_SYMBOL] == 2);
+    TEST_ASSERT(fic[(2u * DAB_TFRAME_SOFTBITS_PER_SYMBOL) + 1536u] == -2);
     TEST_ASSERT(msc[0] == 3);
-    TEST_ASSERT(msc[1] == -3);
+    TEST_ASSERT(msc[1536u] == -3);
     TEST_ASSERT(result.frame_complete == 1);
     TEST_ASSERT(tframe.symbol_index == 0u);
 }

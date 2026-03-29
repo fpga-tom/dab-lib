@@ -45,6 +45,10 @@ typedef struct {
     dab_ofdm_config_t config;
     float *prev_active_i;
     float *prev_active_q;
+    float channel_i[DAB_MODE_I_ACTIVE_CARRIERS];
+    float channel_q[DAB_MODE_I_ACTIVE_CARRIERS];
+    float prs_ref_i[DAB_MODE_I_ACTIVE_CARRIERS];
+    float prs_ref_q[DAB_MODE_I_ACTIVE_CARRIERS];
     int have_prev_symbol;
     uint16_t deintl_map[DAB_MODE_I_DATA_CARRIERS];
 } dab_ofdm_t;

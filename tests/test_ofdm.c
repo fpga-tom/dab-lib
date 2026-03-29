@@ -1,5 +1,6 @@
 #include "dab/core/ofdm.h"
 
+#include <math.h>
 #include <string.h>
 
 #include "test_support.h"
@@ -35,8 +36,8 @@ void test_ofdm_diff_demodulate_mode_i_multiplies_by_previous_conjugate(void) {
     float prev_q[DAB_MODE_I_ACTIVE_CARRIERS] = {0};
     float curr_i[DAB_MODE_I_ACTIVE_CARRIERS] = {0};
     float curr_q[DAB_MODE_I_ACTIVE_CARRIERS] = {0};
-    float diff_i[DAB_MODE_I_DATA_CARRIERS] = {0};
-    float diff_q[DAB_MODE_I_DATA_CARRIERS] = {0};
+    float diff_i[DAB_MODE_I_ACTIVE_CARRIERS] = {0};
+    float diff_q[DAB_MODE_I_ACTIVE_CARRIERS] = {0};
 
     prev_i[0] = 1.0f;
     prev_q[0] = 1.0f;
@@ -46,6 +47,8 @@ void test_ofdm_diff_demodulate_mode_i_multiplies_by_previous_conjugate(void) {
     TEST_ASSERT(dab_ofdm_diff_demodulate_mode_i(prev_i, prev_q, curr_i, curr_q, diff_i, diff_q) == 0);
     TEST_ASSERT(diff_i[0] == 0.0f);
     TEST_ASSERT(diff_q[0] == -2.0f);
+    TEST_ASSERT(diff_i[DAB_MODE_I_ACTIVE_CARRIER_HALF] == 0.0f);
+    TEST_ASSERT(diff_q[DAB_MODE_I_ACTIVE_CARRIER_HALF] == 0.0f);
 }
 
 void test_ofdm_process_mode_i_prs_seeds_reference_and_first_data_symbol_produces_diff(void) {
@@ -58,8 +61,8 @@ void test_ofdm_process_mode_i_prs_seeds_reference_and_first_data_symbol_produces
     float active_q[DAB_MODE_I_ACTIVE_CARRIERS] = {0};
     float prev_i[DAB_MODE_I_ACTIVE_CARRIERS] = {0};
     float prev_q[DAB_MODE_I_ACTIVE_CARRIERS] = {0};
-    float diff_i[DAB_MODE_I_DATA_CARRIERS] = {0};
-    float diff_q[DAB_MODE_I_DATA_CARRIERS] = {0};
+    float diff_i[DAB_MODE_I_ACTIVE_CARRIERS] = {0};
+    float diff_q[DAB_MODE_I_ACTIVE_CARRIERS] = {0};
     float deintl_i[DAB_MODE_I_DATA_CARRIERS] = {0};
     float deintl_q[DAB_MODE_I_DATA_CARRIERS] = {0};
     int8_t soft_a[DAB_MODE_I_DATA_CARRIERS] = {0};
@@ -78,7 +81,8 @@ void test_ofdm_process_mode_i_prs_seeds_reference_and_first_data_symbol_produces
     buffers.soft_a = soft_a;
     buffers.soft_b = soft_b;
 
-    fft_i[DAB_MODE_I_FFT_SAMPLES - DAB_MODE_I_ACTIVE_CARRIER_HALF] = 1.0f;
+    fft_i[DAB_MODE_I_FFT_SAMPLES - DAB_MODE_I_ACTIVE_CARRIER_HALF] = 2.0f * ofdm.prs_ref_i[0];
+    fft_q[DAB_MODE_I_FFT_SAMPLES - DAB_MODE_I_ACTIVE_CARRIER_HALF] = 2.0f * ofdm.prs_ref_q[0];
     TEST_ASSERT(dab_ofdm_process_mode_i(&ofdm,
                                         fft_i,
                                         fft_q,
@@ -88,8 +92,11 @@ void test_ofdm_process_mode_i_prs_seeds_reference_and_first_data_symbol_produces
                                         &result) == 0);
     TEST_ASSERT(result.have_diff == 0);
     TEST_ASSERT(ofdm.have_prev_symbol == 1);
+    TEST_ASSERT(fabsf(active_i[0] - ofdm.prs_ref_i[0]) < 1.0e-4f);
+    TEST_ASSERT(fabsf(active_q[0] - ofdm.prs_ref_q[0]) < 1.0e-4f);
 
-    fft_q[DAB_MODE_I_FFT_SAMPLES - DAB_MODE_I_ACTIVE_CARRIER_HALF] = 1.0f;
+    fft_i[DAB_MODE_I_FFT_SAMPLES - DAB_MODE_I_ACTIVE_CARRIER_HALF] = -2.0f * ofdm.prs_ref_q[0];
+    fft_q[DAB_MODE_I_FFT_SAMPLES - DAB_MODE_I_ACTIVE_CARRIER_HALF] = 2.0f * ofdm.prs_ref_i[0];
     TEST_ASSERT(dab_ofdm_process_mode_i(&ofdm,
                                         fft_i,
                                         fft_q,
@@ -100,11 +107,11 @@ void test_ofdm_process_mode_i_prs_seeds_reference_and_first_data_symbol_produces
     TEST_ASSERT(result.have_diff == 1);
     TEST_ASSERT(result.have_softbits == 1);
     TEST_ASSERT(ofdm.have_prev_symbol == 1);
-    TEST_ASSERT(diff_i[0] == 1.0f);
-    TEST_ASSERT(diff_q[0] == 1.0f);
+    TEST_ASSERT(fabsf(diff_i[0] - 0.0f) < 1.0e-3f);
+    TEST_ASSERT(fabsf(diff_q[0] - 1.0f) < 1.0e-3f);
 
-    fft_i[DAB_MODE_I_FFT_SAMPLES - DAB_MODE_I_ACTIVE_CARRIER_HALF] = 1.0f;
-    fft_q[DAB_MODE_I_FFT_SAMPLES - DAB_MODE_I_ACTIVE_CARRIER_HALF] = -1.0f;
+    fft_i[DAB_MODE_I_FFT_SAMPLES - DAB_MODE_I_ACTIVE_CARRIER_HALF] = 2.0f * ofdm.prs_ref_i[0];
+    fft_q[DAB_MODE_I_FFT_SAMPLES - DAB_MODE_I_ACTIVE_CARRIER_HALF] = -2.0f * ofdm.prs_ref_q[0];
     TEST_ASSERT(dab_ofdm_process_mode_i(&ofdm,
                                         fft_i,
                                         fft_q,
@@ -114,8 +121,8 @@ void test_ofdm_process_mode_i_prs_seeds_reference_and_first_data_symbol_produces
                                         &result) == 0);
     TEST_ASSERT(result.have_diff == 1);
     TEST_ASSERT(result.have_softbits == 1);
-    TEST_ASSERT(diff_i[0] == 0.0f);
-    TEST_ASSERT(diff_q[0] == -2.0f);
+    TEST_ASSERT(fabsf(diff_i[0] - 0.0f) < 1.0e-3f);
+    TEST_ASSERT(fabsf(diff_q[0] + 1.0f) < 1.0e-3f);
 }
 
 void test_ofdm_qpsk_soft_decode_mode_i_scales_to_signed_softbits(void) {

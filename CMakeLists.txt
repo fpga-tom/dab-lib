@@ -32,6 +32,7 @@ add_library(dab
     src/core/receiver.c
     src/core/sync.c
     src/core/tframe.c
+    src/core/viterbi47_port.c
     src/hal/sdr_device.c
     src/hal/sdrplay/sdrplay_api.c
     src/hal/sdrplay/sdrplay_adapter.c
@@ -70,9 +71,199 @@ add_executable(dab_sdrplay_sync_probe
 
 target_link_libraries(dab_sdrplay_sync_probe PRIVATE dab)
 
+add_executable(dab_sync_file_replay
+    tools/dab_sync_file_replay.c
+)
+
+target_link_libraries(dab_sync_file_replay PRIVATE dab)
+
 add_executable(dab_gen_mode_i_prs_table
     tools/gen_mode_i_prs_table.c
 )
+
+add_executable(dab_fic_dump_analyze
+    tools/dab_fic_dump_analyze.c
+)
+
+target_link_libraries(dab_fic_dump_analyze PRIVATE dab)
+
+add_executable(dab_fic_symbol_dump_analyze
+    tools/dab_fic_symbol_dump_analyze.c
+)
+
+target_link_libraries(dab_fic_symbol_dump_analyze PRIVATE dab)
+
+add_executable(dab_fic_carrier_dump_analyze
+    tools/dab_fic_carrier_dump_analyze.c
+)
+
+target_link_libraries(dab_fic_carrier_dump_analyze PRIVATE dab)
+
+add_executable(dab_fic_diff_dump_analyze
+    tools/dab_fic_diff_dump_analyze.c
+)
+
+target_link_libraries(dab_fic_diff_dump_analyze PRIVATE dab)
+
+add_executable(dab_fic_active_dump_analyze
+    tools/dab_fic_active_dump_analyze.c
+)
+
+target_link_libraries(dab_fic_active_dump_analyze PRIVATE dab)
+
+add_executable(dab_fic_raw_active_dump_analyze
+    tools/dab_fic_raw_active_dump_analyze.c
+)
+
+target_link_libraries(dab_fic_raw_active_dump_analyze PRIVATE dab)
+target_include_directories(dab_fic_raw_active_dump_analyze PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
+
+add_executable(dab_fic_block_dump_analyze
+    tools/dab_fic_block_dump_analyze.c
+)
+
+target_link_libraries(dab_fic_block_dump_analyze PRIVATE dab)
+
+add_executable(dab_fic_input_compare
+    tools/dab_fic_input_compare.c
+)
+
+target_link_libraries(dab_fic_input_compare PRIVATE dab)
+
+add_executable(dab_fic_unpuncture_compare
+    tools/dab_fic_unpuncture_compare.c
+)
+
+target_link_libraries(dab_fic_unpuncture_compare PRIVATE dab)
+
+add_executable(dab_fic_postviterbi_compare
+    tools/dab_fic_postviterbi_compare.c
+)
+
+target_link_libraries(dab_fic_postviterbi_compare PRIVATE dab)
+
+add_executable(dab_prs_active_compare
+    tools/dab_prs_active_compare.c
+)
+
+target_include_directories(dab_prs_active_compare PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
+
+add_executable(dab_prs_fft_compare
+    tools/dab_prs_fft_compare.c
+)
+
+target_link_libraries(dab_prs_fft_compare PRIVATE dab)
+target_include_directories(dab_prs_fft_compare PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
+
+add_executable(dab_prs_ref_compare
+    tools/dab_prs_ref_compare.c
+)
+
+target_link_libraries(dab_prs_ref_compare PRIVATE dab)
+
+add_executable(dab_ofdm_chain_compare
+    tools/dab_ofdm_chain_compare.c
+)
+
+target_link_libraries(dab_ofdm_chain_compare PRIVATE dab)
+target_include_directories(dab_ofdm_chain_compare PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
+
+add_executable(dab_fic_ref_compare
+    tools/dab_fic_ref_compare.c
+)
+
+target_link_libraries(dab_fic_ref_compare PRIVATE dab)
+
+add_executable(dab_fic_qpsk_compare
+    tools/dab_fic_qpsk_compare.c
+)
+
+target_link_libraries(dab_fic_qpsk_compare PRIVATE dab)
+
+add_executable(dab_ref_impl_replay
+    tools/ref_impl_replay.c
+    tools/ref_impl_backend_stubs.c
+    ref-impl/dabplus/approx.c
+    ref-impl/dabplus/audio_stub.c
+    ref-impl/dabplus/backend_defaults.c
+    ref-impl/dabplus/cagc.c
+    ref-impl/dabplus/cc.c
+    ref-impl/dabplus/ci.c
+    ref-impl/dabplus/dab.c
+    ref-impl/dabplus/dab_fic.c
+    ref-impl/dabplus/fec.c
+    ref-impl/dabplus/fi.c
+    ref-impl/dabplus/fib.c
+    ref-impl/dabplus/fs.c
+    ref-impl/dabplus/gf.c
+    ref-impl/dabplus/mod.c
+    ref-impl/dabplus/ofdm.c
+    ref-impl/dabplus/pilot.c
+    ref-impl/dabplus/rs_255_245_5.c
+    ref-impl/dabplus/sdrplay_api_stub.c
+    ref-impl/dabplus/softbit_fft.c
+    ref-impl/dabplus/util.c
+    ref-impl/dabplus/viterbi47_port.c
+)
+
+target_include_directories(dab_ref_impl_replay PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/ref-impl/dabplus
+)
+
+add_executable(dab_ref_symbol_dump
+    tools/dab_ref_symbol_dump.c
+    tools/ref_impl_backend_stubs.c
+    ref-impl/dabplus/approx.c
+    ref-impl/dabplus/audio_stub.c
+    ref-impl/dabplus/backend_defaults.c
+    ref-impl/dabplus/cagc.c
+    ref-impl/dabplus/cc.c
+    ref-impl/dabplus/ci.c
+    ref-impl/dabplus/dab.c
+    ref-impl/dabplus/dab_fic.c
+    ref-impl/dabplus/fec.c
+    ref-impl/dabplus/fi.c
+    ref-impl/dabplus/fib.c
+    ref-impl/dabplus/fs.c
+    ref-impl/dabplus/gf.c
+    ref-impl/dabplus/mod.c
+    ref-impl/dabplus/ofdm.c
+    ref-impl/dabplus/pilot.c
+    ref-impl/dabplus/rs_255_245_5.c
+    ref-impl/dabplus/sdrplay_api_stub.c
+    ref-impl/dabplus/softbit_fft.c
+    ref-impl/dabplus/util.c
+    ref-impl/dabplus/viterbi47_port.c
+)
+
+target_include_directories(dab_ref_symbol_dump PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/ref-impl/dabplus
+)
+
+add_executable(dab_symbol_dump_compare
+    tools/dab_symbol_dump_compare.c
+)
+
+add_executable(dab_carrier_dump_compare
+    tools/dab_carrier_dump_compare.c
+)
+
+add_executable(dab_diff_dump_compare
+    tools/dab_diff_dump_compare.c
+)
+
+add_executable(dab_active_dump_compare
+    tools/dab_active_dump_compare.c
+)
+
+add_executable(dab_raw_active_compare
+    tools/dab_raw_active_compare.c
+)
+
+add_executable(dab_fft_offset_scan_compare
+    tools/dab_fft_offset_scan_compare.c
+)
+target_link_libraries(dab_fft_offset_scan_compare PRIVATE dab m)
 
 target_compile_definitions(dab
     PRIVATE
@@ -121,6 +312,7 @@ if(DAB_BUILD_TESTS)
         tests/test_simd.c
         tests/test_prs_acquire.c
         tests/test_prs_fft.c
+        tests/test_prs_ref.c
         tests/test_prs_score.c
         tests/test_prs_template.c
         tests/test_sync.c

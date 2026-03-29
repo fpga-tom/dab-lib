@@ -52,6 +52,54 @@ void test_prs_score_search_i16_finds_cp_aligned_fft_start(void) {
     TEST_ASSERT(result.prs_score > 0.99f);
 }
 
+void test_prs_score_cp_metric_i16_estimates_positive_cfo_with_positive_sign(void) {
+    dab_prs_score_t score;
+    dab_prs_score_config_t config;
+    dab_sdr_block_view_t block;
+    int16_t iq[2u * 96u] = {0};
+    uint32_t i;
+    float metric = 0.0f;
+    int32_t cfo_hz = 0;
+    const uint32_t sample_rate = 32000u;
+    const uint32_t guard = 8u;
+    const uint32_t fft = 32u;
+    const uint32_t symbol_start = 20u;
+    const uint32_t fft_start = symbol_start + guard;
+    const float expected_cfo_hz = 250.0f;
+
+    dab_prs_score_default_config(&config);
+    config.sample_rate = sample_rate;
+    config.guard_samples = guard;
+    config.fft_samples = fft;
+    TEST_ASSERT(dab_prs_score_init(&score, &config) == 0);
+
+    for (i = 0u; i < fft; ++i) {
+        const double phase = 2.0 * 3.14159265358979323846 * (double)expected_cfo_hz *
+                             (double)(fft_start + i) / (double)sample_rate;
+        iq[2u * (fft_start + i)] = (int16_t)lrint(120.0 * cos(phase));
+        iq[(2u * (fft_start + i)) + 1u] = (int16_t)lrint(120.0 * sin(phase));
+    }
+    for (i = 0u; i < guard; ++i) {
+        const double phase = 2.0 * 3.14159265358979323846 * (double)expected_cfo_hz *
+                             (double)(symbol_start + i) / (double)sample_rate;
+        iq[2u * (symbol_start + i)] = (int16_t)lrint(120.0 * cos(phase));
+        iq[(2u * (symbol_start + i)) + 1u] = (int16_t)lrint(120.0 * sin(phase));
+    }
+
+    block.iq_interleaved = iq;
+    block.sample_count = 96u;
+    block.sample_index = 1000u;
+    block.timestamp_ns = 0u;
+
+    TEST_ASSERT(dab_prs_score_cp_metric_i16(&score,
+                                            &block,
+                                            1000u + fft_start,
+                                            &metric,
+                                            &cfo_hz) == 0);
+    TEST_ASSERT(metric > 0.95f);
+    TEST_ASSERT(cfo_hz == (int32_t)expected_cfo_hz);
+}
+
 void test_prs_reference_score_f32_distinguishes_match_from_mismatch(void) {
     const float ref_i[4] = {1.0f, 0.0f, -1.0f, 0.0f};
     const float ref_q[4] = {0.0f, 1.0f, 0.0f, -1.0f};
@@ -169,4 +217,32 @@ void test_prs_score_symbol_i16_mode_i_diff_rejects_missing_window(void) {
                                                      fft_i,
                                                      fft_q,
                                                      &score) != 0);
+}
+
+void test_prs_reference_bins_diff_f32_estimates_fine_timing_error(void) {
+    const dab_prs_template_bin_t bins[] = {
+        {10u, 1.0f, 0.0f},
+        {11u, 0.0f, 1.0f},
+        {12u, -1.0f, 0.0f},
+        {13u, 0.0f, -1.0f}
+    };
+    float rx_i[2048] = {0};
+    float rx_q[2048] = {0};
+    dab_prs_reference_score_t score;
+    uint32_t i;
+    const float timing_error = 3.25f;
+
+    for (i = 0u; i < 4u; ++i) {
+        const double phase = -2.0 * 3.14159265358979323846 *
+                             ((double)bins[i].bin * (double)timing_error / 2048.0);
+        const double rot_re = cos(phase);
+        const double rot_im = sin(phase);
+
+        rx_i[bins[i].bin] = (float)(((double)bins[i].re * rot_re) - ((double)bins[i].im * rot_im));
+        rx_q[bins[i].bin] = (float)(((double)bins[i].re * rot_im) + ((double)bins[i].im * rot_re));
+    }
+
+    TEST_ASSERT(dab_prs_score_reference_bins_diff_f32(rx_i, rx_q, bins, 4u, 0, 0, &score) == 0);
+    TEST_ASSERT(score.score > 0.99f);
+    TEST_ASSERT(fabsf(score.fine_timing_error_samples - timing_error) < 0.05f);
 }

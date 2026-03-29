@@ -1,3 +1,4 @@
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,6 +30,110 @@ typedef struct {
     dab_null_event_t event;
     dab_prs_candidate_t candidate;
 } pending_candidate_t;
+
+typedef struct {
+    char magic[8];
+    uint32_t symbol_count;
+    int8_t softbits[DAB_TFRAME_FIC_SYMBOLS][2][1536];
+} fic_symbol_dump_t;
+
+typedef struct {
+    char magic[8];
+    uint32_t symbol_count;
+    float carriers[DAB_TFRAME_FIC_SYMBOLS][2][1536];
+} fic_carrier_dump_t;
+
+typedef struct {
+    char magic[8];
+    uint32_t symbol_count;
+    float carriers[DAB_TFRAME_FIC_SYMBOLS][2][1537];
+} fic_diff_dump_t;
+
+typedef struct {
+    char magic[8];
+    uint32_t symbol_count;
+    float carriers[DAB_TFRAME_FIC_SYMBOLS + 1u][2][1537];
+} fic_active_dump_t;
+
+typedef struct {
+    char magic[8];
+    uint32_t symbol_count;
+    float carriers[DAB_TFRAME_FIC_SYMBOLS + 1u][2][1537];
+} fic_raw_active_dump_t;
+
+typedef struct {
+    char magic[8];
+    uint32_t fft_samples;
+    float bins[2][2048];
+} prs_fft_dump_t;
+
+static uint64_t apply_prs_fine_timing(uint64_t fft_start_sample,
+                                      float fine_timing_error_samples,
+                                      float max_abs_timing_error_samples,
+                                      float *applied_timing_error_samples) {
+    const float abs_timing = fabsf(fine_timing_error_samples);
+
+    if (applied_timing_error_samples != 0) {
+        *applied_timing_error_samples = 0.0f;
+    }
+    if (!(abs_timing > 0.0f) || abs_timing > max_abs_timing_error_samples) {
+        return fft_start_sample;
+    }
+
+    {
+        const int32_t correction = (int32_t)lroundf(fine_timing_error_samples);
+
+        if (correction == 0) {
+            return fft_start_sample;
+        }
+        if (applied_timing_error_samples != 0) {
+            *applied_timing_error_samples = (float)correction;
+        }
+        if (correction < 0) {
+            return fft_start_sample + (uint64_t)(-correction);
+        }
+        if (fft_start_sample < (uint64_t)correction) {
+            *applied_timing_error_samples = 0.0f;
+            return fft_start_sample;
+        }
+        return fft_start_sample - (uint64_t)correction;
+    }
+}
+
+static int append_fft_gnuplot_frame(FILE *fp,
+                                    uint32_t frame_index,
+                                    const char *kind,
+                                    uint64_t fft_start_sample,
+                                    const float *carrier_i,
+                                    const float *carrier_q,
+                                    uint32_t carrier_count) {
+    uint32_t carrier;
+
+    if (fp == 0 || carrier_i == 0 || carrier_q == 0 || carrier_count == 0u) {
+        return -1;
+    }
+
+    if (fprintf(fp,
+                "# frame=%u kind=%s fft_start_sample=%llu\n",
+                frame_index,
+                kind != 0 ? kind : "unknown",
+                (unsigned long long)fft_start_sample) < 0) {
+        return -1;
+    }
+    for (carrier = 0u; carrier < carrier_count; ++carrier) {
+        const float re = carrier_i[carrier];
+        const float im = carrier_q[carrier];
+        const float mag = sqrtf((re * re) + (im * im));
+
+        if (fprintf(fp, "%u %.9g %.9g %.9g\n", carrier, re, im, mag) < 0) {
+            return -1;
+        }
+    }
+    if (fputs("\n\n", fp) == EOF) {
+        return -1;
+    }
+    return fflush(fp) == 0 ? 0 : -1;
+}
 
 static void init_predicted_candidate(const dab_prs_acquire_t *acquire,
                                      const dab_sync_t *sync,
@@ -120,6 +225,53 @@ static dab_sdrplay_gain_mode_t env_gain_mode(const char *name, dab_sdrplay_gain_
         return DAB_SDRPLAY_GAIN_MODE_MANUAL;
     }
     return fallback;
+}
+
+static int write_binary_file(const char *path, const void *data, size_t size) {
+    FILE *fp;
+
+    if (path == 0 || path[0] == '\0' || data == 0) {
+        return -1;
+    }
+
+    fp = fopen(path, "wb");
+    if (fp == 0) {
+        return -1;
+    }
+    if (fwrite(data, 1u, size, fp) != size) {
+        fclose(fp);
+        return -1;
+    }
+    fclose(fp);
+    return 0;
+}
+
+static int append_ref_samples_file(FILE *fp,
+                                   float **scratch_iq,
+                                   uint32_t *scratch_capacity_samples,
+                                   const dab_sdr_block_view_t *block) {
+    uint32_t i;
+
+    if (fp == 0 || scratch_iq == 0 || scratch_capacity_samples == 0 || block == 0 ||
+        block->iq_interleaved == 0) {
+        return -1;
+    }
+
+    if (*scratch_capacity_samples < block->sample_count) {
+        float *next = (float *)realloc(*scratch_iq, sizeof(float) * 2u * block->sample_count);
+        if (next == 0) {
+            return -1;
+        }
+        *scratch_iq = next;
+        *scratch_capacity_samples = block->sample_count;
+    }
+
+    for (i = 0u; i < block->sample_count; ++i) {
+        (*scratch_iq)[2u * i] = (float)block->iq_interleaved[2u * i];
+        (*scratch_iq)[2u * i + 1u] = (float)block->iq_interleaved[2u * i + 1u];
+    }
+
+    return fwrite(*scratch_iq, sizeof(float) * 2u, block->sample_count, fp) == block->sample_count ? 0 : -1;
 }
 
 static int history_init(history_buffer_t *history, uint32_t capacity_samples) {
@@ -258,6 +410,8 @@ int main(void) {
     float *fft_q = 0;
     float *active_i = 0;
     float *active_q = 0;
+    float *raw_active_i = 0;
+    float *raw_active_q = 0;
     float *prev_active_i = 0;
     float *prev_active_q = 0;
     float *diff_i = 0;
@@ -274,6 +428,34 @@ int main(void) {
     unsigned int dropped_blocks = 0u;
     uint64_t last_predicted_fft_start = 0u;
     float ref_threshold = env_f32("DAB_SYNC_PROBE_REF_SCORE_THRESHOLD", 0.10f);
+    float prs_fine_timing_limit = env_f32("DAB_SYNC_PROBE_PRS_FINE_TIMING_LIMIT", 32.0f);
+    const char *dump_ref_samples_path = getenv("DAB_SYNC_PROBE_DUMP_REF_SAMPLES_PATH");
+    const char *dump_fic_path = getenv("DAB_SYNC_PROBE_DUMP_FIC_PATH");
+    const char *dump_fic_symbols_path = getenv("DAB_SYNC_PROBE_DUMP_FIC_SYMBOLS_PATH");
+    const char *dump_fic_carriers_path = getenv("DAB_SYNC_PROBE_DUMP_FIC_CARRIERS_PATH");
+    const char *dump_fic_diff_path = getenv("DAB_SYNC_PROBE_DUMP_FIC_DIFF_PATH");
+    const char *dump_fic_active_path = getenv("DAB_SYNC_PROBE_DUMP_FIC_ACTIVE_PATH");
+    const char *dump_fic_raw_active_path = getenv("DAB_SYNC_PROBE_DUMP_FIC_RAW_ACTIVE_PATH");
+    const char *dump_prs_fft_path = getenv("DAB_SYNC_PROBE_DUMP_PRS_FFT_PATH");
+    const char *dump_prs_fft_gnuplot_path = getenv("DAB_SYNC_PROBE_DUMP_PRS_FFT_GNUPLOT_PATH");
+    int fic_dump_written = 0;
+    int fic_symbols_dump_written = 0;
+    int fic_carriers_dump_written = 0;
+    int fic_diff_dump_written = 0;
+    int fic_active_dump_written = 0;
+    int fic_raw_active_dump_written = 0;
+    int prs_fft_dump_written = 0;
+    fic_symbol_dump_t fic_symbol_dump = { { 'D', 'A', 'B', 'F', 'I', 'C', '1', '\0' }, DAB_TFRAME_FIC_SYMBOLS, {{{0}}} };
+    fic_carrier_dump_t fic_carrier_dump = { { 'D', 'A', 'B', 'F', 'I', 'C', '2', '\0' }, DAB_TFRAME_FIC_SYMBOLS, {{{0}}} };
+    fic_diff_dump_t fic_diff_dump = { { 'D', 'A', 'B', 'F', 'I', 'C', '3', '\0' }, DAB_TFRAME_FIC_SYMBOLS, {{{0}}} };
+    fic_active_dump_t fic_active_dump = { { 'D', 'A', 'B', 'F', 'I', 'C', '4', '\0' }, DAB_TFRAME_FIC_SYMBOLS + 1u, {{{0}}} };
+    fic_raw_active_dump_t fic_raw_active_dump = { { 'D', 'A', 'B', 'F', 'I', 'C', '5', '\0' }, DAB_TFRAME_FIC_SYMBOLS + 1u, {{{0}}} };
+    prs_fft_dump_t prs_fft_dump = { { 'D', 'A', 'B', 'P', 'R', 'S', 'F', '\0' }, 2048u, {{0}} };
+    FILE *ref_samples_fp = 0;
+    FILE *prs_fft_gnuplot_fp = 0;
+    float *ref_samples_scratch = 0;
+    uint32_t ref_samples_scratch_capacity = 0u;
+    uint32_t prs_fft_gnuplot_frame = 0u;
     int rc = 1;
 
     dab_sdrplay_default_config(&device_config);
@@ -357,10 +539,12 @@ int main(void) {
     fft_q = (float *)calloc(acquire_config.fft_samples, sizeof(*fft_q));
     active_i = (float *)calloc(DAB_MODE_I_ACTIVE_CARRIERS, sizeof(*active_i));
     active_q = (float *)calloc(DAB_MODE_I_ACTIVE_CARRIERS, sizeof(*active_q));
+    raw_active_i = (float *)calloc(DAB_MODE_I_ACTIVE_CARRIERS, sizeof(*raw_active_i));
+    raw_active_q = (float *)calloc(DAB_MODE_I_ACTIVE_CARRIERS, sizeof(*raw_active_q));
     prev_active_i = (float *)calloc(DAB_MODE_I_ACTIVE_CARRIERS, sizeof(*prev_active_i));
     prev_active_q = (float *)calloc(DAB_MODE_I_ACTIVE_CARRIERS, sizeof(*prev_active_q));
-    diff_i = (float *)calloc(DAB_MODE_I_DATA_CARRIERS, sizeof(*diff_i));
-    diff_q = (float *)calloc(DAB_MODE_I_DATA_CARRIERS, sizeof(*diff_q));
+    diff_i = (float *)calloc(DAB_MODE_I_ACTIVE_CARRIERS, sizeof(*diff_i));
+    diff_q = (float *)calloc(DAB_MODE_I_ACTIVE_CARRIERS, sizeof(*diff_q));
     deintl_i = (float *)calloc(DAB_MODE_I_DATA_CARRIERS, sizeof(*deintl_i));
     deintl_q = (float *)calloc(DAB_MODE_I_DATA_CARRIERS, sizeof(*deintl_q));
     soft_a = (int8_t *)calloc(DAB_MODE_I_DATA_CARRIERS, sizeof(*soft_a));
@@ -369,6 +553,7 @@ int main(void) {
     msc_softbits = (int8_t *)calloc(DAB_TFRAME_MSC_SOFTBITS, sizeof(*msc_softbits));
     frame_softbits = (int8_t *)calloc(DAB_TFRAME_TOTAL_SOFTBITS, sizeof(*frame_softbits));
     if (fft_i == 0 || fft_q == 0 || active_i == 0 || active_q == 0 ||
+        raw_active_i == 0 || raw_active_q == 0 ||
         prev_active_i == 0 || prev_active_q == 0 || diff_i == 0 || diff_q == 0 ||
         deintl_i == 0 || deintl_q == 0 || soft_a == 0 || soft_b == 0 ||
         fic_softbits == 0 || msc_softbits == 0 || frame_softbits == 0) {
@@ -388,6 +573,21 @@ int main(void) {
     if (history_init(&history, env_u32("DAB_SYNC_PROBE_HISTORY_SAMPLES", 262144u)) != 0) {
         fprintf(stderr, "history init failed\n");
         goto cleanup;
+    }
+
+    if (dump_ref_samples_path != 0 && dump_ref_samples_path[0] != '\0') {
+        ref_samples_fp = fopen(dump_ref_samples_path, "wb");
+        if (ref_samples_fp == 0) {
+            fprintf(stderr, "failed to open ref samples dump: %s\n", dump_ref_samples_path);
+            goto cleanup;
+        }
+    }
+    if (dump_prs_fft_gnuplot_path != 0 && dump_prs_fft_gnuplot_path[0] != '\0') {
+        prs_fft_gnuplot_fp = fopen(dump_prs_fft_gnuplot_path, "wb");
+        if (prs_fft_gnuplot_fp == 0) {
+            fprintf(stderr, "failed to open prs fft gnuplot dump: %s\n", dump_prs_fft_gnuplot_path);
+            goto cleanup;
+        }
     }
 
     fprintf(stderr, "open device\n");
@@ -429,6 +629,14 @@ int main(void) {
 
         if (stream->vtbl->read(stream, &src_block) != DAB_SDR_STATUS_OK) {
             fprintf(stderr, "read failed at block %u\n", block_num);
+            goto cleanup;
+        }
+        if (ref_samples_fp != 0 &&
+            append_ref_samples_file(ref_samples_fp,
+                                    &ref_samples_scratch,
+                                    &ref_samples_scratch_capacity,
+                                    &src_block) != 0) {
+            fprintf(stderr, "failed to write ref samples dump\n");
             goto cleanup;
         }
         history_append(&history, &src_block);
@@ -504,36 +712,79 @@ int main(void) {
                                                              fft_q,
                                                              &ref_score) == 0) {
                     int sync_rc;
+                    float applied_prs_timing = 0.0f;
+                    uint64_t prs_fft_start_sample =
+                        apply_prs_fine_timing(coarse.prs_fft_start_sample,
+                                              ref_score.fine_timing_error_samples,
+                                              prs_fine_timing_limit,
+                                              &applied_prs_timing);
+                    if (prs_fft_start_sample != coarse.prs_fft_start_sample &&
+                        dab_prs_score_symbol_i16_mode_i_diff_cfo(&fft,
+                                                                 &hist_view,
+                                                                 prs_fft_start_sample,
+                                                                 cfo_for_fft,
+                                                                 fft_i,
+                                                                 fft_q,
+                                                                 &ref_score) != 0) {
+                        pending.pending = 0;
+                        pending.predicted = 0;
+                        continue;
+                    }
                     if (ref_score.carrier_offset_bins != 0) {
                         (void)dab_prs_fft_apply_bin_shift(fft_i,
                                                           fft_q,
                                                           acquire_config.fft_samples,
                                                           -ref_score.carrier_offset_bins);
                     }
+                    if (!prs_fft_dump_written &&
+                        dump_prs_fft_path != 0 &&
+                        dump_prs_fft_path[0] != '\0') {
+                        memcpy(prs_fft_dump.bins[0], fft_i, sizeof(prs_fft_dump.bins[0]));
+                        memcpy(prs_fft_dump.bins[1], fft_q, sizeof(prs_fft_dump.bins[1]));
+                        if (write_binary_file(dump_prs_fft_path,
+                                              &prs_fft_dump,
+                                              sizeof(prs_fft_dump)) == 0) {
+                            prs_fft_dump_written = 1;
+                            fprintf(stderr, "prs_fft_dump=%s\n", dump_prs_fft_path);
+                        }
+                    }
                     if (dab_ofdm_extract_active_carriers_mode_i(fft_i, fft_q, active_i, active_q) != 0) {
                         pending.pending = 0;
                         pending.predicted = 0;
                         continue;
                     }
-                    printf("prs fft_start=%llu cp_score=%.6f ref_score=%.6f ifo=%d cfo=%d mode=%d locked=%d\n",
-                           (unsigned long long)coarse.prs_fft_start_sample,
+                    if (prs_fft_gnuplot_fp != 0 &&
+                        append_fft_gnuplot_frame(prs_fft_gnuplot_fp,
+                                                 prs_fft_gnuplot_frame++,
+                                                 "prs",
+                                                 prs_fft_start_sample,
+                                                 active_i,
+                                                 active_q,
+                                                 DAB_MODE_I_ACTIVE_CARRIERS) != 0) {
+                        fprintf(stderr, "failed to append prs fft gnuplot dump\n");
+                        goto cleanup;
+                    }
+                    printf("prs fft_start=%llu cp_score=%.6f ref_score=%.6f ifo=%d cfo=%d fine_timing=%.3f applied=%.0f mode=%d locked=%d\n",
+                           (unsigned long long)prs_fft_start_sample,
                            coarse.prs_score,
                            ref_score.score,
                            ref_score.carrier_offset_bins,
                            coarse.coarse_freq_error_hz,
+                           ref_score.fine_timing_error_samples,
+                           applied_prs_timing,
                            sync.state.mode,
                            sync.state.locked);
 
                     if (sync.state.locked) {
                         sync_rc = dab_sync_on_prs_track(&sync,
-                                                        coarse.prs_fft_start_sample,
+                                                        prs_fft_start_sample,
                                                         ref_score.score,
                                                         0.0f,
                                                         ref_score.carrier_offset_bins);
                     } else {
                         dab_sync_on_null_candidate(&sync, &pending.event);
                         sync_rc = dab_sync_on_prs_acquire(&sync,
-                                                          coarse.prs_fft_start_sample,
+                                                          prs_fft_start_sample,
                                                           ref_score.score,
                                                           coarse.coarse_freq_error_hz,
                                                           ref_score.carrier_offset_bins);
@@ -587,13 +838,29 @@ int main(void) {
                         (void)dab_ofdm_process_mode_i(&ofdm,
                                                       fft_i,
                                                       fft_q,
-                                                      coarse.prs_fft_start_sample,
+                                                      prs_fft_start_sample,
                                                       DAB_OFDM_SYMBOL_PRS,
                                                       &ofdm_buffers,
                                                       &ofdm_result);
+                        (void)dab_ofdm_extract_active_carriers_mode_i(fft_i,
+                                                                      fft_q,
+                                                                      raw_active_i,
+                                                                      raw_active_q);
+                        memcpy(fic_active_dump.carriers[0][0],
+                               active_i,
+                               sizeof(active_i[0]) * 1537u);
+                        memcpy(fic_active_dump.carriers[0][1],
+                               active_q,
+                               sizeof(active_q[0]) * 1537u);
+                        memcpy(fic_raw_active_dump.carriers[0][0],
+                               raw_active_i,
+                               sizeof(raw_active_i[0]) * 1537u);
+                        memcpy(fic_raw_active_dump.carriers[0][1],
+                               raw_active_q,
+                               sizeof(raw_active_q[0]) * 1537u);
 
                         for (symbol_idx = 0u; symbol_idx < DAB_TFRAME_TOTAL_SYMBOLS; ++symbol_idx) {
-                            data_fft_start = coarse.prs_fft_start_sample +
+                            data_fft_start = prs_fft_start_sample +
                                              ((uint64_t)(symbol_idx + 1u) * acquire_config.symbol_samples);
                             if (!history_contains_sample_range(&history,
                                                                data_fft_start,
@@ -614,6 +881,13 @@ int main(void) {
                                                                   acquire_config.fft_samples,
                                                                   -ref_score.carrier_offset_bins);
                             }
+                            if (symbol_idx == 0u &&
+                                dab_ofdm_extract_active_carriers_mode_i(fft_i,
+                                                                        fft_q,
+                                                                        raw_active_i,
+                                                                        raw_active_q) != 0) {
+                                break;
+                            }
                             if (dab_ofdm_process_mode_i(&ofdm,
                                                         fft_i,
                                                         fft_q,
@@ -623,6 +897,22 @@ int main(void) {
                                                         &ofdm_result) != 0) {
                                 break;
                             }
+                            if (symbol_idx == 0u &&
+                                prs_fft_gnuplot_fp != 0 &&
+                                append_fft_gnuplot_frame(prs_fft_gnuplot_fp,
+                                                         prs_fft_gnuplot_frame++,
+                                                         "data0",
+                                                         data_fft_start,
+                                                         active_i,
+                                                         active_q,
+                                                         DAB_MODE_I_ACTIVE_CARRIERS) != 0) {
+                                fprintf(stderr, "failed to append first data fft gnuplot dump\n");
+                                goto cleanup;
+                            }
+                            (void)dab_ofdm_extract_active_carriers_mode_i(fft_i,
+                                                                          fft_q,
+                                                                          raw_active_i,
+                                                                          raw_active_q);
                             if (ofdm_result.have_diff) {
                                 const float diff_power = (diff_i[0] * diff_i[0]) + (diff_q[0] * diff_q[0]);
                                 printf("ofdm data_fft_start=%llu diff0_re=%.6f diff0_im=%.6f diff0_power=%.6f",
@@ -641,6 +931,38 @@ int main(void) {
                                                                soft_a,
                                                                soft_b,
                                                                &tframe_result) == 0) {
+                                        if (tframe_result.symbol_index < DAB_TFRAME_FIC_SYMBOLS) {
+                                            memcpy(fic_active_dump.carriers[tframe_result.symbol_index + 1u][0],
+                                                   active_i,
+                                                   sizeof(active_i[0]) * 1537u);
+                                            memcpy(fic_active_dump.carriers[tframe_result.symbol_index + 1u][1],
+                                                   active_q,
+                                                   sizeof(active_q[0]) * 1537u);
+                                            memcpy(fic_raw_active_dump.carriers[tframe_result.symbol_index + 1u][0],
+                                                   raw_active_i,
+                                                   sizeof(raw_active_i[0]) * 1537u);
+                                            memcpy(fic_raw_active_dump.carriers[tframe_result.symbol_index + 1u][1],
+                                                   raw_active_q,
+                                                   sizeof(raw_active_q[0]) * 1537u);
+                                            memcpy(fic_diff_dump.carriers[tframe_result.symbol_index][0],
+                                                   diff_i,
+                                                   sizeof(diff_i[0]) * 1537u);
+                                            memcpy(fic_diff_dump.carriers[tframe_result.symbol_index][1],
+                                                   diff_q,
+                                                   sizeof(diff_q[0]) * 1537u);
+                                            memcpy(fic_carrier_dump.carriers[tframe_result.symbol_index][0],
+                                                   deintl_i,
+                                                   sizeof(deintl_i[0]) * 1536u);
+                                            memcpy(fic_carrier_dump.carriers[tframe_result.symbol_index][1],
+                                                   deintl_q,
+                                                   sizeof(deintl_q[0]) * 1536u);
+                                            memcpy(fic_symbol_dump.softbits[tframe_result.symbol_index][0],
+                                                   soft_a,
+                                                   sizeof(soft_a[0]) * 1536u);
+                                            memcpy(fic_symbol_dump.softbits[tframe_result.symbol_index][1],
+                                                   soft_b,
+                                                   sizeof(soft_b[0]) * 1536u);
+                                        }
                                         printf(" tframe_symbol=%u frame_complete=%d",
                                                tframe_result.symbol_index,
                                                tframe_result.frame_complete);
@@ -653,13 +975,67 @@ int main(void) {
                                                                       tframe_result.frame_start_sample,
                                                                       msc_softbits,
                                                                       DAB_TFRAME_MSC_SOFTBITS) == 0) {
-                                                printf(" fic_frames=%u fic_edge=(%d,%d) msc_frames=%u msc_edge=(%d,%d)",
+                                                printf(" fic_frames=%u fic_blocks=%u fic_valid_fibs=%u msc_frames=%u msc_edge=(%d,%d)",
                                                        fic.frames_seen,
-                                                       (int)fic.first_softbit,
-                                                       (int)fic.last_softbit,
+                                                       fic.fic_blocks_decoded_last_frame,
+                                                       fic.valid_fibs_last_frame,
                                                        msc.frames_seen,
                                                        (int)msc.first_softbit,
                                                        (int)msc.last_softbit);
+                                                if (!fic_dump_written &&
+                                                    dump_fic_path != 0 &&
+                                                    dump_fic_path[0] != '\0' &&
+                                                    write_binary_file(dump_fic_path,
+                                                                      fic_softbits,
+                                                                      sizeof(*fic_softbits) * DAB_TFRAME_FIC_SOFTBITS) == 0) {
+                                                    fic_dump_written = 1;
+                                                    printf(" fic_dump=%s", dump_fic_path);
+                                                }
+                                                if (!fic_symbols_dump_written &&
+                                                    dump_fic_symbols_path != 0 &&
+                                                    dump_fic_symbols_path[0] != '\0' &&
+                                                    write_binary_file(dump_fic_symbols_path,
+                                                                      &fic_symbol_dump,
+                                                                      sizeof(fic_symbol_dump)) == 0) {
+                                                    fic_symbols_dump_written = 1;
+                                                    printf(" fic_symbols_dump=%s", dump_fic_symbols_path);
+                                                }
+                                                if (!fic_carriers_dump_written &&
+                                                    dump_fic_carriers_path != 0 &&
+                                                    dump_fic_carriers_path[0] != '\0' &&
+                                                    write_binary_file(dump_fic_carriers_path,
+                                                                      &fic_carrier_dump,
+                                                                      sizeof(fic_carrier_dump)) == 0) {
+                                                    fic_carriers_dump_written = 1;
+                                                    printf(" fic_carriers_dump=%s", dump_fic_carriers_path);
+                                                }
+                                                if (!fic_diff_dump_written &&
+                                                    dump_fic_diff_path != 0 &&
+                                                    dump_fic_diff_path[0] != '\0' &&
+                                                    write_binary_file(dump_fic_diff_path,
+                                                                      &fic_diff_dump,
+                                                                      sizeof(fic_diff_dump)) == 0) {
+                                                    fic_diff_dump_written = 1;
+                                                    printf(" fic_diff_dump=%s", dump_fic_diff_path);
+                                                }
+                                                if (!fic_active_dump_written &&
+                                                    dump_fic_active_path != 0 &&
+                                                    dump_fic_active_path[0] != '\0' &&
+                                                    write_binary_file(dump_fic_active_path,
+                                                                      &fic_active_dump,
+                                                                      sizeof(fic_active_dump)) == 0) {
+                                                    fic_active_dump_written = 1;
+                                                    printf(" fic_active_dump=%s", dump_fic_active_path);
+                                                }
+                                                if (!fic_raw_active_dump_written &&
+                                                    dump_fic_raw_active_path != 0 &&
+                                                    dump_fic_raw_active_path[0] != '\0' &&
+                                                    write_binary_file(dump_fic_raw_active_path,
+                                                                      &fic_raw_active_dump,
+                                                                      sizeof(fic_raw_active_dump)) == 0) {
+                                                    fic_raw_active_dump_written = 1;
+                                                    printf(" fic_raw_active_dump=%s", dump_fic_raw_active_path);
+                                                }
                                             }
                                         }
                                     }
@@ -689,6 +1065,13 @@ int main(void) {
     rc = 0;
 
 cleanup:
+    if (prs_fft_gnuplot_fp != 0) {
+        fclose(prs_fft_gnuplot_fp);
+    }
+    if (ref_samples_fp != 0) {
+        fclose(ref_samples_fp);
+    }
+    free(ref_samples_scratch);
     if (stream != 0) {
         (void)stream->vtbl->stop(stream);
         dab_sdr_stream_close(stream);
@@ -708,6 +1091,8 @@ cleanup:
     free(diff_i);
     free(prev_active_q);
     free(prev_active_i);
+    free(raw_active_q);
+    free(raw_active_i);
     free(active_q);
     free(active_i);
     free(fft_q);

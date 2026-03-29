@@ -4,6 +4,16 @@
 
 #include "prs_template_mode_i_table.h"
 
+#define DAB_TWO_PI_D 6.28318530717958647692
+
+static float dab_prs_score_phase_to_timing_samples(double phase, uint32_t fft_samples) {
+    if (fft_samples == 0u) {
+        return 0.0f;
+    }
+
+    return (float)(phase * ((double)fft_samples / DAB_TWO_PI_D));
+}
+
 void dab_prs_score_default_config(dab_prs_score_config_t *config) {
     if (config == 0) {
         return;
@@ -36,11 +46,11 @@ void dab_prs_score_reset(dab_prs_score_t *score) {
     (void)score;
 }
 
-static int dab_prs_score_candidate_score_i16(const dab_prs_score_t *score,
-                                             const dab_sdr_block_view_t *block,
-                                             uint64_t fft_start_sample,
-                                             float *score_out,
-                                             int32_t *coarse_freq_error_hz_out) {
+int dab_prs_score_cp_metric_i16(const dab_prs_score_t *score,
+                                const dab_sdr_block_view_t *block,
+                                uint64_t fft_start_sample,
+                                float *score_out,
+                                int32_t *coarse_freq_error_hz_out) {
     const uint32_t guard = score->config.guard_samples;
     const uint32_t fft = score->config.fft_samples;
     const uint64_t block_start = block->sample_index;
@@ -86,8 +96,8 @@ static int dab_prs_score_candidate_score_i16(const dab_prs_score_t *score,
 
     score_value = ((corr_re * corr_re) + (corr_im * corr_im)) / (energy_a * energy_b);
     phase = atan2(corr_im, corr_re);
-    cfo_hz = phase * ((double)score->config.sample_rate /
-                      (2.0 * 3.14159265358979323846 * (double)fft));
+    cfo_hz = -phase * ((double)score->config.sample_rate /
+                       (2.0 * 3.14159265358979323846 * (double)fft));
 
     *score_out = (float)score_value;
     *coarse_freq_error_hz_out = (int32_t)(cfo_hz >= 0.0 ? (cfo_hz + 0.5) : (cfo_hz - 0.5));
@@ -117,11 +127,11 @@ int dab_prs_score_search_i16(const dab_prs_score_t *score,
         float candidate_score;
         int32_t candidate_cfo;
 
-        if (dab_prs_score_candidate_score_i16(score,
-                                              block,
-                                              fft_start_sample,
-                                              &candidate_score,
-                                              &candidate_cfo) != 0) {
+        if (dab_prs_score_cp_metric_i16(score,
+                                        block,
+                                        fft_start_sample,
+                                        &candidate_score,
+                                        &candidate_cfo) != 0) {
             continue;
         }
 
@@ -187,6 +197,7 @@ int dab_prs_score_reference_f32(const float *rx_i,
     result->signal_energy = (float)signal_energy;
     result->reference_energy = (float)reference_energy;
     result->carrier_offset_bins = 0;
+    result->fine_timing_error_samples = 0.0f;
     return 0;
 }
 
@@ -237,6 +248,7 @@ int dab_prs_score_reference_template_f32(const float *rx_i,
     result->signal_energy = (float)signal_energy;
     result->reference_energy = (float)reference_energy;
     result->carrier_offset_bins = 0;
+    result->fine_timing_error_samples = 0.0f;
     return 0;
 }
 
@@ -317,6 +329,8 @@ int dab_prs_score_reference_bins_diff_f32(const float *rx_i,
                 best.signal_energy = (float)signal_energy;
                 best.reference_energy = (float)reference_energy;
                 best.carrier_offset_bins = offset;
+                best.fine_timing_error_samples =
+                    dab_prs_score_phase_to_timing_samples(atan2(corr_im, corr_re), 2048u);
             }
         }
     }

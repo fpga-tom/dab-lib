@@ -1,6 +1,9 @@
 #include "dab/core/ofdm.h"
 
 #include <math.h>
+#include <string.h>
+
+#include "prs_template_mode_i_table.h"
 
 static void dab_ofdm_build_deinterleave_map(uint16_t *map) {
     uint32_t p = 0u;
@@ -16,6 +19,96 @@ static void dab_ofdm_build_deinterleave_map(uint16_t *map) {
                 break;
             }
         }
+    }
+}
+
+static int dab_ofdm_active_index_from_fft_bin(uint32_t bin, uint32_t *index) {
+    if (index == 0) {
+        return -1;
+    }
+
+    if (bin >= (DAB_MODE_I_FFT_SAMPLES - DAB_MODE_I_ACTIVE_CARRIER_HALF)) {
+        *index = bin - (DAB_MODE_I_FFT_SAMPLES - DAB_MODE_I_ACTIVE_CARRIER_HALF);
+        return 0;
+    }
+    if (bin <= DAB_MODE_I_ACTIVE_CARRIER_HALF) {
+        *index = DAB_MODE_I_ACTIVE_CARRIER_HALF + bin;
+        return 0;
+    }
+
+    return -1;
+}
+
+static void dab_ofdm_init_prs_reference(dab_ofdm_t *ofdm) {
+    uint32_t i;
+
+    if (ofdm == 0) {
+        return;
+    }
+
+    memset(ofdm->prs_ref_i, 0, sizeof(ofdm->prs_ref_i));
+    memset(ofdm->prs_ref_q, 0, sizeof(ofdm->prs_ref_q));
+    for (i = 0u; i < DAB_PRS_MODE_I_BIN_COUNT; ++i) {
+        uint32_t active_index = 0u;
+
+        if (dab_ofdm_active_index_from_fft_bin(DAB_PRS_MODE_I_BINS[i].bin, &active_index) == 0 &&
+            active_index < DAB_MODE_I_ACTIVE_CARRIERS) {
+            ofdm->prs_ref_i[active_index] = DAB_PRS_MODE_I_BINS[i].re;
+            ofdm->prs_ref_q[active_index] = DAB_PRS_MODE_I_BINS[i].im;
+        }
+    }
+    ofdm->prs_ref_i[DAB_MODE_I_ACTIVE_CARRIER_HALF] = 0.0f;
+    ofdm->prs_ref_q[DAB_MODE_I_ACTIVE_CARRIER_HALF] = 0.0f;
+}
+
+static void dab_ofdm_estimate_channel_from_prs(dab_ofdm_t *ofdm,
+                                               const float *rx_i,
+                                               const float *rx_q) {
+    uint32_t i;
+
+    if (ofdm == 0 || rx_i == 0 || rx_q == 0) {
+        return;
+    }
+
+    for (i = 0u; i < DAB_MODE_I_ACTIVE_CARRIERS; ++i) {
+        const float ref_re = ofdm->prs_ref_i[i];
+        const float ref_im = ofdm->prs_ref_q[i];
+        const float sym_re = rx_i[i];
+        const float sym_im = rx_q[i];
+        const float denom = (sym_re * sym_re) + (sym_im * sym_im);
+
+        if (i == DAB_MODE_I_ACTIVE_CARRIER_HALF || denom < 1.0e-12f) {
+            ofdm->channel_i[i] = 0.0f;
+            ofdm->channel_q[i] = 0.0f;
+            continue;
+        }
+
+        ofdm->channel_i[i] = ((ref_re * sym_re) + (ref_im * sym_im)) / denom;
+        ofdm->channel_q[i] = ((ref_im * sym_re) - (ref_re * sym_im)) / denom;
+    }
+}
+
+static void dab_ofdm_equalize_active(dab_ofdm_t *ofdm, float *active_i, float *active_q) {
+    uint32_t i;
+
+    if (ofdm == 0 || active_i == 0 || active_q == 0) {
+        return;
+    }
+
+    for (i = 0u; i < DAB_MODE_I_ACTIVE_CARRIERS; ++i) {
+        const float a_re = active_i[i];
+        const float a_im = active_q[i];
+        const float c_re = ofdm->channel_i[i];
+        const float c_im = ofdm->channel_q[i];
+
+        if (i == DAB_MODE_I_ACTIVE_CARRIER_HALF) {
+            active_i[i] = 0.0f;
+            active_q[i] = 0.0f;
+            continue;
+        }
+
+        active_i[i] = (a_re * c_re) - (a_im * c_im);
+        active_q[i] = (a_re * c_im) + (a_im * c_re);
     }
 }
 
@@ -47,6 +140,9 @@ int dab_ofdm_init(dab_ofdm_t *ofdm, const dab_ofdm_config_t *config) {
     ofdm->prev_active_i = 0;
     ofdm->prev_active_q = 0;
     ofdm->have_prev_symbol = 0;
+    memset(ofdm->channel_i, 0, sizeof(ofdm->channel_i));
+    memset(ofdm->channel_q, 0, sizeof(ofdm->channel_q));
+    dab_ofdm_init_prs_reference(ofdm);
     dab_ofdm_build_deinterleave_map(ofdm->deintl_map);
 
     return 0;
@@ -57,6 +153,8 @@ void dab_ofdm_reset(dab_ofdm_t *ofdm) {
         return;
     }
     ofdm->have_prev_symbol = 0;
+    memset(ofdm->channel_i, 0, sizeof(ofdm->channel_i));
+    memset(ofdm->channel_q, 0, sizeof(ofdm->channel_q));
 }
 
 int dab_ofdm_extract_active_carriers_mode_i(const float *fft_i,
@@ -99,6 +197,14 @@ int dab_ofdm_process_mode_i(dab_ofdm_t *ofdm,
                                                 buffers->active_i,
                                                 buffers->active_q) != 0) {
         return -1;
+    }
+
+    if (kind == DAB_OFDM_SYMBOL_PRS) {
+        dab_ofdm_estimate_channel_from_prs(ofdm, buffers->active_i, buffers->active_q);
+        memcpy(buffers->active_i, ofdm->prs_ref_i, sizeof(ofdm->prs_ref_i));
+        memcpy(buffers->active_q, ofdm->prs_ref_q, sizeof(ofdm->prs_ref_q));
+    } else {
+        dab_ofdm_equalize_active(ofdm, buffers->active_i, buffers->active_q);
     }
 
     result->fft_start_sample = fft_start_sample;
@@ -146,11 +252,6 @@ int dab_ofdm_process_mode_i(dab_ofdm_t *ofdm,
         }
         ofdm->have_prev_symbol = 1;
     }
-
-    if (kind == DAB_OFDM_SYMBOL_PRS) {
-        return 0;
-    }
-
     return 0;
 }
 
@@ -166,7 +267,12 @@ int dab_ofdm_diff_demodulate_mode_i(const float *prev_i,
         return -1;
     }
 
-    for (i = 0u; i < DAB_MODE_I_DATA_CARRIERS; ++i) {
+    for (i = 0u; i < DAB_MODE_I_ACTIVE_CARRIERS; ++i) {
+        if (i == DAB_MODE_I_ACTIVE_CARRIER_HALF) {
+            diff_i[i] = 0.0f;
+            diff_q[i] = 0.0f;
+            continue;
+        }
         const float a_re = curr_i[i];
         const float a_im = curr_q[i];
         const float b_re = prev_i[i];
@@ -214,8 +320,8 @@ int dab_ofdm_qpsk_soft_decode_mode_i(const float *deintl_i,
         const float im = deintl_q[i];
         const float mag = sqrtf((re * re) + (im * im));
         float scale = -127.5f;
-        float a;
-        float b;
+        int a;
+        int b;
 
         if (mag > 0.0f) {
             scale /= mag;
@@ -223,21 +329,22 @@ int dab_ofdm_qpsk_soft_decode_mode_i(const float *deintl_i,
             scale = 0.0f;
         }
 
-        a = re * scale;
-        b = im * scale;
-        if (a > 127.0f) {
-            a = 127.0f;
-        } else if (a < -127.0f) {
-            a = -127.0f;
+        /* Match ref-impl qpsk_rx: negative scaling and truncation toward zero. */
+        a = (int)(re * scale);
+        b = (int)(im * scale);
+        if (a > 127) {
+            a = 127;
+        } else if (a < -128) {
+            a = -128;
         }
-        if (b > 127.0f) {
-            b = 127.0f;
-        } else if (b < -127.0f) {
-            b = -127.0f;
+        if (b > 127) {
+            b = 127;
+        } else if (b < -128) {
+            b = -128;
         }
 
-        soft_a[i] = (int8_t)(a >= 0.0f ? (a + 0.5f) : (a - 0.5f));
-        soft_b[i] = (int8_t)(b >= 0.0f ? (b + 0.5f) : (b - 0.5f));
+        soft_a[i] = (int8_t)a;
+        soft_b[i] = (int8_t)b;
     }
 
     return 0;

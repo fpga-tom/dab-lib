@@ -21,6 +21,7 @@ typedef struct {
     float signal_energy;
     float reference_energy;
     int32_t carrier_offset_bins;
+    float fine_timing_error_samples;
 } dab_prs_reference_score_t;
 
 typedef struct {
@@ -30,6 +31,11 @@ typedef struct {
 void dab_prs_score_default_config(dab_prs_score_config_t *config);
 int dab_prs_score_init(dab_prs_score_t *score, const dab_prs_score_config_t *config);
 void dab_prs_score_reset(dab_prs_score_t *score);
+int dab_prs_score_cp_metric_i16(const dab_prs_score_t *score,
+                                const dab_sdr_block_view_t *block,
+                                uint64_t fft_start_sample,
+                                float *score_out,
+                                int32_t *coarse_freq_error_hz_out);
 
 int dab_prs_score_search_i16(const dab_prs_score_t *score,
                              const dab_sdr_block_view_t *block,

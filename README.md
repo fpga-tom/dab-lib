@@ -152,3 +152,123 @@ Next:
 - phase-reference detection after null
 - coarse symbol timing
 - coarse frequency offset estimation
+
+## FIC Dump Debugging
+
+You can dump one tracked FIC frame from the sync probe and analyze it offline.
+
+Capture one FIC frame from live hardware:
+
+```sh
+DAB_SDRPLAY_USE_REAL=1 \
+DAB_SYNC_PROBE_CENTER_FREQ_HZ=213360000 \
+DAB_SYNC_PROBE_GAIN_MODE=manual \
+DAB_SYNC_PROBE_DUMP_FIC_PATH=/tmp/fic_frame.bin \
+./build-release/dab_sdrplay_sync_probe
+```
+
+When the first full frame completes, the probe writes raw FIC softbits to the path in
+`DAB_SYNC_PROBE_DUMP_FIC_PATH`.
+
+Then analyze the dump locally:
+
+```sh
+./build/dab_fic_dump_analyze /tmp/fic_frame.bin
+```
+
+The analyzer tries a few likely symbol-layout interpretations:
+- planar `a[0..1535], b[0..1535]`
+- interleaved `a0,b0,a1,b1,...`
+- swapped `a` / `b` halves
+- each of the above with inverted softbit polarity
+
+For each variant it reports:
+- total valid FIB CRCs
+- per-block best polarity / byte-pack convention seen by the FIC decoder
+
+You can also dump the first three raw FIC OFDM softbit symbols before frame assembly:
+
+```sh
+DAB_SDRPLAY_USE_REAL=1 \
+DAB_SYNC_PROBE_CENTER_FREQ_HZ=213360000 \
+DAB_SYNC_PROBE_GAIN_MODE=manual \
+DAB_SYNC_PROBE_DUMP_FIC_SYMBOLS_PATH=/tmp/fic_symbols.bin \
+./build-release/dab_sdrplay_sync_probe
+```
+
+Then try `a/b` swap and polarity mappings offline:
+
+```sh
+./build/dab_fic_symbol_dump_analyze /tmp/fic_symbols.bin
+```
+
+This reports CRC counts for:
+- `a,b`
+- `-a,b`
+- `a,-b`
+- `-a,-b`
+- `b,a`
+- `-b,a`
+- `b,-a`
+- `-b,-a`
+
+You can also dump the deinterleaved differential carriers for the first 3 FIC symbols:
+
+```sh
+DAB_SDRPLAY_USE_REAL=1 \
+DAB_SYNC_PROBE_CENTER_FREQ_HZ=213360000 \
+DAB_SYNC_PROBE_GAIN_MODE=manual \
+DAB_SYNC_PROBE_DUMP_FIC_CARRIERS_PATH=/tmp/fic_carriers.bin \
+./build-release/dab_sdrplay_sync_probe
+```
+
+Then try QPSK-axis/sign mappings directly from those carriers:
+
+```sh
+./build/dab_fic_carrier_dump_analyze /tmp/fic_carriers.bin
+```
+
+This tests the common slicer conventions:
+- `-re,-im`
+- `re,-im`
+- `-re,im`
+- `re,im`
+- `-im,-re`
+- `im,-re`
+- `-im,re`
+- `im,re`
+
+You can also dump the raw 1537 differential carriers before frequency deinterleave:
+
+```sh
+DAB_SDRPLAY_USE_REAL=1 \
+DAB_SYNC_PROBE_CENTER_FREQ_HZ=213360000 \
+DAB_SYNC_PROBE_GAIN_MODE=manual \
+DAB_SYNC_PROBE_DUMP_FIC_DIFF_PATH=/tmp/fic_diff.bin \
+./build-release/dab_sdrplay_sync_probe
+```
+
+Then try carrier-order plus QPSK-mapping variants:
+
+```sh
+./build/dab_fic_diff_dump_analyze /tmp/fic_diff.bin
+```
+
+This tests:
+- identity order with center removed
+- reversed identity order
+- current frequency-deinterleave order
+- reversed frequency-deinterleave order
+
+against the same 8 QPSK sign/axis mappings.
+
+
+
+Useful commands:
+
+./build-release/dab_ref_impl_replay /tmp/samples.bin
+
+DAB_SDRPLAY_USE_REAL=1 DAB_SYNC_PROBE_CENTER_FREQ_HZ=213360000 DAB_SYNC_PROBE_GAIN_MODE=agc DAB_SYNC_PROBE_FAST_WINDOW_SAMPLES=128 DAB_SYNC_PROBE_SLOW_WINDOW_SAMPLES=8192 DAB_SYNC_PROBE_SAMPLE_DECIMATION=4 DAB_SYNC_PROBE_ENTER_RATIO_THRESHOLD=0.35 DAB_SYNC_PROBE_EXIT_RATIO_THRESHOLD=0.55 DAB_SYNC_PROBE_BLOCKS=5000 DAB_SYNC_PROBE_DUMP_REF_SAMPLES_PATH=/tmp/samples.bin ./build-release/dab_sdrplay_sync_probe
+
+gnuplot -e "file='/tmp/prs_fft.gnuplot.dat'; frames=200" /Users/tomaskrajco/src/scratchpad/dab-lib/tools/plot_prs_fft.gnuplot
+

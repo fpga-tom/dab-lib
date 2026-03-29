@@ -42,8 +42,8 @@ int dab_tframe_push_symbol(dab_tframe_t *tframe,
 
     dst = tframe->buffers.frame_softbits + (tframe->symbol_index * DAB_TFRAME_SOFTBITS_PER_SYMBOL);
     for (i = 0u; i < 1536u; ++i) {
-        dst[2u * i] = soft_a[i];
-        dst[(2u * i) + 1u] = soft_b[i];
+        dst[i] = soft_a[i];
+        dst[i + 1536u] = soft_b[i];
     }
 
     tframe->symbol_index++;
