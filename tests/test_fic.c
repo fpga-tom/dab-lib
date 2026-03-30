@@ -11,6 +11,40 @@
 #define TEST_FIC_UNPUNCTURED_BITS 3096u
 #define TEST_FIC_DEPARTITIONED_BITS 2304u
 
+static uint16_t test_fic_crc16_ccitt(const uint8_t *buf, size_t len);
+
+static void test_fic_build_fib_with_payload(uint8_t fib[DAB_FIC_BYTES_PER_FIB],
+                                            const uint8_t *payload,
+                                            uint32_t payload_size) {
+    uint16_t crc;
+
+    memset(fib, 0xFF, DAB_FIC_BYTES_PER_FIB - 2u);
+    if (payload != 0 && payload_size > 0u) {
+        memcpy(fib, payload, payload_size);
+    }
+    crc = test_fic_crc16_ccitt(fib, DAB_FIC_BYTES_PER_FIB - 2u);
+    fib[30] = (uint8_t)(crc >> 8u);
+    fib[31] = (uint8_t)(crc & 0xFFu);
+}
+
+static void test_fic_write_bits(uint8_t *buf,
+                                uint32_t *bit_pos,
+                                uint32_t value,
+                                uint32_t bit_count) {
+    uint32_t i;
+
+    for (i = 0u; i < bit_count; ++i) {
+        const uint32_t src_shift = bit_count - 1u - i;
+        const uint32_t byte_index = (*bit_pos) >> 3u;
+        const uint32_t dst_shift = 7u - ((*bit_pos) & 7u);
+
+        if (((value >> src_shift) & 1u) != 0u) {
+            buf[byte_index] |= (uint8_t)(1u << dst_shift);
+        }
+        (*bit_pos)++;
+    }
+}
+
 static uint8_t test_fic_mother_code(uint8_t bit, uint8_t *state) {
     const uint8_t x0 = (uint8_t)((((*state) >> 5) & 1u) ^
                                  (((*state) >> 4) & 1u) ^
@@ -239,6 +273,75 @@ void test_fic_process_frame_reports_crc_errors(void) {
     TEST_ASSERT(state.valid_fibs_last_frame < DAB_FIC_TOTAL_FIBS_PER_FRAME);
 }
 
+void test_fic_cursor_iterates_figs_and_stops_on_padding(void) {
+    uint8_t fib_payload[30] = {0};
+    dab_fic_cursor_t cursor;
+    dab_fic_fig_t fig;
+
+    fib_payload[0] = 0x03u;
+    fib_payload[1] = 0x00u;
+    fib_payload[2] = 0x12u;
+    fib_payload[3] = 0x34u;
+    fib_payload[4] = 0xFFu;
+
+    dab_fic_cursor_init(&cursor, fib_payload, sizeof(fib_payload));
+    TEST_ASSERT(dab_fic_cursor_next_fig(&cursor, &fig) == 1);
+    TEST_ASSERT(fig.type == 0u);
+    TEST_ASSERT(fig.length == 3u);
+    TEST_ASSERT(fig.payload[0] == 0x00u);
+    TEST_ASSERT(dab_fic_cursor_next_fig(&cursor, &fig) == 0);
+}
+
+void test_fic_parse_payload_populates_repo(void) {
+    dab_fic_repo_t repo = {0};
+    uint8_t fig0_ext0[] = {0x03u, 0x00u, 0x12u, 0x34u};
+    uint8_t fig0_ext1[5] = {0x04u, 0x01u, 0x00u, 0x00u, 0x00u};
+    uint8_t fig0_ext2[] = {0x06u, 0x02u, 0x12u, 0x34u, 0x21u, 0x05u, 0x0Eu};
+    uint8_t fig1_ext1[] = {
+        0x35u, 0x01u, 0x12u, 0x34u,
+        'T', 'E', 'S', 'T', ' ', 'S', 'E', 'R',
+        'V', 'I', 'C', 'E', ' ', ' ', ' ', ' ',
+        0xF0u, 0x00u
+    };
+    uint8_t payload0[30] = {0};
+    uint8_t payload1[30] = {0};
+    uint32_t bit_pos = 16u;
+
+    test_fic_write_bits(fig0_ext1, &bit_pos, 3u, 6u);
+    test_fic_write_bits(fig0_ext1, &bit_pos, 100u, 10u);
+    test_fic_write_bits(fig0_ext1, &bit_pos, 0u, 1u);
+    test_fic_write_bits(fig0_ext1, &bit_pos, 1u, 1u);
+    test_fic_write_bits(fig0_ext1, &bit_pos, 17u, 6u);
+
+    memcpy(payload0, fig0_ext0, sizeof(fig0_ext0));
+    memcpy(payload0 + sizeof(fig0_ext0), fig0_ext1, sizeof(fig0_ext1));
+    payload0[sizeof(fig0_ext0) + sizeof(fig0_ext1)] = 0xFFu;
+
+    memcpy(payload1, fig0_ext2, sizeof(fig0_ext2));
+    memcpy(payload1 + sizeof(fig0_ext2), fig1_ext1, sizeof(fig1_ext1));
+    payload1[sizeof(fig0_ext2) + sizeof(fig1_ext1)] = 0xFFu;
+
+    TEST_ASSERT(dab_fic_parse_fib_payload(&repo, payload0, sizeof(payload0)) == 0);
+    TEST_ASSERT(dab_fic_parse_fib_payload(&repo, payload1, sizeof(payload1)) == 0);
+    TEST_ASSERT(repo.current.eid == 0x1234u);
+    TEST_ASSERT(repo.current.subchannels[3].valid == 1u);
+    TEST_ASSERT(repo.current.subchannels[3].start_cu == 100u);
+    TEST_ASSERT(repo.current.subchannels[3].protection_kind == DAB_FIC_PROTECTION_UEP);
+    TEST_ASSERT(repo.current.subchannels[3].table_switch == 1u);
+    TEST_ASSERT(repo.current.subchannels[3].protection_index == 17u);
+    TEST_ASSERT(repo.current.service_count == 1u);
+    TEST_ASSERT(repo.current.services[0].sid == 0x1234u);
+    TEST_ASSERT(repo.current.services[0].is_programme == 1u);
+    TEST_ASSERT(repo.current.services[0].caid == 2u);
+    TEST_ASSERT(repo.current.services[0].component_count == 1u);
+    TEST_ASSERT(repo.current.services[0].components[0].tmid == 0u);
+    TEST_ASSERT(repo.current.services[0].components[0].sc_type == 5u);
+    TEST_ASSERT(repo.current.services[0].components[0].subchid == 3u);
+    TEST_ASSERT(repo.current.services[0].components[0].primary == 1u);
+    TEST_ASSERT(repo.current.label_count == 1u);
+    TEST_ASSERT(strcmp(repo.current.labels[0].text, "TEST SERVICE") == 0);
+}
+
 void test_fic_debug_decode_block_uses_runtime_canonical_shape(void) {
     int8_t fic[DAB_TFRAME_FIC_SOFTBITS] = {0};
     uint8_t block[DAB_FIC_BYTES_PER_BLOCK];
@@ -342,4 +445,63 @@ void test_fic_debug_analyze_frame_finds_inverted_and_reversed_shape(void) {
         TEST_ASSERT(report.blocks[block_index].byte_variant == 0u);
         TEST_ASSERT(report.blocks[block_index].valid_fibs == DAB_FIC_FIBS_PER_BLOCK);
     }
+}
+
+void test_fic_process_frame_populates_repo_from_valid_fibs(void) {
+    dab_fic_state_t state;
+    int8_t fic[DAB_TFRAME_FIC_SOFTBITS] = {0};
+    uint8_t payload0[30] = {0};
+    uint8_t payload1[30] = {0};
+    uint8_t fig0_ext0[] = {0x03u, 0x00u, 0x12u, 0x34u};
+    uint8_t fig0_ext1[5] = {0x04u, 0x01u, 0x00u, 0x00u, 0x00u};
+    uint8_t fig0_ext2[] = {0x06u, 0x02u, 0x12u, 0x34u, 0x21u, 0x05u, 0x0Eu};
+    uint8_t fig1_ext1[] = {
+        0x35u, 0x01u, 0x12u, 0x34u,
+        'L', 'I', 'V', 'E', ' ', 'N', 'A', 'M',
+        'E', ' ', ' ', ' ', ' ', ' ', ' ', ' ',
+        0xC0u, 0x00u
+    };
+    uint8_t fib[DAB_FIC_BYTES_PER_FIB];
+    uint8_t block[DAB_FIC_BYTES_PER_BLOCK];
+    uint32_t bit_pos = 16u;
+    uint32_t block_index;
+
+    TEST_ASSERT(dab_fic_init(&state) == 0);
+    test_fic_write_bits(fig0_ext1, &bit_pos, 3u, 6u);
+    test_fic_write_bits(fig0_ext1, &bit_pos, 100u, 10u);
+    test_fic_write_bits(fig0_ext1, &bit_pos, 0u, 1u);
+    test_fic_write_bits(fig0_ext1, &bit_pos, 1u, 1u);
+    test_fic_write_bits(fig0_ext1, &bit_pos, 17u, 6u);
+
+    memcpy(payload0, fig0_ext0, sizeof(fig0_ext0));
+    memcpy(payload0 + sizeof(fig0_ext0), fig0_ext1, sizeof(fig0_ext1));
+    payload0[sizeof(fig0_ext0) + sizeof(fig0_ext1)] = 0xFFu;
+
+    memcpy(payload1, fig0_ext2, sizeof(fig0_ext2));
+    memcpy(payload1 + sizeof(fig0_ext2), fig1_ext1, sizeof(fig1_ext1));
+    payload1[sizeof(fig0_ext2) + sizeof(fig1_ext1)] = 0xFFu;
+
+    memset(block, 0, sizeof(block));
+    test_fic_build_fib_with_payload(fib, payload0, sizeof(payload0));
+    memcpy(block, fib, DAB_FIC_BYTES_PER_FIB);
+    test_fic_build_fib_with_payload(fib, payload1, sizeof(payload1));
+    memcpy(block + DAB_FIC_BYTES_PER_FIB, fib, DAB_FIC_BYTES_PER_FIB);
+    test_fic_build_fib_with_payload(fib, 0, 0u);
+    memcpy(block + (2u * DAB_FIC_BYTES_PER_FIB), fib, DAB_FIC_BYTES_PER_FIB);
+    test_fic_encode_block(block, fic, 0u, 1);
+
+    for (block_index = 1u; block_index < DAB_FIC_BLOCKS_PER_FRAME; ++block_index) {
+        test_fic_build_fib_with_payload(fib, 0, 0u);
+        memcpy(block, fib, DAB_FIC_BYTES_PER_FIB);
+        memcpy(block + DAB_FIC_BYTES_PER_FIB, fib, DAB_FIC_BYTES_PER_FIB);
+        memcpy(block + (2u * DAB_FIC_BYTES_PER_FIB), fib, DAB_FIC_BYTES_PER_FIB);
+        test_fic_encode_block(block, fic, block_index, 1);
+    }
+
+    TEST_ASSERT(dab_fic_process_frame(&state, 100u, fic, DAB_TFRAME_FIC_SOFTBITS) == 0);
+    TEST_ASSERT(state.repo.current.eid == 0x1234u);
+    TEST_ASSERT(state.repo.current.subchannels[3].valid == 1u);
+    TEST_ASSERT(state.repo.current.service_count == 1u);
+    TEST_ASSERT(state.repo.current.labels[0].used == 1u);
+    TEST_ASSERT(strcmp(state.repo.current.labels[0].text, "LIVE NAME") == 0);
 }

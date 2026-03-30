@@ -196,13 +196,31 @@ Initializes FIC decoder state and counters.
 Clears FIC decoder statistics and decoded-output buffers.
 
 ### `dab_fic_process_frame`
-Decodes the FIC portion of one completed frame, updates CRC status for all FIBs, and stores successfully decoded FIB bytes.
+Decodes the FIC portion of one completed frame, updates CRC status for all FIBs, stores successfully decoded FIB bytes, and parses valid FIB payloads into the in-memory FIC repo.
 
 ### `dab_fic_debug_analyze_frame`
 Runs multiple debug decoding variants over a frame and reports which combinations produced valid FIB CRCs.
 
 ### `dab_fic_debug_decode_block`
 Performs an expanded debug decode of one FIC block, including intermediate depuncturing and packing artifacts.
+
+### `dab_fic_cursor_init`
+Initializes a cursor over a raw FIB payload for sequential FIG parsing.
+
+### `dab_fic_cursor_next_fig`
+Returns the next FIG envelope from a FIB payload and stops cleanly on FIG type-7 padding.
+
+### `dab_fic_fig_view_from_raw`
+Normalizes a raw FIG into a parsed view, including the FIG0 inner header fields.
+
+### `dab_fic_bit_reader_init`
+Initializes a bit reader used for packed FIG payloads such as FIG0/1 subchannel organization.
+
+### `dab_fic_bit_reader_get`
+Reads an arbitrary-width big-endian bit field from a packed FIG payload.
+
+### `dab_fic_parse_fib_payload`
+Parses one valid 30-byte FIB payload into a `dab_fic_repo_t`, covering the current minimal FIG support set: FIG0/0, FIG0/1, FIG0/2, and FIG1 labels.
 
 ### `dab_msc_init`
 Initializes MSC state.

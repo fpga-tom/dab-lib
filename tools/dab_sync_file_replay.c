@@ -75,6 +75,143 @@ typedef struct {
     float bins[2][2048];
 } prs_fft_dump_t;
 
+static uint32_t fic_repo_valid_subchannel_count(const dab_fic_database_t *db) {
+    uint32_t i;
+    uint32_t count = 0u;
+
+    if (db == 0) {
+        return 0u;
+    }
+    for (i = 0u; i < DAB_FIC_MAX_SUBCHANNELS; ++i) {
+        if (db->subchannels[i].valid != 0u) {
+            count++;
+        }
+    }
+    return count;
+}
+
+static const dab_fic_label_t *fic_repo_find_label(const dab_fic_database_t *db,
+                                                  dab_fic_label_scope_t scope,
+                                                  uint8_t is_programme,
+                                                  uint32_t sid,
+                                                  uint16_t eid,
+                                                  uint8_t scids) {
+    uint16_t i;
+
+    if (db == 0) {
+        return 0;
+    }
+    for (i = 0u; i < db->label_count; ++i) {
+        const dab_fic_label_t *label = &db->labels[i];
+
+        if (label->used == 0u || label->scope != scope) {
+            continue;
+        }
+        if (scope == DAB_FIC_LABEL_SCOPE_ENSEMBLE && label->eid == eid) {
+            return label;
+        }
+        if (scope == DAB_FIC_LABEL_SCOPE_SERVICE &&
+            label->is_programme == is_programme &&
+            label->sid == sid) {
+            return label;
+        }
+        if (scope == DAB_FIC_LABEL_SCOPE_COMPONENT &&
+            label->is_programme == is_programme &&
+            label->sid == sid &&
+            label->scids == scids) {
+            return label;
+        }
+    }
+    return 0;
+}
+
+static void print_fic_repo_summary(const dab_fic_repo_t *repo) {
+    const dab_fic_database_t *db;
+    const dab_fic_label_t *ensemble_label;
+    uint32_t subchannel_count;
+    uint32_t subchid;
+    uint16_t service_index;
+
+    if (repo == 0) {
+        return;
+    }
+    db = &repo->current;
+    subchannel_count = fic_repo_valid_subchannel_count(db);
+    ensemble_label = fic_repo_find_label(db,
+                                         DAB_FIC_LABEL_SCOPE_ENSEMBLE,
+                                         0u,
+                                         0u,
+                                         db->eid,
+                                         0u);
+
+    printf("fic_repo eid=0x%04x subchannels=%u services=%u labels=%u",
+           db->eid,
+           subchannel_count,
+           db->service_count,
+           db->label_count);
+    if (ensemble_label != 0 && ensemble_label->text[0] != '\0') {
+        printf(" ensemble_label=\"%s\"", ensemble_label->text);
+    }
+    printf("\n");
+
+    for (subchid = 0u; subchid < DAB_FIC_MAX_SUBCHANNELS; ++subchid) {
+        const dab_fic_subchannel_t *subchannel = &db->subchannels[subchid];
+
+        if (subchannel->valid == 0u) {
+            continue;
+        }
+        if (subchannel->protection_kind == DAB_FIC_PROTECTION_UEP) {
+            printf(" fic_subch id=%u start_cu=%u kind=UEP table=%u index=%u\n",
+                   subchannel->subchid,
+                   subchannel->start_cu,
+                   subchannel->table_switch,
+                   subchannel->protection_index);
+        } else {
+            printf(" fic_subch id=%u start_cu=%u kind=EEP option=%u level=%u size_cu=%u\n",
+                   subchannel->subchid,
+                   subchannel->start_cu,
+                   subchannel->protection_option,
+                   subchannel->protection_level,
+                   subchannel->size_cu);
+        }
+    }
+
+    for (service_index = 0u; service_index < db->service_count; ++service_index) {
+        const dab_fic_service_t *service = &db->services[service_index];
+        const dab_fic_label_t *service_label =
+            fic_repo_find_label(db,
+                                DAB_FIC_LABEL_SCOPE_SERVICE,
+                                service->is_programme,
+                                service->sid,
+                                0u,
+                                0u);
+
+        if (service->component_count > 0u) {
+            const dab_fic_service_component_t *component = &service->components[0];
+            printf(" fic_service sid=0x%0*x programme=%u caid=%u comps=%u label=\"%s\" first_comp=(tmid=%u type=%u",
+                   service->is_programme != 0u ? 4 : 8,
+                   service->sid,
+                   service->is_programme,
+                   service->caid,
+                   service->component_count,
+                   service_label != 0 ? service_label->text : "",
+                   component->tmid,
+                   component->sc_type);
+            if (component->has_subchid != 0u) {
+                printf(" subch=%u", component->subchid);
+            }
+            printf(")\n");
+        } else {
+            printf(" fic_service sid=0x%0*x programme=%u caid=%u comps=0 label=\"%s\"\n",
+                   service->is_programme != 0u ? 4 : 8,
+                   service->sid,
+                   service->is_programme,
+                   service->caid,
+                   service_label != 0 ? service_label->text : "");
+        }
+    }
+}
+
 static uint64_t apply_prs_fine_timing(uint64_t fft_start_sample,
                                       float fine_timing_error_samples,
                                       float max_abs_timing_error_samples,
@@ -1188,6 +1325,9 @@ int main(int argc, char **argv) {
                                             }
                                         }
                                         printf(" msc_frames=%u\n", msc.frames_seen);
+                                        if (fic.valid_fibs_last_frame > 0u) {
+                                            print_fic_repo_summary(&fic.repo);
+                                        }
                                         if (!fic_dump_written &&
                                             dump_fic_path != 0 &&
                                             dump_fic_path[0] != '\0' &&
