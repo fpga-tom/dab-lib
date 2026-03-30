@@ -11,31 +11,6 @@
 #define DAB_FIC_VITERBI_STATES 64u
 #define DAB_FIC_NEG_INF (INT_MIN / 4)
 
-static uint8_t dab_fic_mother_code(uint8_t bit, uint8_t *state) {
-    const uint8_t x0 = (uint8_t)((((*state) >> 5) & 1u) ^
-                                 (((*state) >> 4) & 1u) ^
-                                 (((*state) >> 2) & 1u) ^
-                                 (((*state) >> 1) & 1u) ^
-                                 (bit & 1u));
-    const uint8_t x1 = (uint8_t)((((*state) >> 5) & 1u) ^
-                                 (((*state) >> 2) & 1u) ^
-                                 (((*state) >> 1) & 1u) ^
-                                 (((*state) >> 0) & 1u) ^
-                                 (bit & 1u));
-    const uint8_t x2 = (uint8_t)((((*state) >> 5) & 1u) ^
-                                 (((*state) >> 3) & 1u) ^
-                                 (((*state) >> 0) & 1u) ^
-                                 (bit & 1u));
-    const uint8_t x3 = x0;
-    const uint8_t code = (uint8_t)((x0 & 1u) |
-                                   ((x1 & 1u) << 1u) |
-                                   ((x2 & 1u) << 2u) |
-                                   ((x3 & 1u) << 3u));
-
-    *state = (uint8_t)((((*state) << 1u) & 0x3Fu) | (bit & 1u));
-    return code;
-}
-
 static uint32_t dab_fic_puncturing_code(uint32_t p) {
     switch (p) {
         case 15u: return 0x37777777u;
@@ -109,17 +84,6 @@ static int dab_fic_depuncture_block(const int16_t *punctured,
     return in_pos == DAB_FIC_DEPARTITIONED_SOFTBITS ? 0 : -1;
 }
 
-static int dab_fic_branch_metric(const int16_t *symbols, uint8_t code) {
-    int metric = 0;
-    uint32_t j;
-
-    for (j = 0u; j < 4u; ++j) {
-        metric += ((code >> j) & 1u) != 0u ? (int)symbols[j] : -(int)symbols[j];
-    }
-
-    return metric;
-}
-
 static int dab_fic_viterbi_decode(const int16_t *symbols, uint8_t *bits_out) {
     unsigned char metrics[DAB_FIC_UNPUNCTURED_BITS];
     void *vp;
@@ -161,34 +125,6 @@ static int dab_fic_viterbi_decode(const int16_t *symbols, uint8_t *bits_out) {
     return 0;
 }
 
-static void dab_fic_pack_bits_to_bytes_lsb(const uint8_t *bits, uint8_t *bytes) {
-    uint32_t i;
-
-    for (i = 0u; i < DAB_FIC_BYTES_PER_BLOCK; ++i) {
-        uint32_t bit;
-        uint8_t value = 0u;
-
-        for (bit = 0u; bit < 8u; ++bit) {
-            value |= (uint8_t)((bits[(i * 8u) + bit] & 1u) << bit);
-        }
-        bytes[i] = value;
-    }
-}
-
-static void dab_fic_pack_bits_to_bytes_msb(const uint8_t *bits, uint8_t *bytes) {
-    uint32_t i;
-
-    for (i = 0u; i < DAB_FIC_BYTES_PER_BLOCK; ++i) {
-        uint32_t bit;
-        uint8_t value = 0u;
-
-        for (bit = 0u; bit < 8u; ++bit) {
-            value = (uint8_t)((value << 1u) | (bits[(i * 8u) + bit] & 1u));
-        }
-        bytes[i] = value;
-    }
-}
-
 static uint8_t dab_fic_prbs_bit(int reset) {
     static uint16_t reg = 0x1FFu;
     const uint8_t o = (uint8_t)((reg & 0x100u) != 0u);
@@ -222,8 +158,23 @@ static uint8_t dab_fic_bit_swap_8(uint8_t value) {
     return value;
 }
 
-static uint8_t dab_fic_prbs8_reversed(uint32_t reset) {
-    return dab_fic_bit_swap_8(dab_fic_prbs8(reset));
+static void dab_fic_unpack_viterbi_bytes(const uint8_t *packed,
+                                         uint32_t pack_variant,
+                                         uint8_t *scrambled) {
+    uint32_t i;
+
+    for (i = 0u; i < DAB_FIC_BYTES_PER_BLOCK; ++i) {
+        scrambled[i] = pack_variant == 0u ? packed[i] : dab_fic_bit_swap_8(packed[i]);
+    }
+}
+
+static void dab_fic_descramble_block(const uint8_t *scrambled,
+                                     uint8_t *decoded_block) {
+    uint32_t i;
+
+    for (i = 0u; i < DAB_FIC_BYTES_PER_BLOCK; ++i) {
+        decoded_block[i] = (uint8_t)(scrambled[i] ^ dab_fic_prbs8(i == 0u));
+    }
 }
 
 static uint16_t dab_fic_crc16_ccitt(const uint8_t *buf, size_t len) {
@@ -265,86 +216,54 @@ static uint32_t dab_fic_count_valid_fibs(const uint8_t decoded_block[DAB_FIC_BYT
     return valid;
 }
 
+static int dab_fic_decode_block_variant(const int16_t *unpunctured,
+                                        uint32_t polarity_variant,
+                                        uint32_t pack_variant,
+                                        uint8_t decoded_block[DAB_FIC_BYTES_PER_BLOCK]) {
+    int16_t trial_symbols[DAB_FIC_UNPUNCTURED_BITS];
+    uint8_t packed_block[DAB_FIC_BYTES_PER_BLOCK];
+    uint8_t scrambled_block[DAB_FIC_BYTES_PER_BLOCK];
+    uint32_t i;
+
+    if (unpunctured == 0 || decoded_block == 0) {
+        return -1;
+    }
+
+    for (i = 0u; i < DAB_FIC_UNPUNCTURED_BITS; ++i) {
+        trial_symbols[i] = polarity_variant == 0u ? unpunctured[i] : (int16_t)-unpunctured[i];
+    }
+
+    if (dab_fic_viterbi_decode(trial_symbols, packed_block) != 0) {
+        return -1;
+    }
+    dab_fic_unpack_viterbi_bytes(packed_block, pack_variant, scrambled_block);
+    dab_fic_descramble_block(scrambled_block, decoded_block);
+    return 0;
+}
+
 static int dab_fic_decode_block(const int8_t *frame_softbits,
                                 uint32_t block_index,
                                 uint8_t decoded_block[DAB_FIC_BYTES_PER_BLOCK],
                                 dab_fic_debug_block_t *debug_block) {
     int16_t depunctured[DAB_FIC_DEPARTITIONED_SOFTBITS];
     int16_t unpunctured[DAB_FIC_UNPUNCTURED_BITS];
-    int16_t trial_symbols[DAB_FIC_UNPUNCTURED_BITS];
-    uint8_t decoded_bytes[DAB_FIC_BYTES_PER_BLOCK];
-    uint8_t packed_lsb[DAB_FIC_BYTES_PER_BLOCK];
-    uint8_t packed_msb[DAB_FIC_BYTES_PER_BLOCK];
-    uint8_t candidate[DAB_FIC_BYTES_PER_BLOCK];
-    uint8_t best_block[DAB_FIC_BYTES_PER_BLOCK];
-    uint32_t best_valid = 0u;
-    uint32_t polarity_variant;
 
     dab_fic_departition_block(frame_softbits, block_index, depunctured);
     if (dab_fic_depuncture_block(depunctured, unpunctured) != 0) {
         return -1;
     }
-
-    memset(best_block, 0, sizeof(best_block));
-    for (polarity_variant = 0u; polarity_variant < 2u; ++polarity_variant) {
-        uint32_t variant;
-        uint32_t i;
-
-        for (i = 0u; i < DAB_FIC_UNPUNCTURED_BITS; ++i) {
-            trial_symbols[i] = polarity_variant == 0u ? unpunctured[i] : (int16_t)-unpunctured[i];
-        }
-
-        if (dab_fic_viterbi_decode(trial_symbols, decoded_bytes) != 0) {
-            return -1;
-        }
-
-        memcpy(packed_lsb, decoded_bytes, sizeof(packed_lsb));
-        memcpy(packed_msb, decoded_bytes, sizeof(packed_msb));
-
-        for (variant = 0u; variant < 2u; ++variant) {
-            const uint8_t *packed = variant != 0u ? packed_msb : packed_lsb;
-            uint32_t scramble_variant;
-            uint32_t byte_variant;
-
-            for (scramble_variant = 0u; scramble_variant < 3u; ++scramble_variant) {
-                for (byte_variant = 0u; byte_variant < 2u; ++byte_variant) {
-                    uint32_t valid;
-
-                    for (i = 0u; i < DAB_FIC_BYTES_PER_BLOCK; ++i) {
-                        uint8_t value = packed[i];
-
-                        if (scramble_variant == 1u) {
-                            value = (uint8_t)(value ^ dab_fic_prbs8(i == 0u));
-                        } else if (scramble_variant == 2u) {
-                            value = (uint8_t)(value ^ dab_fic_prbs8_reversed(i == 0u));
-                        }
-                        if (byte_variant != 0u) {
-                            value = dab_fic_bit_swap_8(value);
-                        }
-                        candidate[i] = value;
-                    }
-
-                    valid = dab_fic_count_valid_fibs(candidate);
-                    if (valid > best_valid ||
-                        (polarity_variant == 0u && variant == 0u &&
-                         scramble_variant == 0u && byte_variant == 0u)) {
-                        best_valid = valid;
-                        memcpy(best_block, candidate, sizeof(best_block));
-                        if (debug_block != 0) {
-                            debug_block->block_index = block_index;
-                            debug_block->polarity_variant = polarity_variant;
-                            debug_block->pack_variant = variant;
-                            debug_block->scramble_variant = scramble_variant;
-                            debug_block->byte_variant = byte_variant;
-                            debug_block->valid_fibs = valid;
-                        }
-                    }
-                }
-            }
-        }
+    if (dab_fic_decode_block_variant(unpunctured, 0u, 0u, decoded_block) != 0) {
+        return -1;
     }
 
-    memcpy(decoded_block, best_block, sizeof(best_block));
+    if (debug_block != 0) {
+        debug_block->block_index = block_index;
+        debug_block->polarity_variant = 0u;
+        debug_block->pack_variant = 0u;
+        debug_block->scramble_variant = 1u;
+        debug_block->byte_variant = 0u;
+        debug_block->valid_fibs = dab_fic_count_valid_fibs(decoded_block);
+    }
     return 0;
 }
 
@@ -417,14 +336,16 @@ int dab_fic_process_frame(dab_fic_state_t *state,
     state->last_frame_start_sample = frame_start_sample;
     state->fic_blocks_decoded_last_frame = 0u;
     state->valid_fibs_last_frame = 0u;
+    memset(state->block_info_last_frame, 0, sizeof(state->block_info_last_frame));
     memset(state->decoded_fibs, 0, sizeof(state->decoded_fibs));
     memset(state->fib_crc_ok, 0, sizeof(state->fib_crc_ok));
 
     for (block_index = 0u; block_index < DAB_FIC_BLOCKS_PER_FRAME; ++block_index) {
         uint8_t decoded_block[DAB_FIC_BYTES_PER_BLOCK];
+        dab_fic_debug_block_t *block_info = &state->block_info_last_frame[block_index];
         uint32_t fib_index;
 
-        if (dab_fic_decode_block(fic_softbits, block_index, decoded_block, 0) != 0) {
+        if (dab_fic_decode_block(fic_softbits, block_index, decoded_block, block_info) != 0) {
             continue;
         }
 
@@ -458,12 +379,48 @@ int dab_fic_debug_analyze_frame(const int8_t *fic_softbits,
 
     memset(report, 0, sizeof(*report));
     for (block_index = 0u; block_index < DAB_FIC_BLOCKS_PER_FRAME; ++block_index) {
-        uint8_t decoded_block[DAB_FIC_BYTES_PER_BLOCK];
+        int16_t depunctured[DAB_FIC_DEPARTITIONED_SOFTBITS];
+        int16_t unpunctured[DAB_FIC_UNPUNCTURED_BITS];
+        uint8_t candidate[DAB_FIC_BYTES_PER_BLOCK];
+        uint32_t polarity_variant;
+        uint32_t best_valid = 0u;
+        uint32_t best_polarity = 0u;
+        uint32_t best_pack = 0u;
 
-        if (dab_fic_decode_block(fic_softbits, block_index, decoded_block, &report->blocks[block_index]) != 0) {
+        dab_fic_departition_block(fic_softbits, block_index, depunctured);
+        if (dab_fic_depuncture_block(depunctured, unpunctured) != 0) {
             continue;
         }
-        report->total_valid_fibs += report->blocks[block_index].valid_fibs;
+
+        for (polarity_variant = 0u; polarity_variant < 2u; ++polarity_variant) {
+            uint32_t pack_variant;
+
+            for (pack_variant = 0u; pack_variant < 2u; ++pack_variant) {
+                const int rc = dab_fic_decode_block_variant(unpunctured,
+                                                            polarity_variant,
+                                                            pack_variant,
+                                                            candidate);
+                uint32_t valid;
+
+                if (rc != 0) {
+                    continue;
+                }
+                valid = dab_fic_count_valid_fibs(candidate);
+                if (valid > best_valid || (polarity_variant == 0u && pack_variant == 0u)) {
+                    best_valid = valid;
+                    best_polarity = polarity_variant;
+                    best_pack = pack_variant;
+                }
+            }
+        }
+
+        report->blocks[block_index].block_index = block_index;
+        report->blocks[block_index].polarity_variant = best_polarity;
+        report->blocks[block_index].pack_variant = best_pack;
+        report->blocks[block_index].scramble_variant = 1u;
+        report->blocks[block_index].byte_variant = 0u;
+        report->blocks[block_index].valid_fibs = best_valid;
+        report->total_valid_fibs += best_valid;
     }
 
     return 0;

@@ -123,7 +123,8 @@ static void test_fic_build_valid_fib(uint8_t fib[DAB_FIC_BYTES_PER_FIB], uint8_t
 
 static void test_fic_encode_block(const uint8_t decoded_block[DAB_FIC_BYTES_PER_BLOCK],
                                   int8_t frame_softbits[DAB_TFRAME_FIC_SOFTBITS],
-                                  uint32_t block_index) {
+                                  uint32_t block_index,
+                                  int msb_packed) {
     uint8_t scrambled[DAB_FIC_BYTES_PER_BLOCK];
     uint8_t input_bits[TEST_FIC_TRELLIS_BITS] = {0};
     uint8_t coded_bits[TEST_FIC_UNPUNCTURED_BITS] = {0};
@@ -136,7 +137,8 @@ static void test_fic_encode_block(const uint8_t decoded_block[DAB_FIC_BYTES_PER_
     for (byte_index = 0u; byte_index < DAB_FIC_BYTES_PER_BLOCK; ++byte_index) {
         scrambled[byte_index] = (uint8_t)(decoded_block[byte_index] ^ test_fic_prbs8(byte_index == 0u));
         for (bit_index = 0u; bit_index < 8u; ++bit_index) {
-            input_bits[(byte_index * 8u) + bit_index] = (uint8_t)((scrambled[byte_index] >> bit_index) & 1u);
+            const uint32_t src_bit = msb_packed != 0 ? (7u - bit_index) : bit_index;
+            input_bits[(byte_index * 8u) + bit_index] = (uint8_t)((scrambled[byte_index] >> src_bit) & 1u);
         }
     }
 
@@ -189,7 +191,7 @@ void test_fic_process_frame_decodes_valid_fibs(void) {
                    DAB_FIC_BYTES_PER_FIB);
         }
 
-        test_fic_encode_block(block, fic, block_index);
+        test_fic_encode_block(block, fic, block_index, 1);
     }
 
     TEST_ASSERT(dab_fic_process_frame(&state, 12345u, fic, DAB_TFRAME_FIC_SOFTBITS) == 0);
@@ -224,7 +226,7 @@ void test_fic_process_frame_reports_crc_errors(void) {
             memcpy(block + (fib_index * DAB_FIC_BYTES_PER_FIB), fib, DAB_FIC_BYTES_PER_FIB);
         }
 
-        test_fic_encode_block(block, fic, block_index);
+        test_fic_encode_block(block, fic, block_index, 1);
     }
 
     for (fib_index = 0u; fib_index < 512u; ++fib_index) {
@@ -235,4 +237,109 @@ void test_fic_process_frame_reports_crc_errors(void) {
     TEST_ASSERT(state.frames_seen == 1u);
     TEST_ASSERT(state.fic_blocks_decoded_last_frame == DAB_FIC_BLOCKS_PER_FRAME);
     TEST_ASSERT(state.valid_fibs_last_frame < DAB_FIC_TOTAL_FIBS_PER_FRAME);
+}
+
+void test_fic_debug_decode_block_uses_runtime_canonical_shape(void) {
+    int8_t fic[DAB_TFRAME_FIC_SOFTBITS] = {0};
+    uint8_t block[DAB_FIC_BYTES_PER_BLOCK];
+    dab_fic_debug_block_dump_t dump;
+    uint32_t fib_index;
+
+    for (fib_index = 0u; fib_index < DAB_FIC_FIBS_PER_BLOCK; ++fib_index) {
+        uint8_t fib[DAB_FIC_BYTES_PER_FIB];
+        test_fic_build_valid_fib(fib, (uint8_t)(64u + fib_index));
+        memcpy(block + (fib_index * DAB_FIC_BYTES_PER_FIB), fib, DAB_FIC_BYTES_PER_FIB);
+    }
+
+    test_fic_encode_block(block, fic, 0u, 1);
+    TEST_ASSERT(dab_fic_debug_decode_block(fic, DAB_TFRAME_FIC_SOFTBITS, 0u, &dump) == 0);
+    TEST_ASSERT(dump.info.block_index == 0u);
+    TEST_ASSERT(dump.info.polarity_variant == 0u);
+    TEST_ASSERT(dump.info.pack_variant == 0u);
+    TEST_ASSERT(dump.info.scramble_variant == 1u);
+    TEST_ASSERT(dump.info.byte_variant == 0u);
+    TEST_ASSERT(dump.info.valid_fibs == DAB_FIC_FIBS_PER_BLOCK);
+    TEST_ASSERT(memcmp(dump.decoded_block, block, DAB_FIC_BYTES_PER_BLOCK) == 0);
+    TEST_ASSERT(memcmp(dump.packed_lsb, dump.decoded_block, DAB_FIC_BYTES_PER_BLOCK) != 0);
+}
+
+void test_fic_debug_decode_block_recovers_inverted_softbits(void) {
+    int8_t fic[DAB_TFRAME_FIC_SOFTBITS] = {0};
+    uint8_t block[DAB_FIC_BYTES_PER_BLOCK];
+    dab_fic_debug_block_dump_t dump;
+    uint32_t fib_index;
+
+    for (fib_index = 0u; fib_index < DAB_FIC_FIBS_PER_BLOCK; ++fib_index) {
+        uint8_t fib[DAB_FIC_BYTES_PER_FIB];
+        test_fic_build_valid_fib(fib, (uint8_t)(96u + fib_index));
+        memcpy(block + (fib_index * DAB_FIC_BYTES_PER_FIB), fib, DAB_FIC_BYTES_PER_FIB);
+    }
+
+    test_fic_encode_block(block, fic, 0u, 1);
+    for (fib_index = 0u; fib_index < DAB_TFRAME_FIC_SOFTBITS; ++fib_index) {
+        fic[fib_index] = (int8_t)-fic[fib_index];
+    }
+
+    TEST_ASSERT(dab_fic_debug_decode_block(fic, DAB_TFRAME_FIC_SOFTBITS, 0u, &dump) == 0);
+    TEST_ASSERT(dump.info.block_index == 0u);
+    TEST_ASSERT(dump.info.polarity_variant == 0u);
+    TEST_ASSERT(dump.info.pack_variant == 0u);
+    TEST_ASSERT(dump.info.scramble_variant == 1u);
+    TEST_ASSERT(dump.info.byte_variant == 0u);
+    TEST_ASSERT(dump.info.valid_fibs == 0u);
+    TEST_ASSERT(memcmp(dump.decoded_block, block, DAB_FIC_BYTES_PER_BLOCK) != 0);
+}
+
+void test_fic_debug_decode_block_recovers_direct_packed_softbits(void) {
+    int8_t fic[DAB_TFRAME_FIC_SOFTBITS] = {0};
+    uint8_t block[DAB_FIC_BYTES_PER_BLOCK];
+    dab_fic_debug_block_dump_t dump;
+    uint32_t fib_index;
+
+    for (fib_index = 0u; fib_index < DAB_FIC_FIBS_PER_BLOCK; ++fib_index) {
+        uint8_t fib[DAB_FIC_BYTES_PER_FIB];
+        test_fic_build_valid_fib(fib, (uint8_t)(112u + fib_index));
+        memcpy(block + (fib_index * DAB_FIC_BYTES_PER_FIB), fib, DAB_FIC_BYTES_PER_FIB);
+    }
+
+    test_fic_encode_block(block, fic, 0u, 1);
+    TEST_ASSERT(dab_fic_debug_decode_block(fic, DAB_TFRAME_FIC_SOFTBITS, 0u, &dump) == 0);
+    TEST_ASSERT(dump.info.block_index == 0u);
+    TEST_ASSERT(dump.info.polarity_variant == 0u);
+    TEST_ASSERT(dump.info.pack_variant == 0u);
+    TEST_ASSERT(dump.info.scramble_variant == 1u);
+    TEST_ASSERT(dump.info.byte_variant == 0u);
+    TEST_ASSERT(dump.info.valid_fibs == DAB_FIC_FIBS_PER_BLOCK);
+    TEST_ASSERT(memcmp(dump.decoded_block, block, DAB_FIC_BYTES_PER_BLOCK) == 0);
+}
+
+void test_fic_debug_analyze_frame_finds_inverted_and_reversed_shape(void) {
+    int8_t fic[DAB_TFRAME_FIC_SOFTBITS] = {0};
+    uint8_t block[DAB_FIC_BYTES_PER_BLOCK];
+    dab_fic_debug_report_t report;
+    uint32_t block_index;
+    uint32_t fib_index;
+
+    memset(block, 0, sizeof(block));
+    for (fib_index = 0u; fib_index < DAB_FIC_FIBS_PER_BLOCK; ++fib_index) {
+        uint8_t fib[DAB_FIC_BYTES_PER_FIB];
+        test_fic_build_valid_fib(fib, (uint8_t)(128u + fib_index));
+        memcpy(block + (fib_index * DAB_FIC_BYTES_PER_FIB), fib, DAB_FIC_BYTES_PER_FIB);
+    }
+    for (block_index = 0u; block_index < DAB_FIC_BLOCKS_PER_FRAME; ++block_index) {
+        test_fic_encode_block(block, fic, block_index, 0);
+    }
+    for (fib_index = 0u; fib_index < DAB_TFRAME_FIC_SOFTBITS; ++fib_index) {
+        fic[fib_index] = (int8_t)-fic[fib_index];
+    }
+
+    TEST_ASSERT(dab_fic_debug_analyze_frame(fic, DAB_TFRAME_FIC_SOFTBITS, &report) == 0);
+    TEST_ASSERT(report.total_valid_fibs == DAB_FIC_TOTAL_FIBS_PER_FRAME);
+    for (block_index = 0u; block_index < DAB_FIC_BLOCKS_PER_FRAME; ++block_index) {
+        TEST_ASSERT(report.blocks[block_index].polarity_variant == 1u);
+        TEST_ASSERT(report.blocks[block_index].pack_variant == 1u);
+        TEST_ASSERT(report.blocks[block_index].scramble_variant == 1u);
+        TEST_ASSERT(report.blocks[block_index].byte_variant == 0u);
+        TEST_ASSERT(report.blocks[block_index].valid_fibs == DAB_FIC_FIBS_PER_BLOCK);
+    }
 }

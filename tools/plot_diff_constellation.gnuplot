@@ -31,6 +31,6 @@ do for [i=start:stop] {
     set xrange [cx - 0.5 * span - pad : cx + 0.5 * span + pad]
     set yrange [cy - 0.5 * span - pad : cy + 0.5 * span + pad]
     set title sprintf("DIFF%d Constellation Frame %d", data_symbol, i)
-    plot file index dataset using 2:3 with points pt 7 ps 0.4 lc rgb "#1d3557"
+    plot [-2:2][-2:2] file index dataset using 2:3 with points pt 7 ps 0.4 lc rgb "#1d3557"
     pause pause_s
 }

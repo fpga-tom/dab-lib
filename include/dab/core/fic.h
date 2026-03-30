@@ -15,16 +15,6 @@
 #define DAB_FIC_TRELLIS_BITS 774u
 
 typedef struct {
-    uint32_t frames_seen;
-    uint64_t last_frame_start_sample;
-    uint32_t fic_blocks_decoded_last_frame;
-    uint32_t valid_fibs_last_frame;
-    uint32_t total_valid_fibs;
-    uint8_t decoded_fibs[DAB_FIC_TOTAL_FIBS_PER_FRAME][DAB_FIC_BYTES_PER_FIB];
-    uint8_t fib_crc_ok[DAB_FIC_TOTAL_FIBS_PER_FRAME];
-} dab_fic_state_t;
-
-typedef struct {
     uint32_t block_index;
     uint32_t polarity_variant;
     uint32_t pack_variant;
@@ -32,6 +22,17 @@ typedef struct {
     uint32_t byte_variant;
     uint32_t valid_fibs;
 } dab_fic_debug_block_t;
+
+typedef struct {
+    uint32_t frames_seen;
+    uint64_t last_frame_start_sample;
+    uint32_t fic_blocks_decoded_last_frame;
+    uint32_t valid_fibs_last_frame;
+    uint32_t total_valid_fibs;
+    dab_fic_debug_block_t block_info_last_frame[DAB_FIC_BLOCKS_PER_FRAME];
+    uint8_t decoded_fibs[DAB_FIC_TOTAL_FIBS_PER_FRAME][DAB_FIC_BYTES_PER_FIB];
+    uint8_t fib_crc_ok[DAB_FIC_TOTAL_FIBS_PER_FRAME];
+} dab_fic_state_t;
 
 typedef struct {
     dab_fic_debug_block_t blocks[DAB_FIC_BLOCKS_PER_FRAME];

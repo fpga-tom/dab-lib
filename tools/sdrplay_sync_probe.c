@@ -1114,10 +1114,27 @@ int main(void) {
                                                                       tframe_result.frame_start_sample,
                                                                       msc_softbits,
                                                                       DAB_TFRAME_MSC_SOFTBITS) == 0) {
-                                                printf(" fic_frames=%u fic_blocks=%u fic_valid_fibs=%u msc_frames=%u msc_edge=(%d,%d)",
+                                                printf(" fic_frames=%u fic_blocks=%u fic_valid_fibs=%u",
                                                        fic.frames_seen,
                                                        fic.fic_blocks_decoded_last_frame,
-                                                       fic.valid_fibs_last_frame,
+                                                       fic.valid_fibs_last_frame);
+                                                {
+                                                    uint32_t fic_block_index;
+                                                    for (fic_block_index = 0u;
+                                                         fic_block_index < DAB_FIC_BLOCKS_PER_FRAME;
+                                                         ++fic_block_index) {
+                                                        const dab_fic_debug_block_t *info =
+                                                            &fic.block_info_last_frame[fic_block_index];
+                                                        printf(" fic_block%u=(valid=%u pol=%u pack=%u scr=%u byte=%u)",
+                                                               fic_block_index,
+                                                               info->valid_fibs,
+                                                               info->polarity_variant,
+                                                               info->pack_variant,
+                                                               info->scramble_variant,
+                                                               info->byte_variant);
+                                                    }
+                                                }
+                                                printf(" msc_frames=%u msc_edge=(%d,%d)",
                                                        msc.frames_seen,
                                                        (int)msc.first_softbit,
                                                        (int)msc.last_softbit);
