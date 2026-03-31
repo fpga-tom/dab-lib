@@ -73,6 +73,13 @@ add_executable(dab_sdrplay_sync_probe
 
 target_link_libraries(dab_sdrplay_sync_probe PRIVATE dab)
 
+add_executable(dab_sdrplay_audio
+    tools/dab_sdrplay_audio.c
+    tools/audio_playback.c
+)
+
+target_link_libraries(dab_sdrplay_audio PRIVATE dab)
+
 add_executable(dab_sync_file_replay
     tools/dab_sync_file_replay.c
     tools/audio_playback.c
@@ -93,6 +100,17 @@ if(PkgConfig_FOUND)
         if(FAAD2_FOUND)
             target_compile_definitions(dab_sync_file_replay PRIVATE DAB_HAVE_FAAD2=1)
             target_link_libraries(dab_sync_file_replay PRIVATE PkgConfig::FAAD2)
+        endif()
+
+        target_compile_definitions(dab_sdrplay_audio PRIVATE DAB_HAVE_AUDIO_PLAYBACK=1)
+        target_link_libraries(dab_sdrplay_audio PRIVATE PkgConfig::PORTAUDIO)
+        if(FDK_AAC_FOUND)
+            target_compile_definitions(dab_sdrplay_audio PRIVATE DAB_HAVE_FDK_AAC=1)
+            target_link_libraries(dab_sdrplay_audio PRIVATE PkgConfig::FDK_AAC)
+        endif()
+        if(FAAD2_FOUND)
+            target_compile_definitions(dab_sdrplay_audio PRIVATE DAB_HAVE_FAAD2=1)
+            target_link_libraries(dab_sdrplay_audio PRIVATE PkgConfig::FAAD2)
         endif()
     endif()
 endif()

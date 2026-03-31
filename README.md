@@ -37,6 +37,31 @@ Note:
 - real SDRplay runs must be executed outside restrictive sandboxes because the SDRplay runtime uses shared memory
 - the current real path is validated against SDRplay API `3.15`
 
+## Live Audio Playback
+
+Real-hardware over-the-air DAB+ capture, decode, and audio playback:
+
+```sh
+DAB_SDRPLAY_USE_REAL=1 ./build/dab_sdrplay_audio --freq 213360000 --agc on
+```
+
+This tool:
+- opens the SDRplay device
+- tunes to the requested Band III center frequency
+- enables or disables SDR AGC from the command line
+- captures live IQ
+- runs the current sync, FIC, and MSC decode path
+- auto-selects the first decodable audio service it finds
+- decodes DAB+ audio and plays it through PortAudio
+
+Notes:
+- `--freq` is required and expects Hz
+- `--agc` accepts `on` or `off`
+- `--sid` optionally locks playback to one service ID, in decimal or hex like `0x1234`
+- `--debug` toggles verbose sync/decode logs with `on` or `off`
+- stop playback with `Ctrl+C`
+- the build needs `portaudio-2.0` plus either `fdk-aac` or `faad2`
+
 ## Null-Symbol Debug Probe
 
 Real-hardware raw power-drop logging over the current frontend pipeline:
@@ -271,4 +296,3 @@ Useful commands:
 DAB_SDRPLAY_USE_REAL=1 DAB_SYNC_PROBE_CENTER_FREQ_HZ=213360000 DAB_SYNC_PROBE_GAIN_MODE=agc DAB_SYNC_PROBE_FAST_WINDOW_SAMPLES=128 DAB_SYNC_PROBE_SLOW_WINDOW_SAMPLES=8192 DAB_SYNC_PROBE_SAMPLE_DECIMATION=4 DAB_SYNC_PROBE_ENTER_RATIO_THRESHOLD=0.35 DAB_SYNC_PROBE_EXIT_RATIO_THRESHOLD=0.55 DAB_SYNC_PROBE_BLOCKS=5000 DAB_SYNC_PROBE_DUMP_REF_SAMPLES_PATH=/tmp/samples.bin ./build-release/dab_sdrplay_sync_probe
 
 gnuplot -e "file='/tmp/prs_fft.gnuplot.dat'; frames=200" /Users/tomaskrajco/src/scratchpad/dab-lib/tools/plot_prs_fft.gnuplot
-
