@@ -2,6 +2,7 @@
 #include <stdio.h>
 
 #include "dab_api.h"
+#include "ref_impl_backend_hooks.h"
 
 void SDRBackend_processSamples(void *context, softbit_complex_t *buf, unsigned int numSamples) {
     (void)context;
@@ -79,4 +80,18 @@ void SDRBackend_processAudio(void *cbContext, char *data, unsigned long len) {
     (void)cbContext;
     (void)data;
     (void)len;
+}
+
+int SDRBackend_processDabPlusAU(void *cbContext,
+                                unsigned long superframe_index,
+                                unsigned int au_index,
+                                unsigned int au_count,
+                                unsigned char *data,
+                                unsigned long len) {
+    const dab_ref_backend_hooks_t *hooks = (const dab_ref_backend_hooks_t *)cbContext;
+
+    if (hooks == 0 || hooks->magic != DAB_REF_BACKEND_HOOKS_MAGIC || hooks->on_dabplus_au == 0) {
+        return 0;
+    }
+    return hooks->on_dabplus_au(hooks->user, superframe_index, au_index, au_count, data, len);
 }

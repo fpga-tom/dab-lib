@@ -228,8 +228,41 @@ Initializes MSC state.
 ### `dab_msc_reset`
 Clears MSC frame counters and stored sample values.
 
+### `dab_msc_build_layout`
+Normalizes parsed FIG0/1 and FIG0/2 data into MSC subchannel and service-component mappings, including derived CU size and bitrate for UEP/EEP profiles.
+
+### `dab_msc_find_subchannel`
+Looks up one normalized MSC subchannel by `SubChId` from a prepared layout.
+
+### `dab_msc_find_decoded_component`
+Looks up one decoded MSC service component by `SID` and component index after `dab_msc_process_frame_with_fic`.
+
+### `dab_msc_find_primary_decoded_component`
+Looks up the primary decoded MSC service component for one `SID`, falling back to component index 0 when no component is flagged primary.
+
+### `dab_msc_get_component_payload`
+Builds a pull-style view over the currently decoded CIF payloads for one resolved service component, including `tmid`-based component kind and direct pointers into the decoded subchannel storage.
+
+### `dab_msc_get_primary_component_payload`
+Convenience wrapper that resolves the primary component for one service and returns its decoded CIF payload view.
+
+### `dab_msc_ingest_component_payload`
+Feeds one decoded component payload into the MSC content layer. For `tmid == 0`, this accumulates DAB+ CIF payloads into a 120-CIF superframe assembler and updates the latest synchronized audio superframe view.
+
+### `dab_msc_get_dabplus_superframe`
+Returns the latest synchronized DAB+ superframe view for one decoded audio component, including parsed audio flags and AU boundaries.
+
+### `dab_msc_get_primary_dabplus_superframe`
+Convenience wrapper that resolves the primary component for one service and returns its latest synchronized DAB+ superframe.
+
+### `dab_msc_get_subchannel_softbits`
+Returns the MSC softbit slice for one subchannel within one CIF of the current frame.
+
 ### `dab_msc_process_frame`
 Consumes the MSC softbits for one frame and records simple frame-level state. This is currently a placeholder rather than a full MSC decoder.
+
+### `dab_msc_process_frame_with_fic`
+Consumes one MSC frame, builds the current subchannel/service layout from parsed FIC data, decodes routed subchannels, records decoded component bindings, and feeds stream-audio components into the DAB+ superframe assembler.
 
 ## Threading And Buffer Utilities
 

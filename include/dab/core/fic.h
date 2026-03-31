@@ -88,6 +88,11 @@ typedef struct {
     uint8_t subchid;
     uint8_t has_subchid;
     uint16_t scid;
+    uint16_t packet_addr;
+    uint8_t has_packet_addr;
+    uint8_t dg_flag;
+    uint16_t caorg;
+    uint8_t has_caorg;
 } dab_fic_service_component_t;
 
 typedef struct {

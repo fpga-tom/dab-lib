@@ -342,6 +342,36 @@ void test_fic_parse_payload_populates_repo(void) {
     TEST_ASSERT(strcmp(repo.current.labels[0].text, "TEST SERVICE") == 0);
 }
 
+void test_fic_parse_payload_populates_packet_component_from_fig0_ext3(void) {
+    dab_fic_repo_t repo = {0};
+    uint8_t fig0_ext2[] = {0x06u, 0x02u, 0x12u, 0x34u, 0x21u, 0xC1u, 0x23u};
+    uint8_t fig0_ext3[] = {
+        0x06u, 0x03u,
+        0x12u, 0x30u,
+        0x85u,
+        0x04u,
+        0x12u
+    };
+    uint8_t payload[30] = {0};
+
+    memcpy(payload, fig0_ext2, sizeof(fig0_ext2));
+    memcpy(payload + sizeof(fig0_ext2), fig0_ext3, sizeof(fig0_ext3));
+    payload[sizeof(fig0_ext2) + sizeof(fig0_ext3)] = 0xFFu;
+
+    TEST_ASSERT(dab_fic_parse_fib_payload(&repo, payload, sizeof(payload)) == 0);
+    TEST_ASSERT(repo.current.service_count == 1u);
+    TEST_ASSERT(repo.current.services[0].component_count == 1u);
+    TEST_ASSERT(repo.current.services[0].components[0].tmid == 3u);
+    TEST_ASSERT(repo.current.services[0].components[0].scid == 0x123u);
+    TEST_ASSERT(repo.current.services[0].components[0].sc_type == 5u);
+    TEST_ASSERT(repo.current.services[0].components[0].subchid == 1u);
+    TEST_ASSERT(repo.current.services[0].components[0].has_subchid == 1u);
+    TEST_ASSERT(repo.current.services[0].components[0].packet_addr == 0x012u);
+    TEST_ASSERT(repo.current.services[0].components[0].has_packet_addr == 1u);
+    TEST_ASSERT(repo.current.services[0].components[0].dg_flag == 1u);
+    TEST_ASSERT(repo.current.services[0].components[0].has_caorg == 0u);
+}
+
 void test_fic_debug_decode_block_uses_runtime_canonical_shape(void) {
     int8_t fic[DAB_TFRAME_FIC_SOFTBITS] = {0};
     uint8_t block[DAB_FIC_BYTES_PER_BLOCK];

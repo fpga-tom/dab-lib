@@ -12,6 +12,21 @@ static const char *default_path(void) {
     return "/tmp/samples.bin";
 }
 
+static int env_i32(const char *name, int fallback) {
+    const char *value = getenv(name);
+    char *end = NULL;
+    long parsed;
+
+    if (value == NULL || value[0] == '\0') {
+        return fallback;
+    }
+    parsed = strtol(value, &end, 0);
+    if (end == value || *end != '\0') {
+        return fallback;
+    }
+    return (int)parsed;
+}
+
 int main(int argc, char **argv) {
     const char *path = argc > 1 ? argv[1] : default_path();
     FILE *fp = NULL;
@@ -19,6 +34,7 @@ int main(int argc, char **argv) {
     softbit_complex_t buf[2552];
     unsigned long frames = 0;
     unsigned long valid_frames = 0;
+    int selected_subch = env_i32("DAB_REF_REPLAY_SUBCH", -1);
     int i;
     int rc = 1;
 
@@ -39,6 +55,9 @@ int main(int argc, char **argv) {
         frames++;
         if (valid) {
             valid_frames++;
+            if (selected_subch >= 0) {
+                play_subch(ctx, selected_subch);
+            }
         }
     }
 

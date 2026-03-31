@@ -346,6 +346,29 @@ static dab_fic_service_component_t *dab_fic_add_component(dab_fic_service_t *ser
     return &service->components[service->component_count - 1u];
 }
 
+static dab_fic_service_component_t *dab_fic_find_packet_component(dab_fic_database_t *db,
+                                                                  uint16_t scid) {
+    uint16_t service_index;
+
+    if (db == 0) {
+        return 0;
+    }
+    for (service_index = 0u; service_index < db->service_count; ++service_index) {
+        dab_fic_service_t *service = &db->services[service_index];
+        uint8_t component_index;
+
+        for (component_index = 0u; component_index < service->component_count; ++component_index) {
+            dab_fic_service_component_t *component = &service->components[component_index];
+
+            if (component->used != 0u && component->tmid == 3u && component->scid == scid) {
+                return component;
+            }
+        }
+    }
+
+    return 0;
+}
+
 static void dab_fic_extract_label_text(char out[17], const uint8_t *chars) {
     int end = 16;
     int i;
@@ -538,6 +561,56 @@ static int dab_fic_parse_fig0_ext2(dab_fic_repo_t *repo, const dab_fic_fig_view_
     return 0;
 }
 
+static int dab_fic_parse_fig0_ext3(dab_fic_repo_t *repo, const dab_fic_fig_view_t *view) {
+    dab_fic_database_t *db;
+    size_t offset = 0u;
+
+    if (repo == 0 || view == 0 || view->oe != 0u) {
+        return -1;
+    }
+    db = dab_fic_repo_target(repo, view->cn);
+    if (db == 0) {
+        return -1;
+    }
+
+    while (offset + 5u <= view->data_len) {
+        dab_fic_service_component_t *component;
+        const size_t base = offset;
+        const uint16_t scid = (uint16_t)(((uint16_t)view->data[base] << 4u) |
+                                         (((uint16_t)view->data[base + 1u] >> 4u) & 0x0Fu));
+        const uint8_t has_caorg = (uint8_t)(view->data[base + 1u] & 1u);
+        const uint8_t sc_type = (uint8_t)(view->data[base + 2u] & 0x3Fu);
+        const uint8_t subchid = (uint8_t)((view->data[base + 3u] >> 2u) & 0x3Fu);
+        const uint16_t packet_addr = (uint16_t)((((uint16_t)view->data[base + 3u] & 0x03u) << 8u) |
+                                                (uint16_t)view->data[base + 4u]);
+
+        offset += 5u;
+        if (has_caorg != 0u) {
+            if (offset + 2u > view->data_len) {
+                break;
+            }
+        }
+
+        component = dab_fic_find_packet_component(db, scid);
+        if (component != 0) {
+            component->sc_type = sc_type;
+            component->subchid = subchid;
+            component->has_subchid = 1u;
+            component->packet_addr = packet_addr;
+            component->has_packet_addr = 1u;
+            component->dg_flag = (uint8_t)((view->data[base + 2u] >> 7u) & 1u);
+            component->has_caorg = has_caorg;
+            component->caorg = has_caorg != 0u ? dab_fic_rd16be(view->data + offset) : 0u;
+        }
+
+        if (has_caorg != 0u) {
+            offset += 2u;
+        }
+    }
+
+    return 0;
+}
+
 static int dab_fic_parse_fig1(dab_fic_repo_t *repo, const dab_fic_fig_view_t *view) {
     dab_fic_database_t *db;
     dab_fic_label_t label;
@@ -644,6 +717,8 @@ int dab_fic_parse_fib_payload(dab_fic_repo_t *repo, const uint8_t *fib_payload, 
                 (void)dab_fic_parse_fig0_ext1(repo, &view);
             } else if (view.ext == 2u) {
                 (void)dab_fic_parse_fig0_ext2(repo, &view);
+            } else if (view.ext == 3u) {
+                (void)dab_fic_parse_fig0_ext3(repo, &view);
             }
         } else if (view.type == DAB_FIC_FIG_TYPE_1) {
             (void)dab_fic_parse_fig1(repo, &view);

@@ -14,6 +14,7 @@
 #include "dab/core/tframe.h"
 #include "dab/core/msc.h"
 #include "dab/simd/simd.h"
+#include "audio_playback.h"
 
 typedef struct {
     int16_t *iq;
@@ -69,11 +70,32 @@ typedef struct {
     float carriers[DAB_TFRAME_FIC_SYMBOLS + 1u][2][1537];
 } fic_raw_active_dump_t;
 
+
 typedef struct {
     char magic[8];
     uint32_t fft_samples;
     float bins[2][2048];
 } prs_fft_dump_t;
+
+typedef struct {
+    char magic[8];
+    uint64_t frame_start_sample;
+    uint32_t sid;
+    uint8_t subchid;
+    uint8_t cif_index;
+    uint16_t byte_count;
+} msc_cif_dump_record_t;
+
+typedef struct {
+    char magic[8];
+    uint64_t frame_start_sample;
+    uint32_t sid;
+    uint8_t subchid;
+    uint8_t cif_index;
+    uint16_t deinterleaved_count;
+    uint32_t unpunctured_count;
+    uint16_t byte_count;
+} msc_stage_dump_record_t;
 
 static uint32_t fic_repo_valid_subchannel_count(const dab_fic_database_t *db) {
     uint32_t i;
@@ -441,6 +463,22 @@ static int env_i32(const char *name, int fallback) {
     return (int)parsed;
 }
 
+static int env_u32_base0(const char *name, uint32_t *value_out) {
+    const char *value = getenv(name);
+    char *end = 0;
+    unsigned long parsed;
+
+    if (value_out == 0 || value == 0 || value[0] == '\0') {
+        return -1;
+    }
+    parsed = strtoul(value, &end, 0);
+    if (end == value || *end != '\0' || parsed > 0xfffffffful) {
+        return -1;
+    }
+    *value_out = (uint32_t)parsed;
+    return 0;
+}
+
 static int refine_symbol_fft_start_cp(const dab_prs_score_t *cp_score,
                                       const dab_sdr_block_view_t *block,
                                       uint64_t predicted_fft_start,
@@ -516,6 +554,88 @@ static int write_binary_file(const char *path, const void *data, size_t size) {
     }
     fclose(fp);
     return 0;
+}
+
+static FILE *open_trunc_binary_file(const char *path) {
+    if (path == 0 || path[0] == '\0') {
+        return 0;
+    }
+    return fopen(path, "wb");
+}
+
+static int append_selected_component_dump(FILE *fp,
+                                          uint64_t frame_start_sample,
+                                          uint32_t sid,
+                                          const dab_msc_component_payload_t *payload) {
+    uint32_t cif_index;
+
+    if (fp == 0 || payload == 0 || payload->valid == 0u) {
+        return 0;
+    }
+
+    for (cif_index = 0u; cif_index < DAB_MSC_CIFS_PER_FRAME; ++cif_index) {
+        msc_cif_dump_record_t record;
+
+        if (payload->cif_valid[cif_index] == 0u || payload->byte_count[cif_index] == 0u || payload->data[cif_index] == 0) {
+            continue;
+        }
+
+        memset(&record, 0, sizeof(record));
+        memcpy(record.magic, "MSCCIF1", 8u);
+        record.frame_start_sample = frame_start_sample;
+        record.sid = sid;
+        record.subchid = payload->subchid;
+        record.cif_index = (uint8_t)cif_index;
+        record.byte_count = payload->byte_count[cif_index];
+
+        if (fwrite(&record, 1u, sizeof(record), fp) != sizeof(record)) {
+            return -1;
+        }
+        if (fwrite(payload->data[cif_index], 1u, payload->byte_count[cif_index], fp) != payload->byte_count[cif_index]) {
+            return -1;
+        }
+    }
+
+    return fflush(fp) == 0 ? 0 : -1;
+}
+
+static int append_selected_stage_dump(FILE *fp,
+                                      uint64_t frame_start_sample,
+                                      uint32_t sid,
+                                      uint8_t subchid,
+                                      uint8_t cif_index,
+                                      const int8_t *deinterleaved,
+                                      uint16_t deinterleaved_count,
+                                      const int16_t *unpunctured,
+                                      uint32_t unpunctured_count,
+                                      const uint8_t *pre_descramble,
+                                      const uint8_t *post_descramble,
+                                      uint16_t byte_count) {
+    msc_stage_dump_record_t record;
+
+    if (fp == 0 || deinterleaved == 0 || unpunctured == 0 || pre_descramble == 0 || post_descramble == 0) {
+        return -1;
+    }
+
+    memset(&record, 0, sizeof(record));
+    memcpy(record.magic, "MSCDBG1", 8u);
+    record.frame_start_sample = frame_start_sample;
+    record.sid = sid;
+    record.subchid = subchid;
+    record.cif_index = cif_index;
+    record.deinterleaved_count = deinterleaved_count;
+    record.unpunctured_count = unpunctured_count;
+    record.byte_count = byte_count;
+
+    if (fwrite(&record, 1u, sizeof(record), fp) != sizeof(record) ||
+        fwrite(deinterleaved, 1u, deinterleaved_count, fp) != deinterleaved_count ||
+        fwrite(unpunctured, sizeof(*unpunctured), unpunctured_count, fp) != unpunctured_count ||
+        fwrite(pre_descramble, 1u, byte_count, fp) != byte_count ||
+        fwrite(post_descramble, 1u, byte_count, fp) != byte_count) {
+        return -1;
+    }
+
+    return fflush(fp) == 0 ? 0 : -1;
 }
 
 static int history_init(history_buffer_t *history, uint32_t capacity_samples) {
@@ -730,6 +850,11 @@ int main(int argc, char **argv) {
     int apply_data_cpe_correction = env_i32("DAB_SYNC_PROBE_APPLY_DATA_CPE_CORRECTION", 0);
     float prs_fine_timing_limit = env_f32("DAB_SYNC_PROBE_PRS_FINE_TIMING_LIMIT", 32.0f);
     uint32_t sample_rate = env_u32("DAB_SYNC_PROBE_SAMPLE_RATE", 2048000u);
+    uint32_t audio_sid = 0u;
+    int audio_sid_configured = env_u32_base0("DAB_SYNC_REPLAY_AUDIO_SID", &audio_sid) == 0;
+    int audio_debug_enabled = env_i32("DAB_SYNC_REPLAY_AUDIO_DEBUG", 0);
+    const char *dump_selected_sid_path = getenv("DAB_SYNC_REPLAY_DUMP_SID_PATH");
+    const char *dump_selected_stage_path = getenv("DAB_SYNC_REPLAY_DUMP_STAGE_PATH");
     const char *dump_fic_path = getenv("DAB_SYNC_PROBE_DUMP_FIC_PATH");
     const char *dump_fic_symbols_path = getenv("DAB_SYNC_PROBE_DUMP_FIC_SYMBOLS_PATH");
     const char *dump_fic_carriers_path = getenv("DAB_SYNC_PROBE_DUMP_FIC_CARRIERS_PATH");
@@ -752,8 +877,18 @@ int main(int argc, char **argv) {
     fic_raw_active_dump_t fic_raw_active_dump = { { 'D', 'A', 'B', 'F', 'I', 'C', '5', '\0' }, DAB_TFRAME_FIC_SYMBOLS + 1u, 0u, {0u}, {{{0}}} };
     prs_fft_dump_t prs_fft_dump = { { 'D', 'A', 'B', 'P', 'R', 'S', 'F', '\0' }, 2048u, {{0}} };
     FILE *prs_fft_gnuplot_fp = 0;
+    FILE *selected_sid_dump_fp = 0;
+    FILE *selected_stage_dump_fp = 0;
     uint32_t prs_fft_gnuplot_frame = 0u;
     int rc = 1;
+#if defined(DAB_HAVE_AUDIO_PLAYBACK)
+    dab_audio_playback_t audio = {0};
+    audio.debug_enabled = (uint8_t)(audio_debug_enabled != 0);
+#endif
+    dab_msc_deinterleaver_t selected_debug_deinterleaver = {0};
+    uint8_t selected_debug_deinterleaver_valid = 0u;
+    uint8_t selected_debug_subchid = 0xffu;
+    uint32_t selected_debug_conv_len = 0u;
 
     dab_null_detect_default_config(&detector_config);
     detector_config.fast_window_samples = env_u32("DAB_SYNC_PROBE_FAST_WINDOW_SAMPLES", 128u);
@@ -875,6 +1010,20 @@ int main(int argc, char **argv) {
             goto cleanup;
         }
     }
+    if (audio_sid_configured && dump_selected_sid_path != 0 && dump_selected_sid_path[0] != '\0') {
+        selected_sid_dump_fp = open_trunc_binary_file(dump_selected_sid_path);
+        if (selected_sid_dump_fp == 0) {
+            fprintf(stderr, "failed to open selected sid dump: %s\n", dump_selected_sid_path);
+            goto cleanup;
+        }
+    }
+    if (audio_sid_configured && dump_selected_stage_path != 0 && dump_selected_stage_path[0] != '\0') {
+        selected_stage_dump_fp = open_trunc_binary_file(dump_selected_stage_path);
+        if (selected_stage_dump_fp == 0) {
+            fprintf(stderr, "failed to open selected stage dump: %s\n", dump_selected_stage_path);
+            goto cleanup;
+        }
+    }
 
     printf("sync-file-replay start path=%s sample_rate=%u block_samples=%u simd=%s fft=%s ref_threshold=%.3f\n",
            path,
@@ -883,6 +1032,21 @@ int main(int argc, char **argv) {
            simd_ops != 0 ? simd_ops->name : "unknown",
            fft.backend_name != 0 ? fft.backend_name : "unknown",
            ref_threshold);
+    if (audio_sid_configured) {
+#if defined(DAB_HAVE_AUDIO_PLAYBACK)
+        printf("audio playback enabled sid=0x%08x\n", audio_sid);
+#else
+        fprintf(stderr,
+                "audio playback requested for sid=0x%08x but this build has no audio playback support\n",
+                audio_sid);
+#endif
+        if (selected_sid_dump_fp != 0) {
+            printf("selected sid dump enabled sid=0x%08x path=%s\n", audio_sid, dump_selected_sid_path);
+        }
+        if (selected_stage_dump_fp != 0) {
+            printf("selected stage dump enabled sid=0x%08x path=%s\n", audio_sid, dump_selected_stage_path);
+        }
+    }
 
     while (1) {
         dab_sdr_block_view_t hist_view;
@@ -1239,9 +1403,6 @@ int main(int argc, char **argv) {
                                         break;
                                     }
                                 }
-                                printf(" data_cpe_deg=%.3f data_cpe_corr=%d",
-                                       data_cpe_deg,
-                                       apply_data_cpe_correction);
                             }
                             if ((int)symbol_idx < skip_initial_data_symbols) {
                                 continue;
@@ -1299,10 +1460,12 @@ int main(int argc, char **argv) {
                                                               tframe_result.frame_start_sample,
                                                               fic_softbits,
                                                               DAB_TFRAME_FIC_SOFTBITS) == 0 &&
-                                        dab_msc_process_frame(&msc,
-                                                              tframe_result.frame_start_sample,
-                                                              msc_softbits,
-                                                              DAB_TFRAME_MSC_SOFTBITS) == 0) {
+                                        dab_msc_process_frame_with_fic(&msc,
+                                                                       tframe_result.frame_start_sample,
+                                                                       msc_softbits,
+                                                                       DAB_TFRAME_MSC_SOFTBITS,
+                                                                       &fic.repo.current) == 0) {
+                                        dab_msc_dabplus_superframe_t superframe = {0};
                                         printf("frame_complete frame_start=%llu fic_frames=%u fic_blocks=%u fic_valid_fibs=%u",
                                                (unsigned long long)tframe_result.frame_start_sample,
                                                fic.frames_seen,
@@ -1327,6 +1490,128 @@ int main(int argc, char **argv) {
                                         printf(" msc_frames=%u\n", msc.frames_seen);
                                         if (fic.valid_fibs_last_frame > 0u) {
                                             print_fic_repo_summary(&fic.repo);
+                                        }
+#if defined(DAB_HAVE_AUDIO_PLAYBACK)
+                                        if (audio_sid_configured &&
+                                            dab_msc_get_primary_dabplus_superframe(&msc,
+                                                                                   audio_sid,
+                                                                                   &superframe) == 0 &&
+                                            superframe.generation != audio.last_generation) {
+                                            if (dab_audio_playback_consume_superframe(&audio, &superframe) != 0) {
+                                                goto cleanup;
+                                            }
+                                        } else if (audio_sid_configured) {
+                                            dab_msc_dabplus_debug_t debug = {0};
+
+                                            if (dab_msc_get_primary_dabplus_debug(&msc, audio_sid, &debug) == 0 &&
+                                                debug.valid != 0u) {
+                                                dab_audio_playback_report_dabplus_debug(&audio, audio_sid, &debug);
+                                            } else {
+                                                dab_audio_playback_note_missing_superframe(&audio, audio_sid, msc.frames_seen);
+                                            }
+                                        }
+#endif
+                                        if (audio_sid_configured && selected_sid_dump_fp != 0) {
+                                            dab_msc_component_payload_t payload = {0};
+
+                                            if (dab_msc_get_primary_component_payload(&msc, audio_sid, &payload) == 0 &&
+                                                append_selected_component_dump(selected_sid_dump_fp,
+                                                                              tframe_result.frame_start_sample,
+                                                                              audio_sid,
+                                                                              &payload) != 0) {
+                                                fprintf(stderr, "failed to append selected sid dump\n");
+                                                goto cleanup;
+                                            }
+                                        }
+                                        if (audio_sid_configured && selected_stage_dump_fp != 0) {
+                                            const dab_msc_decoded_component_t *component =
+                                                dab_msc_find_primary_decoded_component(&msc, audio_sid);
+                                            const dab_msc_subchannel_frame_t *subchannel_frame = 0;
+
+                                            if (component != 0 && component->subchid < DAB_FIC_MAX_SUBCHANNELS) {
+                                                const dab_msc_decoder_config_t *config =
+                                                    &msc.runtimes[component->subchid].config;
+                                                uint32_t cif_index;
+                                                int8_t *deinterleaved = 0;
+                                                int16_t *unpunctured = 0;
+                                                uint8_t *pre_descramble = 0;
+                                                uint8_t *post_descramble = 0;
+
+                                                subchannel_frame =
+                                                    dab_msc_find_subchannel_frame(&msc.frame_view, component->subchid);
+                                                if (subchannel_frame != 0 && config->valid != 0u) {
+                                                    if (!selected_debug_deinterleaver_valid ||
+                                                        selected_debug_subchid != component->subchid ||
+                                                        selected_debug_conv_len != config->conv_len) {
+                                                        dab_msc_deinterleaver_reset(&selected_debug_deinterleaver);
+                                                        selected_debug_deinterleaver_valid = 1u;
+                                                        selected_debug_subchid = component->subchid;
+                                                        selected_debug_conv_len = config->conv_len;
+                                                    }
+
+                                                    deinterleaved = (int8_t *)malloc(config->conv_len * DAB_MSC_CIFS_PER_FRAME);
+                                                    unpunctured = (int16_t *)malloc(sizeof(*unpunctured) * ((config->framebits + 6u) * 4u));
+                                                    pre_descramble = (uint8_t *)malloc(config->framebits / 8u);
+                                                    post_descramble = (uint8_t *)malloc(config->framebits / 8u);
+                                                    if (deinterleaved == 0 || unpunctured == 0 ||
+                                                        pre_descramble == 0 || post_descramble == 0) {
+                                                        free(deinterleaved);
+                                                        free(unpunctured);
+                                                        free(pre_descramble);
+                                                        free(post_descramble);
+                                                        fprintf(stderr, "selected stage dump alloc failed\n");
+                                                        goto cleanup;
+                                                    }
+
+                                                    if (dab_msc_deinterleave_subchannel_frame(msc_softbits,
+                                                                                             DAB_TFRAME_MSC_SOFTBITS,
+                                                                                             subchannel_frame,
+                                                                                             config,
+                                                                                             &selected_debug_deinterleaver,
+                                                                                             deinterleaved,
+                                                                                             config->conv_len * DAB_MSC_CIFS_PER_FRAME) != 0) {
+                                                        fprintf(stderr, "selected stage dump deinterleave failed\n");
+                                                        goto cleanup;
+                                                    }
+                                                    for (cif_index = 0u; cif_index < DAB_MSC_CIFS_PER_FRAME; ++cif_index) {
+                                                        uint32_t byte_count = 0u;
+
+                                                        if (dab_msc_decode_deinterleaved_cif_debug(deinterleaved + (cif_index * config->conv_len),
+                                                                                                  config->conv_len,
+                                                                                                  config,
+                                                                                                  unpunctured,
+                                                                                                  (config->framebits + 6u) * 4u,
+                                                                                                  pre_descramble,
+                                                                                                  config->framebits / 8u,
+                                                                                                  post_descramble,
+                                                                                                  config->framebits / 8u,
+                                                                                                  &byte_count) != 0) {
+                                                            fprintf(stderr, "selected stage dump decode failed\n");
+                                                            goto cleanup;
+                                                        }
+                                                        if (append_selected_stage_dump(selected_stage_dump_fp,
+                                                                                       tframe_result.frame_start_sample,
+                                                                                       audio_sid,
+                                                                                       component->subchid,
+                                                                                       (uint8_t)cif_index,
+                                                                                       deinterleaved + (cif_index * config->conv_len),
+                                                                                       (uint16_t)config->conv_len,
+                                                                                       unpunctured,
+                                                                                       (config->framebits + 6u) * 4u,
+                                                                                       pre_descramble,
+                                                                                       post_descramble,
+                                                                                       (uint16_t)byte_count) != 0) {
+                                                            fprintf(stderr, "failed to append selected stage dump\n");
+                                                            goto cleanup;
+                                                        }
+                                                    }
+                                                }
+
+                                                free(deinterleaved);
+                                                free(unpunctured);
+                                                free(pre_descramble);
+                                                free(post_descramble);
+                                            }
                                         }
                                         if (!fic_dump_written &&
                                             dump_fic_path != 0 &&
@@ -1402,8 +1687,17 @@ int main(int argc, char **argv) {
     rc = 0;
 
 cleanup:
+#if defined(DAB_HAVE_AUDIO_PLAYBACK)
+    dab_audio_playback_close(&audio);
+#endif
     if (prs_fft_gnuplot_fp != 0) {
         fclose(prs_fft_gnuplot_fp);
+    }
+    if (selected_sid_dump_fp != 0) {
+        fclose(selected_sid_dump_fp);
+    }
+    if (selected_stage_dump_fp != 0) {
+        fclose(selected_stage_dump_fp);
     }
     if (fp != 0) {
         fclose(fp);

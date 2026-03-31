@@ -10,6 +10,8 @@ option(DAB_BUILD_TESTS "Build unit tests" ON)
 option(DAB_ENABLE_AVX2 "Enable AVX2 backend when supported" ON)
 option(DAB_ENABLE_NEON "Enable NEON backend when supported" ON)
 
+find_package(PkgConfig QUIET)
+
 if(MSVC)
     add_compile_options(/W4)
 else()
@@ -73,9 +75,39 @@ target_link_libraries(dab_sdrplay_sync_probe PRIVATE dab)
 
 add_executable(dab_sync_file_replay
     tools/dab_sync_file_replay.c
+    tools/audio_playback.c
 )
 
 target_link_libraries(dab_sync_file_replay PRIVATE dab)
+if(PkgConfig_FOUND)
+    pkg_check_modules(FDK_AAC IMPORTED_TARGET QUIET fdk-aac)
+    pkg_check_modules(FAAD2 IMPORTED_TARGET QUIET faad2)
+    pkg_check_modules(PORTAUDIO IMPORTED_TARGET QUIET portaudio-2.0)
+    if(PORTAUDIO_FOUND AND (FDK_AAC_FOUND OR FAAD2_FOUND))
+        target_compile_definitions(dab_sync_file_replay PRIVATE DAB_HAVE_AUDIO_PLAYBACK=1)
+        target_link_libraries(dab_sync_file_replay PRIVATE PkgConfig::PORTAUDIO)
+        if(FDK_AAC_FOUND)
+            target_compile_definitions(dab_sync_file_replay PRIVATE DAB_HAVE_FDK_AAC=1)
+            target_link_libraries(dab_sync_file_replay PRIVATE PkgConfig::FDK_AAC)
+        endif()
+        if(FAAD2_FOUND)
+            target_compile_definitions(dab_sync_file_replay PRIVATE DAB_HAVE_FAAD2=1)
+            target_link_libraries(dab_sync_file_replay PRIVATE PkgConfig::FAAD2)
+        endif()
+    endif()
+endif()
+
+set(DAB_REF_IMPL_AUDIO_SOURCE ref-impl/dabplus/audio_stub.c)
+set(DAB_REF_IMPL_AUDIO_LIBS "")
+set(DAB_REF_IMPL_AUDIO_DEFINES "")
+if(PkgConfig_FOUND)
+    pkg_check_modules(FAAD2 IMPORTED_TARGET QUIET faad2)
+    if(PORTAUDIO_FOUND AND FAAD2_FOUND)
+        set(DAB_REF_IMPL_AUDIO_SOURCE ref-impl/dabplus/paudio.c)
+        set(DAB_REF_IMPL_AUDIO_LIBS PkgConfig::PORTAUDIO PkgConfig::FAAD2)
+        set(DAB_REF_IMPL_AUDIO_DEFINES PORTAUDIO=1)
+    endif()
+endif()
 
 add_executable(dab_gen_mode_i_prs_table
     tools/gen_mode_i_prs_table.c
@@ -184,7 +216,7 @@ add_executable(dab_ref_impl_replay
     tools/ref_impl_replay.c
     tools/ref_impl_backend_stubs.c
     ref-impl/dabplus/approx.c
-    ref-impl/dabplus/audio_stub.c
+    ${DAB_REF_IMPL_AUDIO_SOURCE}
     ref-impl/dabplus/backend_defaults.c
     ref-impl/dabplus/cagc.c
     ref-impl/dabplus/cc.c
@@ -205,6 +237,8 @@ add_executable(dab_ref_impl_replay
     ref-impl/dabplus/util.c
     ref-impl/dabplus/viterbi47_port.c
 )
+target_link_libraries(dab_ref_impl_replay PRIVATE ${DAB_REF_IMPL_AUDIO_LIBS})
+target_compile_definitions(dab_ref_impl_replay PRIVATE ${DAB_REF_IMPL_AUDIO_DEFINES})
 
 target_include_directories(dab_ref_impl_replay PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/ref-impl/dabplus
@@ -214,7 +248,40 @@ add_executable(dab_ref_symbol_dump
     tools/dab_ref_symbol_dump.c
     tools/ref_impl_backend_stubs.c
     ref-impl/dabplus/approx.c
-    ref-impl/dabplus/audio_stub.c
+    ${DAB_REF_IMPL_AUDIO_SOURCE}
+    ref-impl/dabplus/backend_defaults.c
+    ref-impl/dabplus/cagc.c
+    ref-impl/dabplus/cc.c
+    ref-impl/dabplus/ci.c
+    ref-impl/dabplus/dab.c
+    ref-impl/dabplus/dab_fic.c
+    ref-impl/dabplus/fec.c
+    ref-impl/dabplus/fi.c
+    ref-impl/dabplus/fib.c
+    ref-impl/dabplus/fs.c
+    ref-impl/dabplus/gf.c
+    ref-impl/dabplus/mod.c
+    ref-impl/dabplus/ofdm.c
+    ref-impl/dabplus/pilot.c
+    ref-impl/dabplus/rs_255_245_5.c
+    ref-impl/dabplus/sdrplay_api_stub.c
+    ref-impl/dabplus/softbit_fft.c
+    ref-impl/dabplus/util.c
+    ref-impl/dabplus/viterbi47_port.c
+)
+target_link_libraries(dab_ref_symbol_dump PRIVATE ${DAB_REF_IMPL_AUDIO_LIBS})
+target_compile_definitions(dab_ref_symbol_dump PRIVATE ${DAB_REF_IMPL_AUDIO_DEFINES})
+
+target_include_directories(dab_ref_symbol_dump PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/ref-impl/dabplus
+)
+
+add_executable(dab_msc_ref_compare
+    tools/dab_msc_ref_compare.c
+    tools/audio_playback.c
+    tools/ref_impl_backend_stubs.c
+    ref-impl/dabplus/approx.c
+    ${DAB_REF_IMPL_AUDIO_SOURCE}
     ref-impl/dabplus/backend_defaults.c
     ref-impl/dabplus/cagc.c
     ref-impl/dabplus/cc.c
@@ -236,7 +303,24 @@ add_executable(dab_ref_symbol_dump
     ref-impl/dabplus/viterbi47_port.c
 )
 
-target_include_directories(dab_ref_symbol_dump PRIVATE
+target_link_libraries(dab_msc_ref_compare PRIVATE dab)
+target_link_libraries(dab_msc_ref_compare PRIVATE ${DAB_REF_IMPL_AUDIO_LIBS})
+target_compile_definitions(dab_msc_ref_compare PRIVATE ${DAB_REF_IMPL_AUDIO_DEFINES})
+if(PkgConfig_FOUND)
+    if(PORTAUDIO_FOUND AND (FDK_AAC_FOUND OR FAAD2_FOUND))
+        target_compile_definitions(dab_msc_ref_compare PRIVATE DAB_HAVE_AUDIO_PLAYBACK=1)
+        target_link_libraries(dab_msc_ref_compare PRIVATE PkgConfig::PORTAUDIO)
+        if(FDK_AAC_FOUND)
+            target_compile_definitions(dab_msc_ref_compare PRIVATE DAB_HAVE_FDK_AAC=1)
+            target_link_libraries(dab_msc_ref_compare PRIVATE PkgConfig::FDK_AAC)
+        endif()
+        if(FAAD2_FOUND)
+            target_compile_definitions(dab_msc_ref_compare PRIVATE DAB_HAVE_FAAD2=1)
+            target_link_libraries(dab_msc_ref_compare PRIVATE PkgConfig::FAAD2)
+        endif()
+    endif()
+endif()
+target_include_directories(dab_msc_ref_compare PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/ref-impl/dabplus
 )
 

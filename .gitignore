@@ -4,3 +4,4 @@ doc/
 build/
 build-release/
 tags
+build-asan/
