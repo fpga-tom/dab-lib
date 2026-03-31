@@ -1339,7 +1339,7 @@ int main(int argc, char **argv) {
                     float applied_prs_timing = 0.0f;
                     uint64_t prs_fft_start_sample =
                         apply_prs_fine_timing(coarse.prs_fft_start_sample,
-                                              ref_score.fine_timing_error_samples,
+                                              -ref_score.fine_timing_error_samples,
                                               prs_fine_timing_limit,
                                               &applied_prs_timing);
                     if (prs_fft_start_sample != coarse.prs_fft_start_sample &&
