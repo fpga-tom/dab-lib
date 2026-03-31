@@ -53,14 +53,26 @@ This tool:
 - runs the current sync, FIC, and MSC decode path
 - auto-selects the first decodable audio service it finds
 - decodes DAB+ audio and plays it through PortAudio
+- attempts recovery after lock loss or prolonged no-audio periods
 
 Notes:
 - `--freq` is required and expects Hz
 - `--agc` accepts `on` or `off`
 - `--sid` optionally locks playback to one service ID, in decimal or hex like `0x1234`
 - `--debug` toggles verbose sync/decode logs with `on` or `off`
+- `DAB_SDRPLAY_AUDIO_RESET_TIMEOUT_SECONDS` controls how long the tool waits before forcing audio recovery reset
 - stop playback with `Ctrl+C`
 - the build needs `portaudio-2.0` plus either `fdk-aac` or `faad2`
+
+Status lines:
+- `service-discovered sid=...` means the selected service is present in FIC/MSC metadata
+- `waiting-for-audio sid=...` means sync is back but no valid DAB+ superframe is available yet
+- `playing sid=...` means audio superframes are flowing again and playback resumed
+- `lost-lock ...`, `audio-timeout ...`, and `audio-recovery-reset ...` describe the current recovery path
+
+Decoder note:
+- `fdk-aac` is preferred when available
+- `faad2` builds work, but some stations can still hit AU decode failures such as unsupported gain-control features
 
 ## Null-Symbol Debug Probe
 
@@ -169,14 +181,25 @@ Interpretation:
 
 Implemented:
 - SDRplay HAL with stub and real dynamic-loading path
-- frontend IQ conversion to planar float
-- frontend DC removal
+- frontend IQ conversion to planar float and DC removal
 - rolling null-symbol detector
+- phase-reference detection, coarse timing, and coarse CFO tracking
+- OFDM differential demodulation and softbit generation
+- FIC decode with service and label parsing
+- MSC routing with DAB+ superframe assembly
+- live SDRplay over-the-air audio playback via `dab_sdrplay_audio`
+- recovery path for lock loss and prolonged no-audio conditions
 
-Next:
-- phase-reference detection after null
-- coarse symbol timing
-- coarse frequency offset estimation
+Working well enough for:
+- tuning one Band III ensemble from SDRplay hardware
+- locking to one service with `--sid`
+- recovering from at least some antenna-loss / signal-drop events
+
+Current limitations:
+- recovery is still heuristic, not a production-grade retune/state-machine yet
+- `service-discovered` only means the service mapping exists; it does not guarantee playable audio yet
+- some services remain decoder-limited when built against `faad2`; `fdk-aac` should be preferred
+- the live tool is still SDRplay-specific even though most DSP stages are generic
 
 ## FIC Dump Debugging
 
