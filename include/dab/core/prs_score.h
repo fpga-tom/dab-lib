@@ -25,6 +25,13 @@ typedef struct {
 } dab_prs_reference_score_t;
 
 typedef struct {
+    float signal_energy;
+    float noise_energy;
+    float snr_db;
+    uint32_t used_carriers;
+} dab_prs_snr_result_t;
+
+typedef struct {
     dab_prs_score_config_t config;
 } dab_prs_score_t;
 
@@ -81,5 +88,18 @@ int dab_prs_score_symbol_i16_mode_i_diff_cfo(const dab_prs_fft_t *fft,
                                              float *fft_i,
                                              float *fft_q,
                                              dab_prs_reference_score_t *result);
+int dab_prs_estimate_snr_f32(const float *rx_i,
+                             const float *rx_q,
+                             const float *ref_i,
+                             const float *ref_q,
+                             uint32_t count,
+                             dab_prs_snr_result_t *result);
+int dab_prs_estimate_equalized_snr_f32(const float *rx_i,
+                                       const float *rx_q,
+                                       const float *ref_i,
+                                       const float *ref_q,
+                                       uint32_t count,
+                                       dab_prs_snr_result_t *result);
+int dab_prs_score_to_snr_db(float score, float *snr_db_out);
 
 #endif

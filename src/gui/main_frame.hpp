@@ -9,6 +9,7 @@
 class wxChoice;
 class wxCommandEvent;
 class wxTimerEvent;
+class wxTimer;
 class wxButton;
 class wxStaticText;
 class wxWindow;
@@ -34,13 +35,17 @@ private:
     void UpdatePlaybackControls();
     void StartPlaybackForCurrentSelection();
     void StopPlayback();
+    void OnPlaybackStatusTimer(wxTimerEvent &event);
+    void RefreshPlaybackStatus();
 
     wxChoice *stationChoice_ = nullptr;
     wxButton *startButton_ = nullptr;
     wxButton *stopButton_ = nullptr;
     wxStaticText *controlStatusLabel_ = nullptr;
+    wxStaticText *receiverStatusLabel_ = nullptr;
     wxString scanResultsPath_;
     std::vector<StationEntry> stationEntries_;
+    wxTimer *playbackStatusTimer_ = nullptr;
 };
 
 #endif

@@ -55,6 +55,10 @@ void dab_sync_reset(dab_sync_t *sync) {
     }
     sync->state = (dab_sync_state_t){0};
     sync->state.mode = DAB_SYNC_MODE_IDLE;
+    sync->state.receiver_snr_db = 0.0f;
+    sync->state.receiver_snr_valid = 0;
+    sync->state.spectrum_cn_db = 0.0f;
+    sync->state.spectrum_cn_valid = 0;
 }
 
 void dab_sync_on_null_candidate(dab_sync_t *sync, const dab_null_event_t *event) {

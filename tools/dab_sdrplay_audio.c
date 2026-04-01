@@ -19,6 +19,16 @@
 #include "dab/hal/sdrplay_device.h"
 #include "dab/simd/simd.h"
 
+#if defined(DAB_GUI_PLAYBACK_EMBEDDED)
+void dab_gui_embedded_audio_status_reset(void);
+void dab_gui_embedded_audio_status_update(int locked,
+                                          int has_receiver_snr,
+                                          float receiver_snr_db,
+                                          int has_spectrum_cn,
+                                          float spectrum_cn_db,
+                                          float prs_score);
+#endif
+
 typedef struct {
     int16_t *iq;
     uint32_t capacity_samples;
@@ -75,6 +85,75 @@ static int g_debug_logs = 1;
 static void on_signal_stop(int signum) {
     (void)signum;
     g_stop_requested = 1;
+}
+
+static void publish_playback_status(const dab_sync_t *sync) {
+#if defined(DAB_GUI_PLAYBACK_EMBEDDED)
+    if (sync == 0) {
+        dab_gui_embedded_audio_status_reset();
+        return;
+    }
+
+    dab_gui_embedded_audio_status_update(sync->state.locked,
+                                         sync->state.receiver_snr_valid,
+                                         sync->state.receiver_snr_db,
+                                         sync->state.spectrum_cn_valid,
+                                         sync->state.spectrum_cn_db,
+                                         sync->state.prs_score);
+#else
+    (void)sync;
+#endif
+}
+
+static int estimate_spectrum_cn_db(const float *fft_i,
+                                   const float *fft_q,
+                                   float *cn_db_out) {
+    const uint32_t inactive_low_start = 772u;
+    const uint32_t inactive_low_end = 1020u;
+    const uint32_t inactive_high_start = 1028u;
+    const uint32_t inactive_high_end = 1276u;
+    double active_power = 0.0;
+    double inactive_power = 0.0;
+    uint32_t active_count = 0u;
+    uint32_t inactive_count = 0u;
+    uint32_t bin;
+
+    if (fft_i == 0 || fft_q == 0 || cn_db_out == 0) {
+        return -1;
+    }
+
+    for (bin = 0u; bin < DAB_MODE_I_FFT_SAMPLES; ++bin) {
+        const double re = (double)fft_i[bin];
+        const double im = (double)fft_q[bin];
+        const double power = (re * re) + (im * im);
+        const int is_active =
+            (bin <= DAB_MODE_I_ACTIVE_CARRIER_HALF) ||
+            (bin >= (DAB_MODE_I_FFT_SAMPLES - DAB_MODE_I_ACTIVE_CARRIER_HALF));
+
+        if (bin == 1024u) {
+            continue;
+        }
+
+        if (is_active) {
+            active_power += power;
+            active_count++;
+            continue;
+        }
+
+        if ((bin >= inactive_low_start && bin <= inactive_low_end) ||
+            (bin >= inactive_high_start && bin <= inactive_high_end)) {
+            inactive_power += power;
+            inactive_count++;
+        }
+    }
+
+    if (active_count == 0u || inactive_count == 0u || inactive_power <= 0.0) {
+        return -1;
+    }
+
+    *cn_db_out = (float)(10.0 * log10((active_power / (double)active_count) /
+                                      (inactive_power / (double)inactive_count)));
+    return 0;
 }
 
 static void print_usage(const char *argv0) {
@@ -225,6 +304,7 @@ static void reset_runtime_state(dab_null_detect_t *detector,
     }
     if (sync != 0) {
         dab_sync_reset(sync);
+        publish_playback_status(sync);
     }
     if (ofdm != 0) {
         dab_ofdm_reset(ofdm);
@@ -1140,6 +1220,7 @@ int main(int argc, char **argv) {
         printf(" sid=0x%08x", selected_audio_sid);
     }
     printf("\n");
+    publish_playback_status(&sync);
 
     while (g_stop_requested == 0) {
         dab_sdr_block_view_t hist_view;
@@ -1319,6 +1400,7 @@ int main(int argc, char **argv) {
         {
             dab_prs_result_t coarse = {0};
             dab_prs_reference_score_t ref_score = {0};
+            dab_prs_snr_result_t prs_snr = {0};
             float prs_plot_i[DAB_MODE_I_ACTIVE_CARRIERS];
             float prs_plot_q[DAB_MODE_I_ACTIVE_CARRIERS];
             int coarse_rc = dab_prs_score_search_i16(&cp_score, &hist_view, &pending.candidate, &coarse);
@@ -1376,6 +1458,26 @@ int main(int argc, char **argv) {
                         pending.pending = 0;
                         pending.predicted = 0;
                         continue;
+                    }
+                    if (estimate_spectrum_cn_db(fft_i, fft_q, &sync.state.spectrum_cn_db) == 0) {
+                        sync.state.spectrum_cn_valid = 1;
+                    } else {
+                        sync.state.spectrum_cn_db = 0.0f;
+                        sync.state.spectrum_cn_valid = 0;
+                    }
+                    if (dab_prs_estimate_equalized_snr_f32(active_i,
+                                                           active_q,
+                                                           ofdm.prs_ref_i,
+                                                           ofdm.prs_ref_q,
+                                                           DAB_MODE_I_ACTIVE_CARRIERS,
+                                                           &prs_snr) == 0) {
+                        sync.state.receiver_snr_db = prs_snr.snr_db;
+                        sync.state.receiver_snr_valid = 1;
+                    } else if (dab_prs_score_to_snr_db(ref_score.score, &sync.state.receiver_snr_db) == 0) {
+                        sync.state.receiver_snr_valid = 1;
+                    } else {
+                        sync.state.receiver_snr_db = 0.0f;
+                        sync.state.receiver_snr_valid = 0;
                     }
                     phase_correct_prs_for_plot(&ofdm, active_i, active_q, prs_plot_i, prs_plot_q);
                     if (prs_fft_gnuplot_fp != 0 &&
@@ -1443,6 +1545,7 @@ int main(int argc, char **argv) {
                                       sync.state.fine_freq_error_hz,
                                       sync.state.carrier_offset_bins);
                     }
+                    publish_playback_status(&sync);
 
                     {
                         dab_ofdm_buffers_t ofdm_buffers;

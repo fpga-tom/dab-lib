@@ -32,6 +32,10 @@ typedef struct {
     float fine_freq_error_hz;
     float cfo_integrator_hz;
     float prs_score;
+    float receiver_snr_db;
+    int receiver_snr_valid;
+    float spectrum_cn_db;
+    int spectrum_cn_valid;
     uint32_t good_frames;
     uint32_t bad_frames;
     dab_sync_mode_t mode;

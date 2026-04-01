@@ -404,3 +404,269 @@ int dab_prs_score_symbol_i16_mode_i_diff_cfo(const dab_prs_fft_t *fft,
     }
     return dab_prs_score_reference_mode_i_diff_f32(fft_i, fft_q, result);
 }
+
+int dab_prs_estimate_snr_f32(const float *rx_i,
+                             const float *rx_q,
+                             const float *ref_i,
+                             const float *ref_q,
+                             uint32_t count,
+                             dab_prs_snr_result_t *result) {
+    uint32_t i;
+    uint32_t used = 0u;
+    double cross_re = 0.0;
+    double cross_im = 0.0;
+    double ref_energy = 0.0;
+    double signal_energy = 0.0;
+    double noise_energy = 0.0;
+    double gain_re;
+    double gain_im;
+
+    if (rx_i == 0 || rx_q == 0 || ref_i == 0 || ref_q == 0 || result == 0 || count == 0u) {
+        return -1;
+    }
+
+    for (i = 0u; i < count; ++i) {
+        const double ri = (double)ref_i[i];
+        const double rq = (double)ref_q[i];
+        const double re = (double)rx_i[i];
+        const double im = (double)rx_q[i];
+        const double carrier_ref_energy = (ri * ri) + (rq * rq);
+
+        if (carrier_ref_energy <= 0.0) {
+            continue;
+        }
+
+        cross_re += (re * ri) + (im * rq);
+        cross_im += (im * ri) - (re * rq);
+        ref_energy += carrier_ref_energy;
+        used++;
+    }
+
+    if (used == 0u || ref_energy <= 0.0) {
+        return -1;
+    }
+
+    gain_re = cross_re / ref_energy;
+    gain_im = cross_im / ref_energy;
+
+    for (i = 0u; i < count; ++i) {
+        const double ri = (double)ref_i[i];
+        const double rq = (double)ref_q[i];
+        const double re = (double)rx_i[i];
+        const double im = (double)rx_q[i];
+        const double carrier_ref_energy = (ri * ri) + (rq * rq);
+
+        if (carrier_ref_energy <= 0.0) {
+            continue;
+        }
+
+        {
+            const double fit_re = (gain_re * ri) - (gain_im * rq);
+            const double fit_im = (gain_re * rq) + (gain_im * ri);
+            const double err_re = re - fit_re;
+            const double err_im = im - fit_im;
+
+            signal_energy += (fit_re * fit_re) + (fit_im * fit_im);
+            noise_energy += (err_re * err_re) + (err_im * err_im);
+        }
+    }
+
+    if (signal_energy <= 0.0 || noise_energy <= 0.0) {
+        return -1;
+    }
+
+    result->signal_energy = (float)signal_energy;
+    result->noise_energy = (float)noise_energy;
+    result->snr_db = (float)(10.0 * log10(signal_energy / noise_energy));
+    result->used_carriers = used;
+    return 0;
+}
+
+int dab_prs_estimate_equalized_snr_f32(const float *rx_i,
+                                       const float *rx_q,
+                                       const float *ref_i,
+                                       const float *ref_q,
+                                       uint32_t count,
+                                       dab_prs_snr_result_t *result) {
+    enum { DAB_PRS_SNR_SMOOTH_RADIUS = 8 };
+
+    uint32_t i;
+    uint32_t used = 0u;
+    double inv_i[1537];
+    double inv_q[1537];
+    uint8_t valid[1537];
+    double eq_cross_re = 0.0;
+    double eq_cross_im = 0.0;
+    double ref_energy = 0.0;
+    double signal_energy = 0.0;
+    double noise_energy = 0.0;
+    double fit_re;
+    double fit_im;
+
+    if (rx_i == 0 || rx_q == 0 || ref_i == 0 || ref_q == 0 || result == 0 || count == 0u || count > 1537u) {
+        return -1;
+    }
+
+    for (i = 0u; i < count; ++i) {
+        const double si = (double)rx_i[i];
+        const double sq = (double)rx_q[i];
+        const double ri = (double)ref_i[i];
+        const double rq = (double)ref_q[i];
+        const double sym_energy = (si * si) + (sq * sq);
+        const double ref_bin_energy = (ri * ri) + (rq * rq);
+
+        if (sym_energy <= 1.0e-12 || ref_bin_energy <= 0.0) {
+            inv_i[i] = 0.0;
+            inv_q[i] = 0.0;
+            valid[i] = 0u;
+            continue;
+        }
+
+        inv_i[i] = ((ri * si) + (rq * sq)) / sym_energy;
+        inv_q[i] = ((rq * si) - (ri * sq)) / sym_energy;
+        valid[i] = 1u;
+    }
+
+    for (i = 0u; i < count; ++i) {
+        const double ri = (double)ref_i[i];
+        const double rq = (double)ref_q[i];
+        const double ref_bin_energy = (ri * ri) + (rq * rq);
+        double avg_inv_re = 0.0;
+        double avg_inv_im = 0.0;
+        uint32_t avg_count = 0u;
+        uint32_t j0;
+        uint32_t j1;
+        uint32_t j;
+        double eq_re;
+        double eq_im;
+
+        if (ref_bin_energy <= 0.0) {
+            continue;
+        }
+
+        j0 = i > DAB_PRS_SNR_SMOOTH_RADIUS ? i - DAB_PRS_SNR_SMOOTH_RADIUS : 0u;
+        j1 = i + DAB_PRS_SNR_SMOOTH_RADIUS;
+        if (j1 >= count) {
+            j1 = count - 1u;
+        }
+
+        for (j = j0; j <= j1; ++j) {
+            if (valid[j] == 0u) {
+                continue;
+            }
+            avg_inv_re += inv_i[j];
+            avg_inv_im += inv_q[j];
+            avg_count++;
+        }
+
+        if (avg_count == 0u) {
+            continue;
+        }
+
+        avg_inv_re /= (double)avg_count;
+        avg_inv_im /= (double)avg_count;
+        eq_re = ((double)rx_i[i] * avg_inv_re) - ((double)rx_q[i] * avg_inv_im);
+        eq_im = ((double)rx_i[i] * avg_inv_im) + ((double)rx_q[i] * avg_inv_re);
+
+        eq_cross_re += (eq_re * ri) + (eq_im * rq);
+        eq_cross_im += (eq_im * ri) - (eq_re * rq);
+        ref_energy += ref_bin_energy;
+        used++;
+    }
+
+    if (used == 0u || ref_energy <= 0.0) {
+        return -1;
+    }
+
+    fit_re = eq_cross_re / ref_energy;
+    fit_im = eq_cross_im / ref_energy;
+
+    for (i = 0u; i < count; ++i) {
+        const double ri = (double)ref_i[i];
+        const double rq = (double)ref_q[i];
+        const double ref_bin_energy = (ri * ri) + (rq * rq);
+        double avg_inv_re = 0.0;
+        double avg_inv_im = 0.0;
+        uint32_t avg_count = 0u;
+        uint32_t j0;
+        uint32_t j1;
+        uint32_t j;
+        double eq_re;
+        double eq_im;
+        double fit_ref_re;
+        double fit_ref_im;
+        double err_re;
+        double err_im;
+
+        if (ref_bin_energy <= 0.0) {
+            continue;
+        }
+
+        j0 = i > DAB_PRS_SNR_SMOOTH_RADIUS ? i - DAB_PRS_SNR_SMOOTH_RADIUS : 0u;
+        j1 = i + DAB_PRS_SNR_SMOOTH_RADIUS;
+        if (j1 >= count) {
+            j1 = count - 1u;
+        }
+
+        for (j = j0; j <= j1; ++j) {
+            if (valid[j] == 0u) {
+                continue;
+            }
+            avg_inv_re += inv_i[j];
+            avg_inv_im += inv_q[j];
+            avg_count++;
+        }
+
+        if (avg_count == 0u) {
+            continue;
+        }
+
+        avg_inv_re /= (double)avg_count;
+        avg_inv_im /= (double)avg_count;
+        eq_re = ((double)rx_i[i] * avg_inv_re) - ((double)rx_q[i] * avg_inv_im);
+        eq_im = ((double)rx_i[i] * avg_inv_im) + ((double)rx_q[i] * avg_inv_re);
+        fit_ref_re = (fit_re * ri) - (fit_im * rq);
+        fit_ref_im = (fit_re * rq) + (fit_im * ri);
+        err_re = eq_re - fit_ref_re;
+        err_im = eq_im - fit_ref_im;
+
+        signal_energy += (fit_ref_re * fit_ref_re) + (fit_ref_im * fit_ref_im);
+        noise_energy += (err_re * err_re) + (err_im * err_im);
+    }
+
+    if (signal_energy <= 0.0 || noise_energy <= 0.0) {
+        return -1;
+    }
+
+    result->signal_energy = (float)signal_energy;
+    result->noise_energy = (float)noise_energy;
+    result->snr_db = (float)(10.0 * log10(signal_energy / noise_energy));
+    result->used_carriers = used;
+    return 0;
+}
+
+int dab_prs_score_to_snr_db(float score, float *snr_db_out) {
+    const double score_d = (double)score;
+    const double epsilon = 1.0e-6;
+    double clamped_score;
+    double snr_linear;
+
+    if (snr_db_out == 0) {
+        return -1;
+    }
+
+    if (!(score_d > 0.0) || !(score_d < 1.0)) {
+        return -1;
+    }
+
+    clamped_score = score_d;
+    if (clamped_score < epsilon) {
+        clamped_score = epsilon;
+    } else if (clamped_score > (1.0 - epsilon)) {
+        clamped_score = 1.0 - epsilon;
+    }
+
+    snr_linear = clamped_score / (1.0 - clamped_score);
+    *snr_db_out = (float)(10.0 * log10(snr_linear));
+    return 0;
+}

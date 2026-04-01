@@ -34,6 +34,7 @@ namespace {
 
 constexpr int kEqualizerTimerId = wxID_HIGHEST + 1;
 constexpr int kScanTimerId = wxID_HIGHEST + 2;
+constexpr int kPlaybackStatusTimerId = wxID_HIGHEST + 3;
 constexpr double kTwoPi = 6.28318530717958647692;
 
 class SpectrumPanel : public wxPanel {
@@ -451,8 +452,12 @@ MainFrame::MainFrame()
 
     root->SetSizer(layout);
     Centre();
+    playbackStatusTimer_ = new wxTimer(this, kPlaybackStatusTimerId);
+    Bind(wxEVT_TIMER, &MainFrame::OnPlaybackStatusTimer, this, kPlaybackStatusTimerId);
+    playbackStatusTimer_->Start(400);
     ReloadStationsFromScanResults();
     UpdatePlaybackControls();
+    RefreshPlaybackStatus();
 }
 
 wxWindow *MainFrame::CreateBottomPanel(wxWindow *parent) {
@@ -463,28 +468,36 @@ wxWindow *MainFrame::CreateBottomPanel(wxWindow *parent) {
     layout->Add(new StationLogoPanel(panel), 0, wxEXPAND | wxALL, 12);
 
     auto *controls = new wxBoxSizer(wxVERTICAL);
+    auto *receiverPanel = new wxBoxSizer(wxVERTICAL);
+    auto *content = new wxBoxSizer(wxHORIZONTAL);
     auto *title = new wxStaticText(panel, wxID_ANY, "Playback controls");
+    auto *receiverTitle = new wxStaticText(panel, wxID_ANY, "Receiver");
     wxFont titleFont = title->GetFont();
     titleFont.SetWeight(wxFONTWEIGHT_BOLD);
     title->SetFont(titleFont);
+    receiverTitle->SetFont(titleFont);
 
     controlStatusLabel_ = new wxStaticText(panel, wxID_ANY, "Scan stations to populate the list");
     controlStatusLabel_->SetForegroundColour(wxColour(95, 104, 116));
+    receiverStatusLabel_ = new wxStaticText(panel, wxID_ANY, "Receiver: idle");
+    receiverStatusLabel_->SetForegroundColour(wxColour(95, 104, 116));
+    receiverStatusLabel_->SetMinSize(wxSize(260, -1));
+    receiverStatusLabel_->Wrap(260);
 
     auto *stationLabel = new wxStaticText(panel, wxID_ANY, "Station");
     stationChoice_ = new wxChoice(panel, wxID_ANY);
 
     auto *buttonRow = new wxBoxSizer(wxHORIZONTAL);
-    auto *scanButton = new wxButton(panel, wxID_ANY, "Scan");
     startButton_ = new wxButton(panel, wxID_ANY, "Start");
     stopButton_ = new wxButton(panel, wxID_ANY, "Stop");
+    auto *scanButton = new wxButton(panel, wxID_ANY, "Scan");
     scanButton->SetMinSize(wxSize(120, 38));
     startButton_->SetMinSize(wxSize(120, 38));
     stopButton_->SetMinSize(wxSize(120, 38));
 
-    buttonRow->Add(scanButton, 0, wxRIGHT, 10);
     buttonRow->Add(startButton_, 0, wxRIGHT, 10);
-    buttonRow->Add(stopButton_, 0);
+    buttonRow->Add(stopButton_, 0, wxRIGHT, 10);
+    buttonRow->Add(scanButton, 0);
 
     scanButton->Bind(wxEVT_BUTTON, &MainFrame::OnScanButton, this);
     startButton_->Bind(wxEVT_BUTTON, &MainFrame::OnStartButton, this);
@@ -497,7 +510,14 @@ wxWindow *MainFrame::CreateBottomPanel(wxWindow *parent) {
     controls->Add(stationChoice_, 0, wxEXPAND | wxBOTTOM, 12);
     controls->Add(buttonRow, 0);
 
-    layout->Add(controls, 1, wxEXPAND | wxTOP | wxRIGHT | wxBOTTOM, 18);
+    receiverPanel->Add(receiverTitle, 0, wxBOTTOM, 4);
+    receiverPanel->Add(receiverStatusLabel_, 0, wxTOP, 2);
+    receiverPanel->AddStretchSpacer(1);
+
+    content->Add(controls, 1, wxEXPAND | wxRIGHT, 24);
+    content->Add(receiverPanel, 0, wxEXPAND);
+
+    layout->Add(content, 1, wxEXPAND | wxTOP | wxRIGHT | wxBOTTOM, 18);
     panel->SetSizer(layout);
     return panel;
 }
@@ -665,6 +685,49 @@ void MainFrame::UpdatePlaybackControls() {
     if (stopButton_ != nullptr) {
         stopButton_->Enable(isPlaying);
     }
+}
+
+void MainFrame::OnPlaybackStatusTimer(wxTimerEvent &) {
+    RefreshPlaybackStatus();
+}
+
+void MainFrame::RefreshPlaybackStatus() {
+    dab_gui_playback_status_t status{};
+
+    if (receiverStatusLabel_ == nullptr || dab_gui_playback_get_status(&status) != 0) {
+        return;
+    }
+
+    if (!status.running) {
+        receiverStatusLabel_->SetLabel("Receiver: idle");
+        return;
+    }
+
+    if (!status.locked) {
+        receiverStatusLabel_->SetLabel(wxString::Format("Receiver: acquiring, PRS %.3f", status.prs_score));
+        return;
+    }
+
+    if (status.has_receiver_snr) {
+        if (status.has_spectrum_cn) {
+            receiverStatusLabel_->SetLabel(
+                wxString::Format("Receiver: locked, SNR %.1f dB, C/N %.1f dB, PRS %.3f",
+                                 status.receiver_snr_db,
+                                 status.spectrum_cn_db,
+                                 status.prs_score)
+            );
+        } else {
+            receiverStatusLabel_->SetLabel(
+                wxString::Format("Receiver: locked, SNR %.1f dB, PRS %.3f",
+                                 status.receiver_snr_db,
+                                 status.prs_score)
+            );
+        }
+        return;
+    }
+
+    receiverStatusLabel_->SetLabel(wxString::Format("Receiver: locked, estimating SNR, PRS %.3f",
+                                                    status.prs_score));
 }
 
 void MainFrame::StopPlayback() {
