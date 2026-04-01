@@ -1,12 +1,16 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(dab_lib C)
+project(dab_lib C CXX)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(DAB_BUILD_TESTS "Build unit tests" ON)
+option(DAB_BUILD_GUI "Build wxWidgets GUI prototype" ON)
 option(DAB_ENABLE_AVX2 "Enable AVX2 backend when supported" ON)
 option(DAB_ENABLE_NEON "Enable NEON backend when supported" ON)
 
@@ -54,6 +58,50 @@ target_include_directories(dab
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+
+if(DAB_BUILD_GUI)
+    find_package(wxWidgets QUIET COMPONENTS core base)
+    if(wxWidgets_FOUND)
+        include(${wxWidgets_USE_FILE})
+
+        add_executable(dab_sdrplay_scan
+            tools/dab_sdrplay_scan.c
+        )
+
+        target_link_libraries(dab_sdrplay_scan PRIVATE dab m)
+
+        add_executable(dab_gui
+            src/gui/main.cpp
+            src/gui/main_frame.cpp
+            src/gui/embedded_audio_playback_backend.c
+            src/gui/embedded_audio_scan_backend.c
+            tools/audio_playback.c
+        )
+
+        target_include_directories(dab_gui PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/gui
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools
+        )
+
+        target_link_libraries(dab_gui PRIVATE dab ${wxWidgets_LIBRARIES})
+        add_dependencies(dab_gui dab_sdrplay_scan dab_sdrplay_audio)
+        if(PORTAUDIO_FOUND AND (FDK_AAC_FOUND OR FAAD2_FOUND))
+            target_compile_definitions(dab_gui PRIVATE DAB_HAVE_AUDIO_PLAYBACK=1)
+            target_link_libraries(dab_gui PRIVATE PkgConfig::PORTAUDIO)
+            if(FDK_AAC_FOUND)
+                target_compile_definitions(dab_gui PRIVATE DAB_HAVE_FDK_AAC=1)
+                target_link_libraries(dab_gui PRIVATE PkgConfig::FDK_AAC)
+            endif()
+            if(FAAD2_FOUND)
+                target_compile_definitions(dab_gui PRIVATE DAB_HAVE_FAAD2=1)
+                target_link_libraries(dab_gui PRIVATE PkgConfig::FAAD2)
+            endif()
+        endif()
+    else()
+        message(WARNING "wxWidgets not found; dab_gui target will not be built")
+    endif()
+endif()
 
 add_executable(dab_sdrplay_probe
     tools/sdrplay_probe.c
