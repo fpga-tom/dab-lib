@@ -503,10 +503,21 @@ wxWindow *MainFrame::CreateBottomPanel(wxWindow *parent) {
 }
 
 void MainFrame::OnScanButton(wxCommandEvent &) {
+    if (dab_gui_playback_is_running() != 0) {
+        if (controlStatusLabel_ != nullptr) {
+            controlStatusLabel_->SetLabel("Stopping playback before scan...");
+        }
+        StopPlayback();
+    }
+
     ScanDialog dialog(this, scanResultsPath_);
 
     if (dialog.ShowModal() == wxID_OK && dialog.ScanSucceeded()) {
         ReloadStationsFromScanResults();
+        if (controlStatusLabel_ != nullptr) {
+            controlStatusLabel_->SetLabel("Scan complete. Select a station and press Start.");
+        }
+        UpdatePlaybackControls();
     }
 }
 
