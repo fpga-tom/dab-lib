@@ -810,8 +810,8 @@ wxWindow *MainFrame::CreateBottomPanel(wxWindow *parent) {
     controlStatusLabel_->SetForegroundColour(wxColour(95, 104, 116));
     receiverStatusLabel_ = new wxStaticText(panel, wxID_ANY, "Receiver: idle");
     receiverStatusLabel_->SetForegroundColour(wxColour(95, 104, 116));
-    receiverStatusLabel_->SetMinSize(wxSize(260, -1));
-    receiverStatusLabel_->Wrap(260);
+    receiverStatusLabel_->SetMinSize(wxSize(300, -1));
+    receiverStatusLabel_->Wrap(300);
 
     auto *stationLabel = new wxStaticText(panel, wxID_ANY, "Station");
     stationChoice_ = new wxChoice(panel, wxID_ANY);
@@ -844,7 +844,7 @@ wxWindow *MainFrame::CreateBottomPanel(wxWindow *parent) {
     receiverPanel->AddStretchSpacer(1);
 
     content->Add(controls, 1, wxEXPAND | wxRIGHT, 24);
-    content->Add(receiverPanel, 0, wxEXPAND);
+    content->Add(receiverPanel, 1, wxEXPAND);
 
     layout->Add(content, 1, wxEXPAND | wxTOP | wxRIGHT | wxBOTTOM, 18);
     panel->SetSizer(layout);
@@ -1024,9 +1024,16 @@ void MainFrame::RefreshPlaybackStatus() {
     dab_gui_playback_status_t status{};
     dab_gui_playback_logo_t logo{};
     auto *stationLogoPanel = dynamic_cast<StationLogoPanel *>(stationLogoPanel_);
+    const int receiverWrapWidth = receiverStatusLabel_ != nullptr
+                                      ? std::max(220, receiverStatusLabel_->GetClientSize().GetWidth())
+                                      : 0;
 
     if (receiverStatusLabel_ == nullptr || dab_gui_playback_get_status(&status) != 0) {
         return;
+    }
+
+    if (receiverWrapWidth > 0) {
+        receiverStatusLabel_->Wrap(receiverWrapWidth);
     }
 
     if (!status.running) {
