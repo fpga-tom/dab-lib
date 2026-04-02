@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "dab/config.h"
+#include "dab/core/audio_eq.h"
 #include "dab/core/audio_spectrum.h"
 #include "dab/core/msc.h"
 
@@ -58,6 +59,10 @@ typedef struct {
     uint32_t missing_superframe_reports;
     uint32_t consecutive_decode_failures;
     uint32_t total_decode_failures;
+    dab_audio_eq_t eq;
+    int16_t *eq_pcm;
+    uint32_t eq_pcm_frames;
+    uint64_t eq_gain_version;
     dab_audio_spectrum_analyzer_t spectrum;
 } dab_audio_playback_t;
 
@@ -68,6 +73,7 @@ typedef void (*dab_audio_playback_spectrum_callback_t)(const float *bins,
 
 void dab_audio_playback_set_spectrum_callback(dab_audio_playback_spectrum_callback_t callback,
                                               void *user);
+void dab_audio_playback_set_equalizer_gains(const float *gains_db, uint32_t count);
 void dab_audio_playback_close(dab_audio_playback_t *audio);
 int dab_audio_playback_consume_superframe(dab_audio_playback_t *audio,
                                           const dab_msc_dabplus_superframe_t *superframe);

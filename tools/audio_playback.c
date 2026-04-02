@@ -14,6 +14,9 @@ enum {
 static pthread_mutex_t g_spectrum_callback_mutex = PTHREAD_MUTEX_INITIALIZER;
 static dab_audio_playback_spectrum_callback_t g_spectrum_callback = 0;
 static void *g_spectrum_callback_user = 0;
+static pthread_mutex_t g_equalizer_mutex = PTHREAD_MUTEX_INITIALIZER;
+static float g_equalizer_gains[DAB_AUDIO_EQ_BAND_COUNT] = {0};
+static uint64_t g_equalizer_gain_version = 1u;
 
 void dab_audio_playback_set_spectrum_callback(dab_audio_playback_spectrum_callback_t callback,
                                               void *user) {
@@ -21,6 +24,60 @@ void dab_audio_playback_set_spectrum_callback(dab_audio_playback_spectrum_callba
     g_spectrum_callback = callback;
     g_spectrum_callback_user = user;
     (void)pthread_mutex_unlock(&g_spectrum_callback_mutex);
+}
+
+void dab_audio_playback_set_equalizer_gains(const float *gains_db, uint32_t count) {
+    uint32_t i;
+
+    (void)pthread_mutex_lock(&g_equalizer_mutex);
+    for (i = 0u; i < DAB_AUDIO_EQ_BAND_COUNT; ++i) {
+        g_equalizer_gains[i] = (gains_db != 0 && i < count) ? gains_db[i] : 0.0f;
+    }
+    g_equalizer_gain_version++;
+    (void)pthread_mutex_unlock(&g_equalizer_mutex);
+}
+
+static void dab_audio_playback_sync_equalizer(dab_audio_playback_t *audio) {
+    float gains[DAB_AUDIO_EQ_BAND_COUNT];
+    uint64_t version;
+
+    if (audio == 0 || audio->sample_rate == 0u || audio->channels == 0u) {
+        return;
+    }
+
+    (void)pthread_mutex_lock(&g_equalizer_mutex);
+    memcpy(gains, g_equalizer_gains, sizeof(gains));
+    version = g_equalizer_gain_version;
+    (void)pthread_mutex_unlock(&g_equalizer_mutex);
+
+    if (audio->eq.configured == 0u) {
+        dab_audio_eq_init(&audio->eq);
+        if (dab_audio_eq_configure(&audio->eq, audio->sample_rate, audio->channels) != 0) {
+            return;
+        }
+        audio->eq_gain_version = 0u;
+    }
+
+    if (audio->eq_gain_version != version) {
+        dab_audio_eq_set_gains_db(&audio->eq, gains, DAB_AUDIO_EQ_BAND_COUNT);
+        audio->eq_gain_version = version;
+    }
+}
+
+static int dab_audio_playback_ensure_eq_buffer(dab_audio_playback_t *audio, uint32_t frames) {
+    if (audio == 0 || frames == 0u) {
+        return -1;
+    }
+    if (audio->eq_pcm_frames < frames) {
+        int16_t *next = (int16_t *)realloc(audio->eq_pcm,
+                                           (size_t)frames * (size_t)audio->channels * sizeof(int16_t));
+        if (next == 0) {
+            return -1;
+        }
+        audio->eq_pcm = next;
+        audio->eq_pcm_frames = frames;
+    }
+    return 0;
 }
 
 static void dab_audio_playback_publish_spectrum(dab_audio_playback_t *audio,
@@ -114,6 +171,9 @@ static void dab_audio_ring_deinit(dab_audio_playback_t *audio) {
     free(audio->ring);
     audio->ring = 0;
     audio->ring_frames = 0u;
+    free(audio->eq_pcm);
+    audio->eq_pcm = 0;
+    audio->eq_pcm_frames = 0u;
     dab_audio_ring_reset_locked(audio);
 }
 
@@ -382,6 +442,8 @@ static void dab_audio_playback_reset_decoder(dab_audio_playback_t *audio) {
     audio->decoder_backend = DAB_AUDIO_DECODER_NONE;
     audio->sample_rate = 0u;
     audio->channels = 0u;
+    dab_audio_eq_init(&audio->eq);
+    audio->eq_gain_version = 0u;
 }
 
 static int dab_audio_playback_open_stream(dab_audio_playback_t *audio,
@@ -429,6 +491,16 @@ static int dab_audio_playback_open_stream(dab_audio_playback_t *audio,
 
     audio->sample_rate = sample_rate;
     audio->channels = channels;
+    dab_audio_eq_init(&audio->eq);
+    if (dab_audio_eq_configure(&audio->eq, sample_rate, channels) != 0) {
+        fprintf(stderr, "audio playback: eq init failed\n");
+        Pa_StopStream(audio->stream);
+        Pa_CloseStream(audio->stream);
+        audio->stream = 0;
+        return -1;
+    }
+    audio->eq_gain_version = 0u;
+    dab_audio_playback_sync_equalizer(audio);
     dab_audio_spectrum_init(&audio->spectrum, sample_rate, channels);
     ring_seconds = dab_audio_env_u32("DAB_MSC_REF_COMPARE_AUDIO_RING_SECONDS", DAB_AUDIO_RING_SECONDS);
     ring_frames = (size_t)sample_rate * ring_seconds;
@@ -459,14 +531,24 @@ static int dab_audio_playback_open_stream(dab_audio_playback_t *audio,
 static int dab_audio_playback_write_stream(dab_audio_playback_t *audio,
                                            const void *pcm,
                                            unsigned long frames) {
+    const int16_t *pcm_out = (const int16_t *)pcm;
+
     if (audio == 0 || audio->stream == 0 || pcm == 0 || frames == 0u) {
         return -1;
     }
     if (audio->ring_ready == 0u) {
         return -1;
     }
-    dab_audio_playback_publish_spectrum(audio, pcm, (uint32_t)frames);
-    dab_audio_ring_write_frames(audio, (const int16_t *)pcm, (size_t)frames);
+    dab_audio_playback_sync_equalizer(audio);
+    if (audio->eq.configured != 0u) {
+        if (dab_audio_playback_ensure_eq_buffer(audio, (uint32_t)frames) != 0 ||
+            dab_audio_eq_process_i16(&audio->eq, audio->eq_pcm, (const int16_t *)pcm, (uint32_t)frames) != 0) {
+            return -1;
+        }
+        pcm_out = audio->eq_pcm;
+    }
+    dab_audio_playback_publish_spectrum(audio, pcm_out, (uint32_t)frames);
+    dab_audio_ring_write_frames(audio, pcm_out, (size_t)frames);
     return 0;
 }
 

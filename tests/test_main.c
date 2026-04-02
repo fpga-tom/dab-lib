@@ -47,6 +47,7 @@ void test_sdrplay_device_specific_config_propagates_to_samples(void);
 void test_sdrplay_rejects_invalid_device_specific_config(void);
 void test_simd_scalar_fallback(void);
 void test_simd_convert_and_dot(void);
+void test_audio_eq_zero_input_stays_zero(void);
 void test_audio_spectrum_detects_tone_energy(void);
 void test_sync_acquires_and_tracks(void);
 void test_sync_falls_back_to_acquire_after_bad_tracking(void);
@@ -114,6 +115,7 @@ int main(void) {
     test_sdrplay_rejects_invalid_device_specific_config();
     test_simd_scalar_fallback();
     test_simd_convert_and_dot();
+    test_audio_eq_zero_input_stays_zero();
     test_audio_spectrum_detects_tone_energy();
     test_sync_acquires_and_tracks();
     test_sync_falls_back_to_acquire_after_bad_tracking();

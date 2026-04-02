@@ -23,6 +23,7 @@ else()
 endif()
 
 add_library(dab
+    src/core/audio_eq.c
     src/core/audio_spectrum.c
     src/core/block_pool.c
     src/core/frontend.c
@@ -452,6 +453,7 @@ if(DAB_BUILD_TESTS)
     enable_testing()
 
     add_executable(dab_tests
+        tests/test_audio_eq.c
         tests/test_main.c
         tests/test_audio_spectrum.c
         tests/test_block_pool.c

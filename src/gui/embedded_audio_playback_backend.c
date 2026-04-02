@@ -230,3 +230,8 @@ int dab_gui_playback_get_spectrum(dab_gui_playback_spectrum_t *spectrum) {
     (void)pthread_mutex_unlock(&g_playback_mutex);
     return 0;
 }
+
+int dab_gui_playback_set_equalizer(const float *gains_db, uint32_t count) {
+    dab_audio_playback_set_equalizer_gains(gains_db, count);
+    return 0;
+}

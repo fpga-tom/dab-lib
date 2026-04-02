@@ -37,6 +37,7 @@ void dab_gui_playback_stop(void);
 int dab_gui_playback_is_running(void);
 int dab_gui_playback_get_status(dab_gui_playback_status_t *status);
 int dab_gui_playback_get_spectrum(dab_gui_playback_spectrum_t *spectrum);
+int dab_gui_playback_set_equalizer(const float *gains_db, uint32_t count);
 
 #ifdef __cplusplus
 }

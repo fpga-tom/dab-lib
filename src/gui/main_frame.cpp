@@ -1,6 +1,8 @@
 #include "main_frame.hpp"
 #include "dab_gui_backend.h"
 
+#include "dab/core/audio_eq.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -475,6 +477,7 @@ public:
                 if (!applyingPreset_) {
                     presetChoice_->SetStringSelection("Custom");
                     presetStatus_->SetLabel("Manual band adjustment");
+                    PushEqualizerToBackend();
                 }
             });
 
@@ -515,6 +518,15 @@ private:
         ApplyPreset(static_cast<size_t>(event.GetSelection()));
     }
 
+    void PushEqualizerToBackend() {
+        float gains[DAB_AUDIO_EQ_BAND_COUNT] = {0};
+
+        for (size_t i = 0; i < sliders_.size() && i < DAB_AUDIO_EQ_BAND_COUNT; ++i) {
+            gains[i] = (float)sliders_[i]->GetValue();
+        }
+        (void)dab_gui_playback_set_equalizer(gains, DAB_AUDIO_EQ_BAND_COUNT);
+    }
+
     void ApplyPreset(size_t presetIndex) {
         const auto &preset = Presets()[presetIndex];
         applyingPreset_ = true;
@@ -524,6 +536,7 @@ private:
         }
         applyingPreset_ = false;
         presetStatus_->SetLabel(preset.description);
+        PushEqualizerToBackend();
         Layout();
     }
 
