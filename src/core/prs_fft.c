@@ -5,6 +5,14 @@
 #include "dab/simd/simd.h"
 #include "prs_fft_backend.h"
 
+#if defined(DAB_ENABLE_AVX2) && (defined(__AVX2__) || defined(_M_AVX2))
+#include <immintrin.h>
+#endif
+
+#if defined(DAB_ENABLE_NEON) && (defined(__ARM_NEON) || defined(__ARM_NEON__))
+#include <arm_neon.h>
+#endif
+
 static const float DAB_TWO_PI_F = 6.28318530717958647692f;
 
 static int dab_prs_fft_is_power_of_two(uint32_t n) {
@@ -158,7 +166,99 @@ int dab_prs_fft_execute_i16_cfo(const dab_prs_fft_t *fft,
         float rot_im = (float)sin(base_phase);
         uint32_t n;
 
-        for (n = 0u; n < fft->config.fft_samples; ++n) {
+#if defined(DAB_ENABLE_AVX2) && (defined(__AVX2__) || defined(_M_AVX2))
+        {
+            const float lane_re_init[8] = {
+                1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f
+            };
+            const float lane_im_init[8] = {
+                0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f
+            };
+            float lane_re[8];
+            float lane_im[8];
+            float block_step_re;
+            float block_step_im;
+            uint32_t k;
+
+            lane_re[0] = lane_re_init[0];
+            lane_im[0] = lane_im_init[0];
+            for (k = 1u; k < 8u; ++k) {
+                lane_re[k] = (lane_re[k - 1u] * step_re) - (lane_im[k - 1u] * step_im);
+                lane_im[k] = (lane_re[k - 1u] * step_im) + (lane_im[k - 1u] * step_re);
+            }
+            block_step_re = lane_re[7];
+            block_step_im = lane_im[7];
+            block_step_re = (block_step_re * step_re) - (block_step_im * step_im);
+            block_step_im = (lane_re[7] * step_im) + (lane_im[7] * step_re);
+
+            for (n = 0u; n + 8u <= fft->config.fft_samples; n += 8u) {
+                const __m256 in_re = _mm256_loadu_ps(out_i + n);
+                const __m256 in_im = _mm256_loadu_ps(out_q + n);
+                const __m256 lane_rot_re =
+                    _mm256_sub_ps(_mm256_mul_ps(_mm256_set1_ps(rot_re), _mm256_loadu_ps(lane_re)),
+                                  _mm256_mul_ps(_mm256_set1_ps(rot_im), _mm256_loadu_ps(lane_im)));
+                const __m256 lane_rot_im =
+                    _mm256_add_ps(_mm256_mul_ps(_mm256_set1_ps(rot_re), _mm256_loadu_ps(lane_im)),
+                                  _mm256_mul_ps(_mm256_set1_ps(rot_im), _mm256_loadu_ps(lane_re)));
+                const float next_re = (rot_re * block_step_re) - (rot_im * block_step_im);
+                const float next_im = (rot_re * block_step_im) + (rot_im * block_step_re);
+
+                _mm256_storeu_ps(out_i + n,
+                                 _mm256_sub_ps(_mm256_mul_ps(in_re, lane_rot_re),
+                                               _mm256_mul_ps(in_im, lane_rot_im)));
+                _mm256_storeu_ps(out_q + n,
+                                 _mm256_add_ps(_mm256_mul_ps(in_re, lane_rot_im),
+                                               _mm256_mul_ps(in_im, lane_rot_re)));
+
+                rot_re = next_re;
+                rot_im = next_im;
+            }
+        }
+#elif defined(DAB_ENABLE_NEON) && (defined(__ARM_NEON) || defined(__ARM_NEON__))
+        {
+            float lane_re[4];
+            float lane_im[4];
+            float block_step_re;
+            float block_step_im;
+            uint32_t k;
+
+            lane_re[0] = 1.0f;
+            lane_im[0] = 0.0f;
+            for (k = 1u; k < 4u; ++k) {
+                lane_re[k] = (lane_re[k - 1u] * step_re) - (lane_im[k - 1u] * step_im);
+                lane_im[k] = (lane_re[k - 1u] * step_im) + (lane_im[k - 1u] * step_re);
+            }
+            block_step_re = lane_re[3];
+            block_step_im = lane_im[3];
+            block_step_re = (block_step_re * step_re) - (block_step_im * step_im);
+            block_step_im = (lane_re[3] * step_im) + (lane_im[3] * step_re);
+
+            for (n = 0u; n + 4u <= fft->config.fft_samples; n += 4u) {
+                const float32x4_t in_re = vld1q_f32(out_i + n);
+                const float32x4_t in_im = vld1q_f32(out_q + n);
+                const float32x4_t lane_rot_re =
+                    vsubq_f32(vmulq_f32(vdupq_n_f32(rot_re), vld1q_f32(lane_re)),
+                              vmulq_f32(vdupq_n_f32(rot_im), vld1q_f32(lane_im)));
+                const float32x4_t lane_rot_im =
+                    vaddq_f32(vmulq_f32(vdupq_n_f32(rot_re), vld1q_f32(lane_im)),
+                              vmulq_f32(vdupq_n_f32(rot_im), vld1q_f32(lane_re)));
+                const float next_re = (rot_re * block_step_re) - (rot_im * block_step_im);
+                const float next_im = (rot_re * block_step_im) + (rot_im * block_step_re);
+
+                vst1q_f32(out_i + n,
+                          vsubq_f32(vmulq_f32(in_re, lane_rot_re),
+                                    vmulq_f32(in_im, lane_rot_im)));
+                vst1q_f32(out_q + n,
+                          vaddq_f32(vmulq_f32(in_re, lane_rot_im),
+                                    vmulq_f32(in_im, lane_rot_re)));
+
+                rot_re = next_re;
+                rot_im = next_im;
+            }
+        }
+#endif
+
+        for (; n < fft->config.fft_samples; ++n) {
             const float in_re = out_i[n];
             const float in_im = out_q[n];
             const float next_re = (rot_re * step_re) - (rot_im * step_im);
