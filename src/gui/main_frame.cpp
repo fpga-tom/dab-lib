@@ -1045,7 +1045,7 @@ void MainFrame::RefreshPlaybackStatus() {
                                       ? std::max(220, receiverStatusLabel_->GetClientSize().GetWidth())
                                       : 0;
 
-    if (receiverStatusLabel_ == nullptr || dab_gui_playback_get_status(&status) != 0) {
+    if (dab_gui_playback_get_status(&status) != 0) {
         return;
     }
 
@@ -1054,7 +1054,9 @@ void MainFrame::RefreshPlaybackStatus() {
     }
 
     if (!status.running) {
-        receiverStatusLabel_->SetLabel("Receiver: idle");
+        if (receiverStatusLabel_ != nullptr) {
+            receiverStatusLabel_->SetLabel("Receiver: idle");
+        }
         if (stationLogoPanel != nullptr && lastLogoGeneration_ != 0u) {
             stationLogoPanel->ClearLogo();
             lastLogoGeneration_ = 0u;
@@ -1079,6 +1081,10 @@ void MainFrame::RefreshPlaybackStatus() {
     } else if (stationLogoPanel != nullptr && logo.valid == 0 && lastLogoGeneration_ != 0u) {
         stationLogoPanel->ClearLogo();
         lastLogoGeneration_ = 0u;
+    }
+
+    if (receiverStatusLabel_ == nullptr) {
+        return;
     }
 
     if (!status.locked) {
