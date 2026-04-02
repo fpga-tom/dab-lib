@@ -48,6 +48,17 @@ static dab_gui_mot_state_t g_mot_state = { .current_transport_id = -1 };
 
 #define DAB_GUI_PLAYBACK_EMBEDDED 1
 
+static int dab_gui_env_enabled(const char *name) {
+    const char *value = getenv(name);
+
+    if (value == 0 || value[0] == '\0') {
+        return 0;
+    }
+    return strcmp(value, "0") != 0 &&
+           strcmp(value, "false") != 0 &&
+           strcmp(value, "off") != 0;
+}
+
 static void dab_gui_dump_bytes_to_file(const char *path, const uint8_t *data, size_t size) {
     FILE *fp;
 
@@ -89,7 +100,9 @@ static void dab_gui_embedded_audio_logo_publish(const uint8_t *data, size_t size
         return;
     }
 
-    dab_gui_dump_bytes_to_file("dab_gui_logo_dump.bin", data, size);
+    if (dab_gui_env_enabled("DAB_GUI_DUMP_LOGO")) {
+        dab_gui_dump_bytes_to_file("dab_gui_logo_dump.bin", data, size);
+    }
 
     (void)pthread_mutex_lock(&g_playback_mutex);
     g_playback_logo.valid = 1;
@@ -286,7 +299,9 @@ static void dab_gui_mot_process_object_data(const uint8_t *object_data, size_t o
         return;
     }
 
-    dab_gui_dump_bytes_to_file("dab_gui_mot_object_dump.bin", object_data, object_size);
+    if (dab_gui_env_enabled("DAB_GUI_DUMP_MOT")) {
+        dab_gui_dump_bytes_to_file("dab_gui_mot_object_dump.bin", object_data, object_size);
+    }
 
     content_type = (uint8_t)((object_data[5] & 0x7Fu) >> 1u);
     header_size = (uint16_t)(((uint16_t)(object_data[3] & 0x0Fu) << 9u) |
