@@ -47,6 +47,19 @@ constexpr int kEqualizerTimerId = wxID_HIGHEST + 1;
 constexpr int kScanTimerId = wxID_HIGHEST + 2;
 constexpr int kPlaybackStatusTimerId = wxID_HIGHEST + 3;
 
+static bool EnvEnabled(const char *name, bool fallback = false) {
+    const char *value = std::getenv(name);
+
+    if (value == nullptr || value[0] == '\0') {
+        return fallback;
+    }
+    return std::strcmp(value, "0") != 0 &&
+           std::strcmp(value, "false") != 0 &&
+           std::strcmp(value, "False") != 0 &&
+           std::strcmp(value, "off") != 0 &&
+           std::strcmp(value, "OFF") != 0;
+}
+
 static wxBitmapType DetectBitmapType(const uint8_t *bytes, size_t size) {
     static const uint8_t kPngSignature[] = {0x89u, 'P', 'N', 'G', '\r', '\n', 0x1au, '\n'};
     static const uint8_t kJpegSignature[] = {0xffu, 0xd8u, 0xffu};
@@ -789,6 +802,7 @@ MainFrame::MainFrame()
 }
 
 wxWindow *MainFrame::CreateBottomPanel(wxWindow *parent) {
+    const bool showReceiverSection = EnvEnabled("DAB_GUI_SHOW_RECEIVER", false);
     auto *panel = new wxPanel(parent);
     panel->SetBackgroundColour(wxColour(223, 228, 234));
 
@@ -797,21 +811,14 @@ wxWindow *MainFrame::CreateBottomPanel(wxWindow *parent) {
     layout->Add(stationLogoPanel_, 0, wxEXPAND | wxALL, 12);
 
     auto *controls = new wxBoxSizer(wxVERTICAL);
-    auto *receiverPanel = new wxBoxSizer(wxVERTICAL);
     auto *content = new wxBoxSizer(wxHORIZONTAL);
     auto *title = new wxStaticText(panel, wxID_ANY, "Playback controls");
-    auto *receiverTitle = new wxStaticText(panel, wxID_ANY, "Receiver");
     wxFont titleFont = title->GetFont();
     titleFont.SetWeight(wxFONTWEIGHT_BOLD);
     title->SetFont(titleFont);
-    receiverTitle->SetFont(titleFont);
 
     controlStatusLabel_ = new wxStaticText(panel, wxID_ANY, "Scan stations to populate the list");
     controlStatusLabel_->SetForegroundColour(wxColour(95, 104, 116));
-    receiverStatusLabel_ = new wxStaticText(panel, wxID_ANY, "Receiver: idle");
-    receiverStatusLabel_->SetForegroundColour(wxColour(95, 104, 116));
-    receiverStatusLabel_->SetMinSize(wxSize(300, -1));
-    receiverStatusLabel_->Wrap(300);
 
     auto *stationLabel = new wxStaticText(panel, wxID_ANY, "Station");
     stationChoice_ = new wxChoice(panel, wxID_ANY);
@@ -839,12 +846,22 @@ wxWindow *MainFrame::CreateBottomPanel(wxWindow *parent) {
     controls->Add(stationChoice_, 0, wxEXPAND | wxBOTTOM, 12);
     controls->Add(buttonRow, 0);
 
-    receiverPanel->Add(receiverTitle, 0, wxBOTTOM, 4);
-    receiverPanel->Add(receiverStatusLabel_, 0, wxTOP, 2);
-    receiverPanel->AddStretchSpacer(1);
-
     content->Add(controls, 1, wxEXPAND | wxRIGHT, 24);
-    content->Add(receiverPanel, 1, wxEXPAND);
+    if (showReceiverSection) {
+        auto *receiverPanel = new wxBoxSizer(wxVERTICAL);
+        auto *receiverTitle = new wxStaticText(panel, wxID_ANY, "Receiver");
+
+        receiverTitle->SetFont(titleFont);
+        receiverStatusLabel_ = new wxStaticText(panel, wxID_ANY, "Receiver: idle");
+        receiverStatusLabel_->SetForegroundColour(wxColour(95, 104, 116));
+        receiverStatusLabel_->SetMinSize(wxSize(300, -1));
+        receiverStatusLabel_->Wrap(300);
+
+        receiverPanel->Add(receiverTitle, 0, wxBOTTOM, 4);
+        receiverPanel->Add(receiverStatusLabel_, 0, wxTOP, 2);
+        receiverPanel->AddStretchSpacer(1);
+        content->Add(receiverPanel, 1, wxEXPAND);
+    }
 
     layout->Add(content, 1, wxEXPAND | wxTOP | wxRIGHT | wxBOTTOM, 18);
     panel->SetSizer(layout);
