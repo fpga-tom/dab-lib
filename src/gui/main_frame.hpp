@@ -43,9 +43,11 @@ private:
     wxButton *stopButton_ = nullptr;
     wxStaticText *controlStatusLabel_ = nullptr;
     wxStaticText *receiverStatusLabel_ = nullptr;
+    wxWindow *stationLogoPanel_ = nullptr;
     wxString scanResultsPath_;
     std::vector<StationEntry> stationEntries_;
     wxTimer *playbackStatusTimer_ = nullptr;
+    uint64_t lastLogoGeneration_ = 0u;
 };
 
 #endif

@@ -22,6 +22,9 @@
 #include <wx/filename.h>
 #include <wx/gauge.h>
 #include <wx/glcanvas.h>
+#include <wx/image.h>
+#include <wx/log.h>
+#include <wx/mstream.h>
 #include <wx/panel.h>
 #include <wx/settings.h>
 #include <wx/sizer.h>
@@ -43,6 +46,32 @@ namespace {
 constexpr int kEqualizerTimerId = wxID_HIGHEST + 1;
 constexpr int kScanTimerId = wxID_HIGHEST + 2;
 constexpr int kPlaybackStatusTimerId = wxID_HIGHEST + 3;
+
+static wxBitmapType DetectBitmapType(const uint8_t *bytes, size_t size) {
+    static const uint8_t kPngSignature[] = {0x89u, 'P', 'N', 'G', '\r', '\n', 0x1au, '\n'};
+    static const uint8_t kJpegSignature[] = {0xffu, 0xd8u, 0xffu};
+    static const uint8_t kGif87aSignature[] = {'G', 'I', 'F', '8', '7', 'a'};
+    static const uint8_t kGif89aSignature[] = {'G', 'I', 'F', '8', '9', 'a'};
+    static const uint8_t kBmpSignature[] = {'B', 'M'};
+
+    if (bytes == nullptr || size == 0u) {
+        return wxBITMAP_TYPE_INVALID;
+    }
+    if (size >= sizeof(kPngSignature) && memcmp(bytes, kPngSignature, sizeof(kPngSignature)) == 0) {
+        return wxBITMAP_TYPE_PNG;
+    }
+    if (size >= sizeof(kJpegSignature) && memcmp(bytes, kJpegSignature, sizeof(kJpegSignature)) == 0) {
+        return wxBITMAP_TYPE_JPEG;
+    }
+    if ((size >= sizeof(kGif87aSignature) && memcmp(bytes, kGif87aSignature, sizeof(kGif87aSignature)) == 0) ||
+        (size >= sizeof(kGif89aSignature) && memcmp(bytes, kGif89aSignature, sizeof(kGif89aSignature)) == 0)) {
+        return wxBITMAP_TYPE_GIF;
+    }
+    if (size >= sizeof(kBmpSignature) && memcmp(bytes, kBmpSignature, sizeof(kBmpSignature)) == 0) {
+        return wxBITMAP_TYPE_BMP;
+    }
+    return wxBITMAP_TYPE_ANY;
+}
 
 class SpectrumPanel : public wxGLCanvas {
 public:
@@ -385,38 +414,53 @@ public:
     explicit StationLogoPanel(wxWindow *parent) : wxPanel(parent) {
         SetMinSize(wxSize(220, 110));
         SetBackgroundStyle(wxBG_STYLE_PAINT);
+        SetBackgroundColour(wxColour(24, 28, 34));
         Bind(wxEVT_PAINT, &StationLogoPanel::OnPaint, this);
+    }
+
+    void ClearLogo() {
+        hasLogo_ = false;
+        logoImage_ = wxImage();
+        Refresh(false);
+    }
+
+    void SetLogoImage(const wxImage &image) {
+        if (!image.IsOk()) {
+            ClearLogo();
+            return;
+        }
+
+        logoImage_ = image.Copy();
+        hasLogo_ = true;
+        Refresh(false);
     }
 
 private:
     void OnPaint(wxPaintEvent &) {
         wxAutoBufferedPaintDC dc(this);
-        wxGCDC gcdc(dc);
-        wxDC &draw = gcdc.IsOk() ? static_cast<wxDC &>(gcdc) : static_cast<wxDC &>(dc);
-
         const wxRect rect = GetClientRect();
-        draw.SetBackground(wxBrush(wxColour(28, 33, 40)));
-        draw.Clear();
+        dc.SetBackground(wxBrush(GetBackgroundColour()));
+        dc.Clear();
 
-        wxRect inset(rect);
-        inset.Deflate(12, 12);
-        draw.SetPen(wxPen(wxColour(70, 82, 96), 2));
-        draw.SetBrush(wxBrush(wxColour(44, 132, 188)));
-        draw.DrawRoundedRectangle(inset, 12);
+        if (hasLogo_ && logoImage_.IsOk()) {
+            const double scaleX = static_cast<double>(std::max(1, rect.width)) /
+                                  static_cast<double>(logoImage_.GetWidth());
+            const double scaleY = static_cast<double>(std::max(1, rect.height)) /
+                                  static_cast<double>(logoImage_.GetHeight());
+            const double scale = std::min(scaleX, scaleY);
+            const int drawWidth = std::max(1, static_cast<int>(std::lround(logoImage_.GetWidth() * scale)));
+            const int drawHeight = std::max(1, static_cast<int>(std::lround(logoImage_.GetHeight() * scale)));
+            const int drawX = rect.x + ((rect.width - drawWidth) / 2);
+            const int drawY = rect.y + ((rect.height - drawHeight) / 2);
+            wxBitmap bitmap(logoImage_.Scale(drawWidth, drawHeight, wxIMAGE_QUALITY_HIGH));
 
-        draw.SetTextForeground(*wxWHITE);
-        wxFont titleFont = GetFont();
-        titleFont.SetPointSize(titleFont.GetPointSize() + 8);
-        titleFont.SetWeight(wxFONTWEIGHT_BOLD);
-        draw.SetFont(titleFont);
-        draw.DrawText("DAB", inset.x + 18, inset.y + 16);
-
-        wxFont bodyFont = GetFont();
-        bodyFont.SetPointSize(bodyFont.GetPointSize() + 1);
-        draw.SetFont(bodyFont);
-        draw.DrawText("Station logo", inset.x + 18, inset.y + 58);
-        draw.DrawText("placeholder", inset.x + 18, inset.y + 80);
+            dc.DrawBitmap(bitmap, drawX, drawY, true);
+            return;
+        }
     }
+
+    wxImage logoImage_;
+    bool hasLogo_ = false;
 };
 
 class EqualizerPanel : public wxPanel {
@@ -749,7 +793,8 @@ wxWindow *MainFrame::CreateBottomPanel(wxWindow *parent) {
     panel->SetBackgroundColour(wxColour(223, 228, 234));
 
     auto *layout = new wxBoxSizer(wxHORIZONTAL);
-    layout->Add(new StationLogoPanel(panel), 0, wxEXPAND | wxALL, 12);
+    stationLogoPanel_ = new StationLogoPanel(panel);
+    layout->Add(stationLogoPanel_, 0, wxEXPAND | wxALL, 12);
 
     auto *controls = new wxBoxSizer(wxVERTICAL);
     auto *receiverPanel = new wxBoxSizer(wxVERTICAL);
@@ -977,6 +1022,8 @@ void MainFrame::OnPlaybackStatusTimer(wxTimerEvent &) {
 
 void MainFrame::RefreshPlaybackStatus() {
     dab_gui_playback_status_t status{};
+    dab_gui_playback_logo_t logo{};
+    auto *stationLogoPanel = dynamic_cast<StationLogoPanel *>(stationLogoPanel_);
 
     if (receiverStatusLabel_ == nullptr || dab_gui_playback_get_status(&status) != 0) {
         return;
@@ -984,7 +1031,30 @@ void MainFrame::RefreshPlaybackStatus() {
 
     if (!status.running) {
         receiverStatusLabel_->SetLabel("Receiver: idle");
+        if (stationLogoPanel != nullptr && lastLogoGeneration_ != 0u) {
+            stationLogoPanel->ClearLogo();
+            lastLogoGeneration_ = 0u;
+        }
         return;
+    }
+
+    if (stationLogoPanel != nullptr &&
+        dab_gui_playback_get_logo(&logo) == 0 &&
+        logo.valid != 0 &&
+        logo.generation != lastLogoGeneration_ &&
+        logo.byte_count > 0u) {
+        wxMemoryInputStream stream(logo.bytes, logo.byte_count);
+        const wxBitmapType bitmapType = DetectBitmapType(logo.bytes, logo.byte_count);
+        wxLogNull suppressImageErrors;
+        wxImage image(stream, bitmapType);
+
+        if (image.IsOk()) {
+            stationLogoPanel->SetLogoImage(image);
+            lastLogoGeneration_ = logo.generation;
+        }
+    } else if (stationLogoPanel != nullptr && logo.valid == 0 && lastLogoGeneration_ != 0u) {
+        stationLogoPanel->ClearLogo();
+        lastLogoGeneration_ = 0u;
     }
 
     if (!status.locked) {
@@ -1027,6 +1097,10 @@ void MainFrame::StopPlayback() {
         controlStatusLabel_->SetLabel("Stopping playback...");
     }
     dab_gui_playback_stop();
+    if (auto *stationLogoPanel = dynamic_cast<StationLogoPanel *>(stationLogoPanel_)) {
+        stationLogoPanel->ClearLogo();
+        lastLogoGeneration_ = 0u;
+    }
     if (controlStatusLabel_ != nullptr) {
         controlStatusLabel_->SetLabel("Playback stopped.");
     }

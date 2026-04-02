@@ -30,6 +30,17 @@ typedef struct {
     float bins[DAB_AUDIO_SPECTRUM_DISPLAY_BINS];
 } dab_gui_playback_spectrum_t;
 
+enum {
+    DAB_GUI_PLAYBACK_LOGO_MAX_BYTES = 256u * 1024u
+};
+
+typedef struct {
+    int valid;
+    uint64_t generation;
+    uint32_t byte_count;
+    uint8_t bytes[DAB_GUI_PLAYBACK_LOGO_MAX_BYTES];
+} dab_gui_playback_logo_t;
+
 int dab_gui_scan_run(const char *output_path, dab_gui_scan_event_callback_t callback, void *user);
 
 int dab_gui_playback_start(uint64_t frequency_hz, uint32_t sid);
@@ -37,6 +48,7 @@ void dab_gui_playback_stop(void);
 int dab_gui_playback_is_running(void);
 int dab_gui_playback_get_status(dab_gui_playback_status_t *status);
 int dab_gui_playback_get_spectrum(dab_gui_playback_spectrum_t *spectrum);
+int dab_gui_playback_get_logo(dab_gui_playback_logo_t *logo);
 int dab_gui_playback_set_equalizer(const float *gains_db, uint32_t count);
 
 #ifdef __cplusplus

@@ -27,6 +27,7 @@ void dab_gui_embedded_audio_status_update(int locked,
                                           int has_spectrum_cn,
                                           float spectrum_cn_db,
                                           float prs_score);
+void dab_gui_embedded_audio_process_superframe(const dab_msc_dabplus_superframe_t *superframe);
 #endif
 
 typedef struct {
@@ -967,6 +968,9 @@ int main(int argc, char **argv) {
     uint8_t reacquire_report_pending = 0u;
     uint8_t playing_reported = 0u;
     uint8_t waiting_for_audio_reported = 0u;
+#if defined(DAB_GUI_PLAYBACK_EMBEDDED)
+    uint64_t last_logo_generation = 0u;
+#endif
     uint64_t audio_timeout_samples = 0u;
     uint64_t samples_since_audio = 0u;
     int rc = 1;
@@ -1255,6 +1259,9 @@ int main(int argc, char **argv) {
                 reacquire_report_pending = 1u;
                 playing_reported = 0u;
                 waiting_for_audio_reported = 0u;
+#if defined(DAB_GUI_PLAYBACK_EMBEDDED)
+                last_logo_generation = 0u;
+#endif
                 samples_since_audio = 0u;
             }
             prev_locked = (uint8_t)(sync.state.locked != 0);
@@ -1300,6 +1307,9 @@ int main(int argc, char **argv) {
             reacquire_report_pending = 1u;
             playing_reported = 0u;
             waiting_for_audio_reported = 0u;
+#if defined(DAB_GUI_PLAYBACK_EMBEDDED)
+            last_logo_generation = 0u;
+#endif
             samples_since_audio = 0u;
             prev_locked = 0u;
             continue;
@@ -1344,6 +1354,9 @@ int main(int argc, char **argv) {
             reacquire_report_pending = 1u;
             playing_reported = 0u;
             waiting_for_audio_reported = 0u;
+#if defined(DAB_GUI_PLAYBACK_EMBEDDED)
+            last_logo_generation = 0u;
+#endif
             samples_since_audio = 0u;
             prev_locked = 0u;
             continue;
@@ -1820,6 +1833,12 @@ int main(int argc, char **argv) {
                                                                                            selected_audio_sid,
                                                                                            &superframe) == 0 &&
                                                     superframe.generation != audio.last_generation) {
+#if defined(DAB_GUI_PLAYBACK_EMBEDDED)
+                                                    if (superframe.generation != last_logo_generation) {
+                                                        dab_gui_embedded_audio_process_superframe(&superframe);
+                                                        last_logo_generation = superframe.generation;
+                                                    }
+#endif
                                                     if (dab_audio_playback_consume_superframe(&audio, &superframe) != 0) {
                                                         goto cleanup;
                                                     }
