@@ -50,12 +50,40 @@ static float dab_neon_dot_f32(const float *a, const float *b, uint32_t count) {
     return sum;
 }
 
+static void dab_neon_mul_f32(float *dst, const float *a, const float *b, uint32_t count) {
+    uint32_t i = 0u;
+
+    for (; i + 4u <= count; i += 4u) {
+        vst1q_f32(dst + i, vmulq_f32(vld1q_f32(a + i), vld1q_f32(b + i)));
+    }
+
+    for (; i < count; ++i) {
+        dst[i] = a[i] * b[i];
+    }
+}
+
+static void dab_neon_complex_abs2_f32(float *dst_power, const float *re, const float *im, uint32_t count) {
+    uint32_t i = 0u;
+
+    for (; i + 4u <= count; i += 4u) {
+        const float32x4_t rv = vld1q_f32(re + i);
+        const float32x4_t iv = vld1q_f32(im + i);
+        vst1q_f32(dst_power + i, vfmaq_f32(vmulq_f32(rv, rv), iv, iv));
+    }
+
+    for (; i < count; ++i) {
+        dst_power[i] = (re[i] * re[i]) + (im[i] * im[i]);
+    }
+}
+
 static const dab_simd_ops_t DAB_NEON_OPS = {
     DAB_SIMD_KIND_NEON,
     "neon",
     dab_neon_complex_i16_to_f32,
     dab_neon_power_i16_interleaved_f32,
-    dab_neon_dot_f32
+    dab_neon_dot_f32,
+    dab_neon_mul_f32,
+    dab_neon_complex_abs2_f32
 };
 
 const dab_simd_ops_t *dab_simd_neon_ops(void) {

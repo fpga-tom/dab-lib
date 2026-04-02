@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <deque>
@@ -20,6 +19,7 @@
 #include <wx/dcgraph.h>
 #include <wx/filename.h>
 #include <wx/gauge.h>
+#include <wx/glcanvas.h>
 #include <wx/panel.h>
 #include <wx/settings.h>
 #include <wx/sizer.h>
@@ -30,80 +30,351 @@
 #include <wx/tokenzr.h>
 #include <wx/utils.h>
 
+#if defined(__APPLE__)
+#include <OpenGL/gl.h>
+#else
+#include <GL/gl.h>
+#endif
+
 namespace {
 
 constexpr int kEqualizerTimerId = wxID_HIGHEST + 1;
 constexpr int kScanTimerId = wxID_HIGHEST + 2;
 constexpr int kPlaybackStatusTimerId = wxID_HIGHEST + 3;
-constexpr double kTwoPi = 6.28318530717958647692;
 
-class SpectrumPanel : public wxPanel {
+class SpectrumPanel : public wxGLCanvas {
 public:
     explicit SpectrumPanel(wxWindow *parent)
-        : wxPanel(parent),
-          phases_{0.15, 0.38, 0.61, 0.84, 1.07, 1.30, 1.53, 1.76, 1.99, 2.22, 2.45, 2.68},
+        : wxGLCanvas(parent, wxID_ANY, kGlAttributes, wxDefaultPosition, wxDefaultSize, wxFULL_REPAINT_ON_RESIZE),
+          glContext_(new wxGLContext(this)),
           timer_(this, kEqualizerTimerId) {
         SetMinSize(wxSize(-1, 190));
-        SetBackgroundStyle(wxBG_STYLE_PAINT);
+        levels_.fill(0.0f);
+        peaks_.fill(0.0f);
 
         Bind(wxEVT_PAINT, &SpectrumPanel::OnPaint, this);
         Bind(wxEVT_TIMER, &SpectrumPanel::OnTimer, this, kEqualizerTimerId);
-        timer_.Start(80);
+        Bind(wxEVT_SIZE, &SpectrumPanel::OnSize, this);
+        Bind(wxEVT_ERASE_BACKGROUND, &SpectrumPanel::OnEraseBackground, this);
+        timer_.Start(16);
+    }
+
+    ~SpectrumPanel() override {
+        delete glContext_;
+        glContext_ = nullptr;
     }
 
 private:
+    static constexpr int kGlAttributes[] = {
+        WX_GL_RGBA,
+        WX_GL_DOUBLEBUFFER,
+        WX_GL_DEPTH_SIZE, 16,
+        0
+    };
+
+    static float BinToFrequencyHz(size_t index, size_t count) {
+        static constexpr float kMinHz = 20.0f;
+        static constexpr float kMaxHz = 20000.0f;
+        const float t = count > 1u ? static_cast<float>(index) / static_cast<float>(count - 1u) : 0.0f;
+        return kMinHz * std::pow(kMaxHz / kMinHz, t);
+    }
+
+    static wxString FormatFrequencyLabel(float frequencyHz) {
+        if (frequencyHz >= 1000.0f) {
+            const float khz = frequencyHz / 1000.0f;
+            if (khz >= 10.0f || std::fabs(khz - std::round(khz)) < 0.05f) {
+                return wxString::Format("%.0fk", khz);
+            }
+            return wxString::Format("%.1fk", khz);
+        }
+        return wxString::Format("%.0f", frequencyHz);
+    }
+
+    int FrequencyToX(const wxRect &plot, float frequencyHz) const {
+        static constexpr float kMinHz = 20.0f;
+        static constexpr float kMaxHz = 20000.0f;
+        const double logMin = std::log10(static_cast<double>(kMinHz));
+        const double logMax = std::log10(static_cast<double>(kMaxHz));
+        const double logValue = std::log10(std::clamp(static_cast<double>(frequencyHz),
+                                                      static_cast<double>(kMinHz),
+                                                      static_cast<double>(kMaxHz)));
+        const double t = (logValue - logMin) / (logMax - logMin);
+        return plot.x + static_cast<int>(std::lround(t * static_cast<double>(plot.width)));
+    }
+
+    int LevelToY(const wxRect &plot, float level) const {
+        const float clamped = std::clamp(level, 0.0f, 1.0f);
+        return plot.GetBottom() - static_cast<int>(std::lround(clamped * static_cast<float>(plot.height)));
+    }
+
+    float VisualLevel(float level) const {
+        const float clamped = std::clamp(level, 0.0f, 1.0f);
+        return std::pow(clamped, 0.68f);
+    }
+
+    float XToNormalized(int x, const wxRect &rect) const {
+        return -1.0f + (2.0f * static_cast<float>(x - rect.x) / static_cast<float>(std::max(1, rect.width)));
+    }
+
+    static wxColour MixColour(const wxColour &a, const wxColour &b, float t, unsigned char alpha) {
+        const float clamped = std::clamp(t, 0.0f, 1.0f);
+        return wxColour(
+            static_cast<unsigned char>(std::lround((1.0f - clamped) * a.Red() + clamped * b.Red())),
+            static_cast<unsigned char>(std::lround((1.0f - clamped) * a.Green() + clamped * b.Green())),
+            static_cast<unsigned char>(std::lround((1.0f - clamped) * a.Blue() + clamped * b.Blue())),
+            alpha
+        );
+    }
+
+    void DrawGlQuad(int x, int y, int width, int height, const wxRect &rect, const wxColour &base, const wxColour &top) {
+        const float x0 = XToNormalized(x, rect);
+        const float x1 = XToNormalized(x + width, rect);
+        const float y0 = 1.0f - (2.0f * static_cast<float>(y + height - rect.y) / static_cast<float>(std::max(1, rect.height)));
+        const float y1 = 1.0f - (2.0f * static_cast<float>(y - rect.y) / static_cast<float>(std::max(1, rect.height)));
+
+        glBegin(GL_QUADS);
+        glColor4ub(base.Red(), base.Green(), base.Blue(), base.Alpha());
+        glVertex2f(x0, y0);
+        glVertex2f(x1, y0);
+        glColor4ub(top.Red(), top.Green(), top.Blue(), top.Alpha());
+        glVertex2f(x1, y1);
+        glVertex2f(x0, y1);
+        glEnd();
+    }
+
+    void RenderOpenGL(const wxRect &plot) {
+        const wxRect rect = GetClientRect();
+        const double scale = std::max(1.0, static_cast<double>(GetContentScaleFactor()));
+        const int viewportWidth = std::max(1, static_cast<int>(std::lround(static_cast<double>(rect.width) * scale)));
+        const int viewportHeight = std::max(1, static_cast<int>(std::lround(static_cast<double>(rect.height) * scale)));
+        size_t i;
+        const size_t visibleBins = levels_.size();
+        float maxLevel = 0.0f;
+
+        for (i = 0; i < visibleBins; ++i) {
+            maxLevel = std::max(maxLevel, VisualLevel(levels_[i]));
+        }
+        if (maxLevel < 0.18f) {
+            maxLevel = 0.18f;
+        }
+
+        SetCurrent(*glContext_);
+        glViewport(0, 0, viewportWidth, viewportHeight);
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_CULL_FACE);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glClearColor(0.035f, 0.055f, 0.078f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        glMatrixMode(GL_PROJECTION);
+        glLoadIdentity();
+        glMatrixMode(GL_MODELVIEW);
+        glLoadIdentity();
+
+        DrawGlQuad(rect.x, rect.y, rect.width, rect.height, rect, wxColour(8, 12, 18, 255), wxColour(10, 16, 22, 255));
+        DrawGlQuad(plot.x, plot.y, plot.width, plot.height, rect, wxColour(14, 22, 30, 255), wxColour(18, 28, 38, 255));
+
+        for (i = 0; i < visibleBins; ++i) {
+            const int x = plot.x + static_cast<int>((static_cast<long long>(i) * plot.width) / static_cast<int>(visibleBins));
+            const int nextX = plot.x + static_cast<int>((static_cast<long long>(i + 1u) * plot.width) / static_cast<int>(visibleBins));
+            const int width = std::max(6, nextX - x - 2);
+            const float level = std::clamp(VisualLevel(levels_[i]) / maxLevel, 0.0f, 1.0f);
+            const float peak = std::clamp(std::max(level, VisualLevel(peaks_[i]) / maxLevel), 0.0f, 1.0f);
+            const int peakY = LevelToY(plot, peak);
+            const int insetX = x + 1;
+            const int availableHeight = std::max(8, plot.height - 2);
+            const int ledGap = 3;
+            const int ledHeight = 12;
+            const int ledCount = std::max(8, availableHeight / (ledHeight + ledGap));
+            const float litLeds = level * static_cast<float>(ledCount);
+            const int fullLeds = static_cast<int>(litLeds);
+            const float partialLed = litLeds - static_cast<float>(fullLeds);
+            const int glowTop = plot.GetBottom() - (std::min(ledCount, fullLeds + (partialLed > 0.05f ? 1 : 0)) * (ledHeight + ledGap));
+            const int glowHeight = std::max(16, plot.GetBottom() - glowTop);
+            const wxColour lowBase(18, 74, 148, 212);
+            const wxColour lowTop(74, 198, 255, 244);
+            const wxColour midBase(22, 146, 54, 218);
+            const wxColour midTop(132, 255, 118, 246);
+            const wxColour highBase(172, 38, 24, 224);
+            const wxColour highTop(255, 112, 74, 248);
+            wxColour glowColor;
+            int led;
+
+            if (level > 0.80f) {
+                glowColor = highTop;
+            } else if (level > 0.45f) {
+                glowColor = midTop;
+            } else {
+                glowColor = lowTop;
+            }
+
+            DrawGlQuad(std::max(plot.x, insetX - 4),
+                       std::max(plot.y, glowTop + 2),
+                       width + 8,
+                       std::min(plot.height, glowHeight - 4),
+                       rect,
+                       wxColour(glowColor.Red(), glowColor.Green(), glowColor.Blue(), 10),
+                       wxColour(glowColor.Red(), glowColor.Green(), glowColor.Blue(), 36));
+
+            for (led = 0; led < ledCount; ++led) {
+                const int ledBottom = plot.GetBottom() - (led * (ledHeight + ledGap));
+                const int ledTopY = ledBottom - ledHeight;
+                const bool fullyLit = led < fullLeds;
+                const bool partiallyLit = (led == fullLeds) && (partialLed > 0.05f);
+                const int partialHeight = partiallyLit ? std::max(2, static_cast<int>(std::lround(partialLed * static_cast<float>(ledHeight)))) : 0;
+                const float zone = ledCount > 1 ? static_cast<float>(led) / static_cast<float>(ledCount - 1) : 0.0f;
+                wxColour barBase;
+                wxColour barTop;
+
+                DrawGlQuad(insetX,
+                           ledTopY,
+                           width,
+                           ledHeight,
+                           rect,
+                           wxColour(14, 20, 26, 180),
+                           wxColour(26, 36, 48, 210));
+
+                if (zone < 0.5f) {
+                    const float local = zone / 0.5f;
+                    barBase = MixColour(lowBase, midBase, local, 220);
+                    barTop = MixColour(lowTop, midTop, local, 245);
+                } else {
+                    const float local = (zone - 0.5f) / 0.5f;
+                    barBase = MixColour(midBase, highBase, local, 225);
+                    barTop = MixColour(midTop, highTop, local, 248);
+                }
+
+                if (fullyLit) {
+                    DrawGlQuad(insetX,
+                               ledTopY,
+                               width,
+                               ledHeight,
+                               rect,
+                               barBase,
+                               barTop);
+                    DrawGlQuad(insetX,
+                               ledTopY,
+                               width,
+                               std::max(2, ledHeight / 3),
+                               rect,
+                               wxColour(255, 255, 255, 24),
+                               wxColour(255, 255, 255, 96));
+                } else if (partiallyLit) {
+                    DrawGlQuad(insetX,
+                               ledBottom - partialHeight,
+                               width,
+                               partialHeight,
+                               rect,
+                               wxColour(barBase.Red(), barBase.Green(), barBase.Blue(), 160),
+                               wxColour(barTop.Red(), barTop.Green(), barTop.Blue(), 200));
+                }
+            }
+
+            glLineWidth(2.0f);
+            glBegin(GL_LINES);
+            glColor4ub(255, 200, 118, 255);
+            glVertex2f(XToNormalized(insetX, rect), 1.0f - (2.0f * static_cast<float>(peakY - rect.y) / static_cast<float>(std::max(1, rect.height))));
+            glVertex2f(XToNormalized(insetX + width, rect), 1.0f - (2.0f * static_cast<float>(peakY - rect.y) / static_cast<float>(std::max(1, rect.height))));
+            glEnd();
+        }
+
+        glFlush();
+        SwapBuffers();
+    }
+
     void OnTimer(wxTimerEvent &) {
-        for (double &phase : phases_) {
-            phase += 0.11;
-            if (phase > kTwoPi) {
-                phase -= kTwoPi;
+        dab_gui_playback_spectrum_t spectrum{};
+
+        if (dab_gui_playback_get_spectrum(&spectrum) == 0 && spectrum.valid && spectrum.bin_count > 0u) {
+            const size_t count = std::min(levels_.size(), static_cast<size_t>(spectrum.bin_count));
+
+            for (size_t i = 0; i < count; ++i) {
+                levels_[i] = std::clamp(spectrum.bins[i], 0.0f, 1.0f);
+                peaks_[i] = std::max(levels_[i], peaks_[i] * 0.91f);
+            }
+            for (size_t i = count; i < levels_.size(); ++i) {
+                levels_[i] *= 0.90f;
+                peaks_[i] *= 0.86f;
+            }
+        } else {
+            for (float &level : levels_) {
+                level *= 0.88f;
+            }
+            for (float &peak : peaks_) {
+                peak *= 0.88f;
             }
         }
         Refresh(false);
     }
 
     void OnPaint(wxPaintEvent &) {
-        wxAutoBufferedPaintDC dc(this);
+        wxPaintDC dc(this);
+
+        const wxRect rect = GetClientRect();
+        const wxRect frame(rect.x + 2, rect.y + 2, std::max(1, rect.width - 4), std::max(1, rect.height - 4));
+        const wxRect plot(frame.x + 18, frame.y + 18, std::max(1, frame.width - 30), std::max(1, frame.height - 32));
+        const std::array<int, 6> dbLabels = {0, -12, -24, -36, -48, -60};
+        const std::array<float, 10> freqMarkers = {20.0f, 50.0f, 100.0f, 200.0f, 500.0f,
+                                                   1000.0f, 2000.0f, 5000.0f, 10000.0f, 20000.0f};
+
+        RenderOpenGL(plot);
+
         wxGCDC gcdc(dc);
         wxDC &draw = gcdc.IsOk() ? static_cast<wxDC &>(gcdc) : static_cast<wxDC &>(dc);
 
-        const wxRect rect = GetClientRect();
-        draw.SetBackground(wxBrush(wxColour(18, 22, 28)));
-        draw.Clear();
+        draw.SetPen(*wxTRANSPARENT_PEN);
+        draw.SetBrush(wxBrush(wxColour(15, 22, 30)));
+        draw.DrawRoundedRectangle(frame, 10);
 
-        draw.SetPen(wxPen(wxColour(42, 52, 64), 1));
-        for (int row = 1; row < 5; ++row) {
-            const int y = rect.y + (rect.height * row) / 5;
-            draw.DrawLine(rect.x + 12, y, rect.GetRight() - 12, y);
+        draw.SetPen(wxPen(wxColour(38, 51, 64), 1));
+        draw.SetBrush(*wxTRANSPARENT_BRUSH);
+        draw.DrawRoundedRectangle(frame, 10);
+
+        for (size_t row = 0; row < dbLabels.size(); ++row) {
+            const float t = static_cast<float>(row) / static_cast<float>(dbLabels.size() - 1u);
+            const int y = plot.y + static_cast<int>(std::lround(t * static_cast<float>(plot.height)));
+            const wxColour gridColour = row == 0u ? wxColour(72, 94, 112) : wxColour(33, 44, 56);
+
+            draw.SetPen(wxPen(gridColour, 1));
+            draw.DrawLine(plot.x, y, plot.GetRight(), y);
+            draw.SetTextForeground(wxColour(122, 138, 152));
+            draw.DrawText(wxString::Format("%d", dbLabels[row]), frame.x + 6, y - 8);
         }
 
-        const int bars = static_cast<int>(phases_.size());
-        const int left = rect.x + 18;
-        const int top = rect.y + 16;
-        const int height = std::max(1, rect.height - 32);
-        const int width = std::max(1, rect.width - 36);
-        const int gap = 8;
-        const int barWidth = std::max(10, (width - gap * (bars - 1)) / bars);
+        for (float marker : freqMarkers) {
+            const int x = FrequencyToX(plot, marker);
 
-        for (int i = 0; i < bars; ++i) {
-            const double harmonic = std::sin(phases_[i]) * 0.5 + 0.5;
-            const double accent = std::sin((phases_[i] * 2.0) + (i * 0.33)) * 0.15 + 0.15;
-            const double level = std::clamp(0.22 + harmonic * 0.55 + accent, 0.12, 0.96);
-            const int barHeight = static_cast<int>(level * height);
-            const int x = left + i * (barWidth + gap);
-            const int y = top + height - barHeight;
-
-            const wxColour fill(36 + i * 10, 170 + (i % 3) * 16, 196 - i * 7);
-            draw.SetPen(*wxTRANSPARENT_PEN);
-            draw.SetBrush(wxBrush(fill));
-            draw.DrawRoundedRectangle(x, y, barWidth, barHeight, 4);
+            draw.SetPen(wxPen(wxColour(24, 35, 45), 1));
+            draw.DrawLine(x, plot.y, x, plot.GetBottom());
+            draw.SetTextForeground(wxColour(98, 116, 132));
+            draw.DrawText(FormatFrequencyLabel(marker), x - 10, plot.GetBottom() + 4);
         }
 
-        draw.SetTextForeground(wxColour(180, 194, 210));
-        draw.DrawText("Graphical equalizer", rect.x + 16, rect.y + 10);
+        draw.SetTextForeground(wxColour(210, 221, 230));
+        wxFont titleFont = GetFont();
+        titleFont.SetWeight(wxFONTWEIGHT_BOLD);
+        draw.SetFont(titleFont);
+        draw.DrawText("Spectrum Analyzer", frame.x + 10, frame.y + 6);
+
+        wxFont metaFont = GetFont();
+        metaFont.SetPointSize(std::max(7, metaFont.GetPointSize() - 1));
+        draw.SetFont(metaFont);
+        draw.SetTextForeground(wxColour(120, 146, 163));
+        draw.DrawText("FFT 1024  |  LOG FREQ  |  PEAK HOLD", frame.GetRight() - 188, frame.y + 8);
     }
 
-    std::array<double, 12> phases_;
+    void OnSize(wxSizeEvent &event) {
+        Refresh(false);
+        event.Skip();
+    }
+
+    void OnEraseBackground(wxEraseEvent &) {
+    }
+
+    std::array<float, DAB_AUDIO_SPECTRUM_DISPLAY_BINS> levels_;
+    std::array<float, DAB_AUDIO_SPECTRUM_DISPLAY_BINS> peaks_;
+    wxGLContext *glContext_ = nullptr;
     wxTimer timer_;
 };
 

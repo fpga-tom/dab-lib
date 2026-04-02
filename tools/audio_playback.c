@@ -11,6 +11,49 @@ enum {
     DAB_AUDIO_PREFILL_BLOCKS = 3
 };
 
+static pthread_mutex_t g_spectrum_callback_mutex = PTHREAD_MUTEX_INITIALIZER;
+static dab_audio_playback_spectrum_callback_t g_spectrum_callback = 0;
+static void *g_spectrum_callback_user = 0;
+
+void dab_audio_playback_set_spectrum_callback(dab_audio_playback_spectrum_callback_t callback,
+                                              void *user) {
+    (void)pthread_mutex_lock(&g_spectrum_callback_mutex);
+    g_spectrum_callback = callback;
+    g_spectrum_callback_user = user;
+    (void)pthread_mutex_unlock(&g_spectrum_callback_mutex);
+}
+
+static void dab_audio_playback_publish_spectrum(dab_audio_playback_t *audio,
+                                                const void *pcm,
+                                                uint32_t frames) {
+    dab_audio_playback_spectrum_callback_t callback;
+    void *user;
+    const float *display = 0;
+    uint32_t bin_count = 0u;
+
+    if (audio == 0 || pcm == 0 || frames == 0u || audio->sample_rate == 0u || audio->channels == 0u) {
+        return;
+    }
+
+    if (dab_audio_spectrum_push_i16(&audio->spectrum,
+                                    (const int16_t *)pcm,
+                                    frames,
+                                    audio->channels,
+                                    &display,
+                                    &bin_count) == 0) {
+        return;
+    }
+
+    (void)pthread_mutex_lock(&g_spectrum_callback_mutex);
+    callback = g_spectrum_callback;
+    user = g_spectrum_callback_user;
+    (void)pthread_mutex_unlock(&g_spectrum_callback_mutex);
+
+    if (callback != 0 && display != 0 && bin_count != 0u) {
+        callback(display, bin_count, audio->sample_rate, user);
+    }
+}
+
 static unsigned int dab_audio_env_u32(const char *name, unsigned int fallback) {
     const char *value = getenv(name);
     char *end = 0;
@@ -386,6 +429,7 @@ static int dab_audio_playback_open_stream(dab_audio_playback_t *audio,
 
     audio->sample_rate = sample_rate;
     audio->channels = channels;
+    dab_audio_spectrum_init(&audio->spectrum, sample_rate, channels);
     ring_seconds = dab_audio_env_u32("DAB_MSC_REF_COMPARE_AUDIO_RING_SECONDS", DAB_AUDIO_RING_SECONDS);
     ring_frames = (size_t)sample_rate * ring_seconds;
     if (ring_frames < (size_t)DAB_AUDIO_FRAMES_PER_BUFFER * 8u) {
@@ -421,6 +465,7 @@ static int dab_audio_playback_write_stream(dab_audio_playback_t *audio,
     if (audio->ring_ready == 0u) {
         return -1;
     }
+    dab_audio_playback_publish_spectrum(audio, pcm, (uint32_t)frames);
     dab_audio_ring_write_frames(audio, (const int16_t *)pcm, (size_t)frames);
     return 0;
 }

@@ -23,6 +23,7 @@ else()
 endif()
 
 add_library(dab
+    src/core/audio_spectrum.c
     src/core/block_pool.c
     src/core/frontend.c
     src/core/fic.c
@@ -60,7 +61,8 @@ target_include_directories(dab
 )
 
 if(DAB_BUILD_GUI)
-    find_package(wxWidgets QUIET COMPONENTS core base)
+    find_package(OpenGL QUIET)
+    find_package(wxWidgets QUIET COMPONENTS core base gl)
     if(wxWidgets_FOUND)
         include(${wxWidgets_USE_FILE})
 
@@ -85,6 +87,9 @@ if(DAB_BUILD_GUI)
         )
 
         target_link_libraries(dab_gui PRIVATE dab ${wxWidgets_LIBRARIES})
+        if(OpenGL_FOUND)
+            target_link_libraries(dab_gui PRIVATE OpenGL::GL)
+        endif()
         add_dependencies(dab_gui dab_sdrplay_scan dab_sdrplay_audio)
         if(PORTAUDIO_FOUND AND (FDK_AAC_FOUND OR FAAD2_FOUND))
             target_compile_definitions(dab_gui PRIVATE DAB_HAVE_AUDIO_PLAYBACK=1)
@@ -448,6 +453,7 @@ if(DAB_BUILD_TESTS)
 
     add_executable(dab_tests
         tests/test_main.c
+        tests/test_audio_spectrum.c
         tests/test_block_pool.c
         tests/test_frontend.c
         tests/test_fic.c

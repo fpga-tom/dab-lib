@@ -15,6 +15,8 @@ typedef struct {
     void (*complex_i16_to_f32)(float *dst_i, float *dst_q, const int16_t *src, uint32_t count);
     void (*power_i16_interleaved_f32)(float *dst_power, const int16_t *src, uint32_t count);
     float (*dot_f32)(const float *a, const float *b, uint32_t count);
+    void (*mul_f32)(float *dst, const float *a, const float *b, uint32_t count);
+    void (*complex_abs2_f32)(float *dst_power, const float *re, const float *im, uint32_t count);
 } dab_simd_ops_t;
 
 const dab_simd_ops_t *dab_simd_get_ops(void);

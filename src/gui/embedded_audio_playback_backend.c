@@ -1,5 +1,6 @@
 #include "dab_gui_backend.h"
 
+#include <stdio.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdint.h>
@@ -16,6 +17,7 @@ typedef struct {
 
 static dab_gui_playback_state_t g_playback_state = {0};
 static dab_gui_playback_status_t g_playback_status = {0};
+static dab_gui_playback_spectrum_t g_playback_spectrum = {0};
 static pthread_mutex_t g_playback_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 #define DAB_GUI_PLAYBACK_EMBEDDED 1
@@ -28,6 +30,10 @@ void dab_gui_embedded_audio_status_reset(void) {
     g_playback_status.has_spectrum_cn = 0;
     g_playback_status.spectrum_cn_db = 0.0f;
     g_playback_status.prs_score = 0.0f;
+    g_playback_spectrum.valid = 0;
+    g_playback_spectrum.sample_rate = 0u;
+    g_playback_spectrum.bin_count = 0u;
+    memset(g_playback_spectrum.bins, 0, sizeof(g_playback_spectrum.bins));
     (void)pthread_mutex_unlock(&g_playback_mutex);
 }
 
@@ -44,6 +50,29 @@ void dab_gui_embedded_audio_status_update(int locked,
     g_playback_status.has_spectrum_cn = has_spectrum_cn;
     g_playback_status.spectrum_cn_db = spectrum_cn_db;
     g_playback_status.prs_score = prs_score;
+    (void)pthread_mutex_unlock(&g_playback_mutex);
+}
+
+static void dab_gui_embedded_audio_spectrum_callback(const float *bins,
+                                                     uint32_t bin_count,
+                                                     uint32_t sample_rate,
+                                                     void *user) {
+    uint32_t copy_count = bin_count;
+    (void)user;
+
+    if (bins == 0) {
+        return;
+    }
+    if (copy_count > DAB_AUDIO_SPECTRUM_DISPLAY_BINS) {
+        copy_count = DAB_AUDIO_SPECTRUM_DISPLAY_BINS;
+    }
+
+    (void)pthread_mutex_lock(&g_playback_mutex);
+    memset(g_playback_spectrum.bins, 0, sizeof(g_playback_spectrum.bins));
+    memcpy(g_playback_spectrum.bins, bins, (size_t)copy_count * sizeof(float));
+    g_playback_spectrum.valid = 1;
+    g_playback_spectrum.sample_rate = sample_rate;
+    g_playback_spectrum.bin_count = copy_count;
     (void)pthread_mutex_unlock(&g_playback_mutex);
 }
 
@@ -80,13 +109,19 @@ static void *dab_gui_playback_thread_main(void *arg) {
     setenv("DAB_SDRPLAY_USE_REAL", "1", 1);
     g_stop_requested = 0;
     dab_gui_embedded_audio_status_reset();
+    dab_audio_playback_set_spectrum_callback(&dab_gui_embedded_audio_spectrum_callback, 0);
     (void)dab_gui_embedded_audio_main(9, argv);
+    dab_audio_playback_set_spectrum_callback(0, 0);
 
     (void)pthread_mutex_lock(&g_playback_mutex);
     g_playback_state.running = 0;
     g_playback_status.running = 0;
     g_playback_status.frequency_hz = g_playback_state.frequency_hz;
     g_playback_status.sid = g_playback_state.sid;
+    g_playback_spectrum.valid = 0;
+    g_playback_spectrum.sample_rate = 0u;
+    g_playback_spectrum.bin_count = 0u;
+    memset(g_playback_spectrum.bins, 0, sizeof(g_playback_spectrum.bins));
     (void)pthread_mutex_unlock(&g_playback_mutex);
     return 0;
 }
@@ -157,6 +192,10 @@ void dab_gui_playback_stop(void) {
         g_playback_status.locked = 0;
         g_playback_status.has_receiver_snr = 0;
         g_playback_status.has_spectrum_cn = 0;
+        g_playback_spectrum.valid = 0;
+        g_playback_spectrum.sample_rate = 0u;
+        g_playback_spectrum.bin_count = 0u;
+        memset(g_playback_spectrum.bins, 0, sizeof(g_playback_spectrum.bins));
         (void)pthread_mutex_unlock(&g_playback_mutex);
     }
 }
@@ -177,6 +216,17 @@ int dab_gui_playback_get_status(dab_gui_playback_status_t *status) {
 
     (void)pthread_mutex_lock(&g_playback_mutex);
     *status = g_playback_status;
+    (void)pthread_mutex_unlock(&g_playback_mutex);
+    return 0;
+}
+
+int dab_gui_playback_get_spectrum(dab_gui_playback_spectrum_t *spectrum) {
+    if (spectrum == 0) {
+        return -1;
+    }
+
+    (void)pthread_mutex_lock(&g_playback_mutex);
+    *spectrum = g_playback_spectrum;
     (void)pthread_mutex_unlock(&g_playback_mutex);
     return 0;
 }

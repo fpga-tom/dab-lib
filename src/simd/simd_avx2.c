@@ -56,12 +56,42 @@ static float dab_avx2_dot_f32(const float *a, const float *b, uint32_t count) {
     return sum;
 }
 
+static void dab_avx2_mul_f32(float *dst, const float *a, const float *b, uint32_t count) {
+    uint32_t i = 0u;
+
+    for (; i + 8u <= count; i += 8u) {
+        const __m256 av = _mm256_loadu_ps(a + i);
+        const __m256 bv = _mm256_loadu_ps(b + i);
+        _mm256_storeu_ps(dst + i, _mm256_mul_ps(av, bv));
+    }
+
+    for (; i < count; ++i) {
+        dst[i] = a[i] * b[i];
+    }
+}
+
+static void dab_avx2_complex_abs2_f32(float *dst_power, const float *re, const float *im, uint32_t count) {
+    uint32_t i = 0u;
+
+    for (; i + 8u <= count; i += 8u) {
+        const __m256 rv = _mm256_loadu_ps(re + i);
+        const __m256 iv = _mm256_loadu_ps(im + i);
+        _mm256_storeu_ps(dst_power + i, _mm256_add_ps(_mm256_mul_ps(rv, rv), _mm256_mul_ps(iv, iv)));
+    }
+
+    for (; i < count; ++i) {
+        dst_power[i] = (re[i] * re[i]) + (im[i] * im[i]);
+    }
+}
+
 static const dab_simd_ops_t DAB_AVX2_OPS = {
     DAB_SIMD_KIND_AVX2,
     "avx2",
     dab_avx2_complex_i16_to_f32,
     dab_avx2_power_i16_interleaved_f32,
-    dab_avx2_dot_f32
+    dab_avx2_dot_f32,
+    dab_avx2_mul_f32,
+    dab_avx2_complex_abs2_f32
 };
 
 const dab_simd_ops_t *dab_simd_avx2_ops(void) {

@@ -26,12 +26,28 @@ static float dab_scalar_dot_f32(const float *a, const float *b, uint32_t count) 
     return sum;
 }
 
+static void dab_scalar_mul_f32(float *dst, const float *a, const float *b, uint32_t count) {
+    uint32_t i;
+    for (i = 0u; i < count; ++i) {
+        dst[i] = a[i] * b[i];
+    }
+}
+
+static void dab_scalar_complex_abs2_f32(float *dst_power, const float *re, const float *im, uint32_t count) {
+    uint32_t i;
+    for (i = 0u; i < count; ++i) {
+        dst_power[i] = (re[i] * re[i]) + (im[i] * im[i]);
+    }
+}
+
 static const dab_simd_ops_t DAB_SCALAR_OPS = {
     DAB_SIMD_KIND_SCALAR,
     "scalar",
     dab_scalar_complex_i16_to_f32,
     dab_scalar_power_i16_interleaved_f32,
-    dab_scalar_dot_f32
+    dab_scalar_dot_f32,
+    dab_scalar_mul_f32,
+    dab_scalar_complex_abs2_f32
 };
 
 const dab_simd_ops_t *dab_simd_scalar_ops(void) {
