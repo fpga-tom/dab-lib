@@ -83,6 +83,19 @@ typedef struct {
 static volatile sig_atomic_t g_stop_requested = 0;
 static int g_debug_logs = 1;
 
+static int env_enabled(const char *name, int fallback) {
+    const char *value = getenv(name);
+
+    if (value == 0 || value[0] == '\0') {
+        return fallback;
+    }
+    return strcmp(value, "0") != 0 &&
+           strcmp(value, "false") != 0 &&
+           strcmp(value, "False") != 0 &&
+           strcmp(value, "off") != 0 &&
+           strcmp(value, "OFF") != 0;
+}
+
 static void on_signal_stop(int signum) {
     (void)signum;
     g_stop_requested = 1;
@@ -933,6 +946,7 @@ int main(int argc, char **argv) {
     int apply_data_cpe_correction = env_i32("DAB_SYNC_PROBE_APPLY_DATA_CPE_CORRECTION", 0);
     int audio_debug_enabled = env_i32("DAB_SDRPLAY_AUDIO_DEBUG", 0);
     int debug_logs_enabled = env_i32("DAB_SDRPLAY_AUDIO_DEBUG_LOGS", 1);
+    int receiver_metrics_enabled = env_enabled("DAB_GUI_SHOW_RECEIVER", 0);
     const char *dump_ref_samples_path = getenv("DAB_SYNC_PROBE_DUMP_REF_SAMPLES_PATH");
     const char *dump_fic_path = getenv("DAB_SYNC_PROBE_DUMP_FIC_PATH");
     const char *dump_fic_symbols_path = getenv("DAB_SYNC_PROBE_DUMP_FIC_SYMBOLS_PATH");
@@ -1472,25 +1486,32 @@ int main(int argc, char **argv) {
                         pending.predicted = 0;
                         continue;
                     }
-                    if (estimate_spectrum_cn_db(fft_i, fft_q, &sync.state.spectrum_cn_db) == 0) {
-                        sync.state.spectrum_cn_valid = 1;
-                    } else {
-                        sync.state.spectrum_cn_db = 0.0f;
-                        sync.state.spectrum_cn_valid = 0;
-                    }
-                    if (dab_prs_estimate_equalized_snr_f32(active_i,
-                                                           active_q,
-                                                           ofdm.prs_ref_i,
-                                                           ofdm.prs_ref_q,
-                                                           DAB_MODE_I_ACTIVE_CARRIERS,
-                                                           &prs_snr) == 0) {
-                        sync.state.receiver_snr_db = prs_snr.snr_db;
-                        sync.state.receiver_snr_valid = 1;
-                    } else if (dab_prs_score_to_snr_db(ref_score.score, &sync.state.receiver_snr_db) == 0) {
-                        sync.state.receiver_snr_valid = 1;
+                    if (receiver_metrics_enabled) {
+                        if (estimate_spectrum_cn_db(fft_i, fft_q, &sync.state.spectrum_cn_db) == 0) {
+                            sync.state.spectrum_cn_valid = 1;
+                        } else {
+                            sync.state.spectrum_cn_db = 0.0f;
+                            sync.state.spectrum_cn_valid = 0;
+                        }
+                        if (dab_prs_estimate_equalized_snr_f32(active_i,
+                                                               active_q,
+                                                               ofdm.prs_ref_i,
+                                                               ofdm.prs_ref_q,
+                                                               DAB_MODE_I_ACTIVE_CARRIERS,
+                                                               &prs_snr) == 0) {
+                            sync.state.receiver_snr_db = prs_snr.snr_db;
+                            sync.state.receiver_snr_valid = 1;
+                        } else if (dab_prs_score_to_snr_db(ref_score.score, &sync.state.receiver_snr_db) == 0) {
+                            sync.state.receiver_snr_valid = 1;
+                        } else {
+                            sync.state.receiver_snr_db = 0.0f;
+                            sync.state.receiver_snr_valid = 0;
+                        }
                     } else {
                         sync.state.receiver_snr_db = 0.0f;
                         sync.state.receiver_snr_valid = 0;
+                        sync.state.spectrum_cn_db = 0.0f;
+                        sync.state.spectrum_cn_valid = 0;
                     }
                     phase_correct_prs_for_plot(&ofdm, active_i, active_q, prs_plot_i, prs_plot_q);
                     if (prs_fft_gnuplot_fp != 0 &&
