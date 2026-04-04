@@ -3,6 +3,7 @@
 #include <stdlib.h>
 
 #if defined(_WIN32)
+#include <process.h>
 #include <windows.h>
 
 typedef struct {
@@ -10,11 +11,15 @@ typedef struct {
     void *arg;
 } dab_thread_boot_t;
 
-static DWORD WINAPI dab_thread_bootstrap(LPVOID arg) {
+enum {
+    DAB_WINDOWS_THREAD_STACK_BYTES = 8u * 1024u * 1024u
+};
+
+static unsigned __stdcall dab_thread_bootstrap(void *arg) {
     dab_thread_boot_t *boot = (dab_thread_boot_t *)arg;
     int result = boot->entry(boot->arg);
     free(boot);
-    return (DWORD)result;
+    return (unsigned)result;
 }
 
 int dab_thread_create(dab_thread_t *thread, dab_thread_entry_t entry, void *arg, const char *name) {
@@ -25,7 +30,12 @@ int dab_thread_create(dab_thread_t *thread, dab_thread_entry_t entry, void *arg,
     }
     boot->entry = entry;
     boot->arg = arg;
-    thread->handle = CreateThread(0, 0, dab_thread_bootstrap, boot, 0, 0);
+    thread->handle = (HANDLE)_beginthreadex(0,
+                                            DAB_WINDOWS_THREAD_STACK_BYTES,
+                                            dab_thread_bootstrap,
+                                            boot,
+                                            0,
+                                            0);
     if (thread->handle == 0) {
         free(boot);
         return -1;

@@ -16,6 +16,14 @@ typedef struct {
 
 static dab_gui_scan_sink_t g_scan_sink = {0};
 
+static void dab_gui_setenv_real_backend(void) {
+#if defined(_WIN32)
+    (void)_putenv_s("DAB_SDRPLAY_USE_REAL", "1");
+#else
+    (void)setenv("DAB_SDRPLAY_USE_REAL", "1", 1);
+#endif
+}
+
 static void dab_gui_scan_emit_line(const char *line) {
     if (line != 0 && line[0] != '\0' && g_scan_sink.callback != 0) {
         g_scan_sink.callback(line, g_scan_sink.user);
@@ -79,7 +87,7 @@ int dab_gui_scan_run(const char *output_path, dab_gui_scan_event_callback_t call
     g_scan_sink.callback = callback;
     g_scan_sink.user = user;
 
-    setenv("DAB_SDRPLAY_USE_REAL", "1", 1);
+    dab_gui_setenv_real_backend();
 
     dab_sdrplay_default_config(&device_config);
     device_config.gain_mode = DAB_SDRPLAY_GAIN_MODE_AUTO;

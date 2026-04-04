@@ -1,7 +1,6 @@
 #include "dab_gui_backend.h"
 
 #include <stdio.h>
-#include <pthread.h>
 #include <signal.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -9,9 +8,11 @@
 #include <string.h>
 
 #include "dab/core/msc.h"
+#include "dab/os/os_mutex.h"
+#include "dab/os/os_thread.h"
 
 typedef struct {
-    pthread_t thread;
+    dab_thread_t thread;
     int thread_valid;
     int running;
     uint64_t frequency_hz;
@@ -22,7 +23,8 @@ static dab_gui_playback_state_t g_playback_state = {0};
 static dab_gui_playback_status_t g_playback_status = {0};
 static dab_gui_playback_spectrum_t g_playback_spectrum = {0};
 static dab_gui_playback_logo_t g_playback_logo = {0};
-static pthread_mutex_t g_playback_mutex = PTHREAD_MUTEX_INITIALIZER;
+static dab_mutex_t g_playback_mutex;
+static int g_playback_mutex_ready = 0;
 
 typedef struct {
     uint8_t *data;
@@ -47,6 +49,21 @@ typedef struct {
 static dab_gui_mot_state_t g_mot_state = { .current_transport_id = -1 };
 
 #define DAB_GUI_PLAYBACK_EMBEDDED 1
+
+static void dab_gui_playback_ensure_mutex(void) {
+    if (g_playback_mutex_ready == 0) {
+        (void)dab_mutex_init(&g_playback_mutex);
+        g_playback_mutex_ready = 1;
+    }
+}
+
+static void dab_gui_setenv_real_backend(void) {
+#if defined(_WIN32)
+    (void)_putenv_s("DAB_SDRPLAY_USE_REAL", "1");
+#else
+    (void)setenv("DAB_SDRPLAY_USE_REAL", "1", 1);
+#endif
+}
 
 static int dab_gui_env_enabled(const char *name) {
     const char *value = getenv(name);
@@ -78,7 +95,8 @@ static void dab_gui_dump_bytes_to_file(const char *path, const uint8_t *data, si
 }
 
 void dab_gui_embedded_audio_status_reset(void) {
-    (void)pthread_mutex_lock(&g_playback_mutex);
+    dab_gui_playback_ensure_mutex();
+    dab_mutex_lock(&g_playback_mutex);
     g_playback_status.locked = 0;
     g_playback_status.has_receiver_snr = 0;
     g_playback_status.receiver_snr_db = 0.0f;
@@ -92,7 +110,7 @@ void dab_gui_embedded_audio_status_reset(void) {
     g_playback_logo.valid = 0;
     g_playback_logo.byte_count = 0u;
     memset(g_playback_logo.bytes, 0, sizeof(g_playback_logo.bytes));
-    (void)pthread_mutex_unlock(&g_playback_mutex);
+    dab_mutex_unlock(&g_playback_mutex);
 }
 
 static void dab_gui_embedded_audio_logo_publish(const uint8_t *data, size_t size) {
@@ -104,12 +122,13 @@ static void dab_gui_embedded_audio_logo_publish(const uint8_t *data, size_t size
         dab_gui_dump_bytes_to_file("dab_gui_logo_dump.bin", data, size);
     }
 
-    (void)pthread_mutex_lock(&g_playback_mutex);
+    dab_gui_playback_ensure_mutex();
+    dab_mutex_lock(&g_playback_mutex);
     g_playback_logo.valid = 1;
     g_playback_logo.generation++;
     g_playback_logo.byte_count = (uint32_t)size;
     memcpy(g_playback_logo.bytes, data, size);
-    (void)pthread_mutex_unlock(&g_playback_mutex);
+    dab_mutex_unlock(&g_playback_mutex);
 }
 
 static void dab_gui_mot_reset_object(dab_gui_mot_state_t *state) {
@@ -637,14 +656,15 @@ void dab_gui_embedded_audio_status_update(int locked,
                                           int has_spectrum_cn,
                                           float spectrum_cn_db,
                                           float prs_score) {
-    (void)pthread_mutex_lock(&g_playback_mutex);
+    dab_gui_playback_ensure_mutex();
+    dab_mutex_lock(&g_playback_mutex);
     g_playback_status.locked = locked;
     g_playback_status.has_receiver_snr = has_receiver_snr;
     g_playback_status.receiver_snr_db = receiver_snr_db;
     g_playback_status.has_spectrum_cn = has_spectrum_cn;
     g_playback_status.spectrum_cn_db = spectrum_cn_db;
     g_playback_status.prs_score = prs_score;
-    (void)pthread_mutex_unlock(&g_playback_mutex);
+    dab_mutex_unlock(&g_playback_mutex);
 }
 
 static void dab_gui_embedded_audio_spectrum_callback(const float *bins,
@@ -661,13 +681,14 @@ static void dab_gui_embedded_audio_spectrum_callback(const float *bins,
         copy_count = DAB_AUDIO_SPECTRUM_DISPLAY_BINS;
     }
 
-    (void)pthread_mutex_lock(&g_playback_mutex);
+    dab_gui_playback_ensure_mutex();
+    dab_mutex_lock(&g_playback_mutex);
     memset(g_playback_spectrum.bins, 0, sizeof(g_playback_spectrum.bins));
     memcpy(g_playback_spectrum.bins, bins, (size_t)copy_count * sizeof(float));
     g_playback_spectrum.valid = 1;
     g_playback_spectrum.sample_rate = sample_rate;
     g_playback_spectrum.bin_count = copy_count;
-    (void)pthread_mutex_unlock(&g_playback_mutex);
+    dab_mutex_unlock(&g_playback_mutex);
 }
 
 static void (*dab_gui_embedded_audio_signal(int signum, void (*handler)(int)))(int) {
@@ -681,11 +702,11 @@ static void (*dab_gui_embedded_audio_signal(int signum, void (*handler)(int)))(i
 #undef main
 #undef signal
 
-static void *dab_gui_playback_thread_main(void *arg) {
+static int dab_gui_playback_thread_main(void *arg) {
     dab_gui_playback_state_t *state = (dab_gui_playback_state_t *)arg;
     char freq_arg[32];
     char sid_arg[32];
-    char *argv[9];
+    char *argv[10];
 
     snprintf(freq_arg, sizeof(freq_arg), "%llu", (unsigned long long)state->frequency_hz);
     snprintf(sid_arg, sizeof(sid_arg), "0x%08x", state->sid);
@@ -699,8 +720,9 @@ static void *dab_gui_playback_thread_main(void *arg) {
     argv[6] = "off";
     argv[7] = "--sid";
     argv[8] = sid_arg;
+    argv[9] = 0;
 
-    setenv("DAB_SDRPLAY_USE_REAL", "1", 1);
+    dab_gui_setenv_real_backend();
     g_stop_requested = 0;
     dab_gui_embedded_audio_status_reset();
     dab_audio_playback_set_spectrum_callback(&dab_gui_embedded_audio_spectrum_callback, 0);
@@ -708,7 +730,8 @@ static void *dab_gui_playback_thread_main(void *arg) {
     dab_audio_playback_set_spectrum_callback(0, 0);
     dab_gui_mot_reset_state(&g_mot_state);
 
-    (void)pthread_mutex_lock(&g_playback_mutex);
+    dab_gui_playback_ensure_mutex();
+    dab_mutex_lock(&g_playback_mutex);
     g_playback_state.running = 0;
     g_playback_status.running = 0;
     g_playback_status.frequency_hz = g_playback_state.frequency_hz;
@@ -720,19 +743,18 @@ static void *dab_gui_playback_thread_main(void *arg) {
     g_playback_logo.valid = 0;
     g_playback_logo.byte_count = 0u;
     memset(g_playback_logo.bytes, 0, sizeof(g_playback_logo.bytes));
-    (void)pthread_mutex_unlock(&g_playback_mutex);
+    dab_mutex_unlock(&g_playback_mutex);
     return 0;
 }
 
 int dab_gui_playback_start(uint64_t frequency_hz, uint32_t sid) {
     int rc = -1;
-    pthread_attr_t attr;
-    int attr_ready = 0;
 
-    (void)pthread_mutex_lock(&g_playback_mutex);
+    dab_gui_playback_ensure_mutex();
+    dab_mutex_lock(&g_playback_mutex);
     if (!g_playback_state.running) {
         if (g_playback_state.thread_valid) {
-            (void)pthread_join(g_playback_state.thread, 0);
+            (void)dab_thread_join(&g_playback_state.thread, 0);
             g_playback_state.thread_valid = 0;
         }
         g_playback_state.frequency_hz = frequency_hz;
@@ -750,24 +772,17 @@ int dab_gui_playback_start(uint64_t frequency_hz, uint32_t sid) {
             .frequency_hz = frequency_hz,
             .sid = sid,
         };
-        if (pthread_attr_init(&attr) == 0) {
-            attr_ready = 1;
-            (void)pthread_attr_setstacksize(&attr, 8u * 1024u * 1024u);
-        }
-        rc = pthread_create(&g_playback_state.thread,
-                            attr_ready ? &attr : 0,
-                            dab_gui_playback_thread_main,
-                            &g_playback_state) == 0 ? 0 : -1;
-        if (attr_ready) {
-            (void)pthread_attr_destroy(&attr);
-        }
+        rc = dab_thread_create(&g_playback_state.thread,
+                               dab_gui_playback_thread_main,
+                               &g_playback_state,
+                               "dab_gui_playback");
         if (rc != 0) {
             g_playback_state.running = 0;
         } else {
             g_playback_state.thread_valid = 1;
         }
     }
-    (void)pthread_mutex_unlock(&g_playback_mutex);
+    dab_mutex_unlock(&g_playback_mutex);
 
     return rc;
 }
@@ -775,16 +790,17 @@ int dab_gui_playback_start(uint64_t frequency_hz, uint32_t sid) {
 void dab_gui_playback_stop(void) {
     int should_join = 0;
 
-    (void)pthread_mutex_lock(&g_playback_mutex);
+    dab_gui_playback_ensure_mutex();
+    dab_mutex_lock(&g_playback_mutex);
     if (g_playback_state.running) {
         g_stop_requested = 1;
         should_join = 1;
     }
-    (void)pthread_mutex_unlock(&g_playback_mutex);
+    dab_mutex_unlock(&g_playback_mutex);
 
     if (should_join) {
-        (void)pthread_join(g_playback_state.thread, 0);
-        (void)pthread_mutex_lock(&g_playback_mutex);
+        (void)dab_thread_join(&g_playback_state.thread, 0);
+        dab_mutex_lock(&g_playback_mutex);
         g_playback_state.thread_valid = 0;
         g_playback_state.running = 0;
         g_playback_status.running = 0;
@@ -798,16 +814,17 @@ void dab_gui_playback_stop(void) {
         g_playback_logo.valid = 0;
         g_playback_logo.byte_count = 0u;
         memset(g_playback_logo.bytes, 0, sizeof(g_playback_logo.bytes));
-        (void)pthread_mutex_unlock(&g_playback_mutex);
+        dab_mutex_unlock(&g_playback_mutex);
     }
 }
 
 int dab_gui_playback_is_running(void) {
     int running;
 
-    (void)pthread_mutex_lock(&g_playback_mutex);
+    dab_gui_playback_ensure_mutex();
+    dab_mutex_lock(&g_playback_mutex);
     running = g_playback_state.running;
-    (void)pthread_mutex_unlock(&g_playback_mutex);
+    dab_mutex_unlock(&g_playback_mutex);
     return running;
 }
 
@@ -816,9 +833,10 @@ int dab_gui_playback_get_status(dab_gui_playback_status_t *status) {
         return -1;
     }
 
-    (void)pthread_mutex_lock(&g_playback_mutex);
+    dab_gui_playback_ensure_mutex();
+    dab_mutex_lock(&g_playback_mutex);
     *status = g_playback_status;
-    (void)pthread_mutex_unlock(&g_playback_mutex);
+    dab_mutex_unlock(&g_playback_mutex);
     return 0;
 }
 
@@ -827,9 +845,10 @@ int dab_gui_playback_get_spectrum(dab_gui_playback_spectrum_t *spectrum) {
         return -1;
     }
 
-    (void)pthread_mutex_lock(&g_playback_mutex);
+    dab_gui_playback_ensure_mutex();
+    dab_mutex_lock(&g_playback_mutex);
     *spectrum = g_playback_spectrum;
-    (void)pthread_mutex_unlock(&g_playback_mutex);
+    dab_mutex_unlock(&g_playback_mutex);
     return 0;
 }
 
@@ -838,9 +857,10 @@ int dab_gui_playback_get_logo(dab_gui_playback_logo_t *logo) {
         return -1;
     }
 
-    (void)pthread_mutex_lock(&g_playback_mutex);
+    dab_gui_playback_ensure_mutex();
+    dab_mutex_lock(&g_playback_mutex);
     *logo = g_playback_logo;
-    (void)pthread_mutex_unlock(&g_playback_mutex);
+    dab_mutex_unlock(&g_playback_mutex);
     return 0;
 }
 

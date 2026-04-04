@@ -13,13 +13,156 @@ option(DAB_BUILD_TESTS "Build unit tests" ON)
 option(DAB_BUILD_GUI "Build wxWidgets GUI prototype" ON)
 option(DAB_ENABLE_AVX2 "Enable AVX2 backend when supported" ON)
 option(DAB_ENABLE_NEON "Enable NEON backend when supported" ON)
+option(DAB_USE_BUNDLED_WINDOWS_DEPS "Use third-party libraries from libs/ on Windows" ON)
 
 find_package(PkgConfig QUIET)
 
 if(MSVC)
     add_compile_options(/W4)
+    add_compile_definitions(_CRT_SECURE_NO_WARNINGS NOMINMAX)
 else()
     add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
+set(DAB_LIBS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libs)
+set(DAB_LIBS_INCLUDE_DIR ${DAB_LIBS_DIR}/include)
+
+function(dab_target_link_math target_name)
+    if(NOT WIN32)
+        target_link_libraries(${target_name} PRIVATE m)
+    endif()
+endfunction()
+
+function(dab_copy_runtime_dlls target_name)
+    if(WIN32 AND ARGN)
+        set(runtime_list_file "${CMAKE_CURRENT_BINARY_DIR}/${target_name}-$<CONFIG>-runtime-dlls.cmake")
+        set(runtime_list_content "set(runtime_dlls\n")
+        foreach(runtime_dll IN LISTS ARGN)
+            string(APPEND runtime_list_content "    \"${runtime_dll}\"\n")
+        endforeach()
+        string(APPEND runtime_list_content ")\n")
+        file(GENERATE OUTPUT "${runtime_list_file}" CONTENT "${runtime_list_content}")
+
+        add_custom_command(TARGET ${target_name} POST_BUILD
+            COMMAND ${CMAKE_COMMAND}
+                -Dtarget_dir=$<TARGET_FILE_DIR:${target_name}>
+                -Druntime_list_file=${runtime_list_file}
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CopyRuntimeDlls.cmake"
+            VERBATIM
+        )
+    endif()
+endfunction()
+
+function(dab_set_windows_stack_size target_name stack_bytes)
+    if(WIN32 AND MSVC)
+        target_link_options(${target_name} PRIVATE "/STACK:${stack_bytes}")
+    endif()
+endfunction()
+
+set(DAB_AUDIO_PLAYBACK_AVAILABLE OFF)
+set(DAB_AUDIO_LINK_TARGETS "")
+set(DAB_AUDIO_RUNTIME_DLLS "")
+set(DAB_WXWIDGETS_FOUND OFF)
+set(DAB_WXWIDGETS_TARGET "")
+set(DAB_WXWIDGETS_RUNTIME_DLLS "")
+
+if(WIN32 AND DAB_USE_BUNDLED_WINDOWS_DEPS)
+    if(EXISTS ${DAB_LIBS_DIR}/portaudio_x64.lib AND
+       EXISTS ${DAB_LIBS_DIR}/portaudio_x64.dll AND
+       EXISTS ${DAB_LIBS_INCLUDE_DIR}/portaudio.h)
+        add_library(dab_portaudio SHARED IMPORTED GLOBAL)
+        set_target_properties(dab_portaudio PROPERTIES
+            IMPORTED_IMPLIB ${DAB_LIBS_DIR}/portaudio_x64.lib
+            IMPORTED_LOCATION ${DAB_LIBS_DIR}/portaudio_x64.dll
+            INTERFACE_INCLUDE_DIRECTORIES ${DAB_LIBS_INCLUDE_DIR}
+        )
+        list(APPEND DAB_AUDIO_LINK_TARGETS dab_portaudio)
+        list(APPEND DAB_AUDIO_RUNTIME_DLLS ${DAB_LIBS_DIR}/portaudio_x64.dll)
+        set(DAB_PORTAUDIO_FOUND ON)
+    endif()
+
+    if(EXISTS ${DAB_LIBS_DIR}/libfaad2_dll.lib AND
+       EXISTS ${DAB_LIBS_DIR}/libfaad2_dll.dll AND
+       EXISTS ${DAB_LIBS_INCLUDE_DIR}/neaacdec.h)
+        add_library(dab_faad2 SHARED IMPORTED GLOBAL)
+        set_target_properties(dab_faad2 PROPERTIES
+            IMPORTED_IMPLIB ${DAB_LIBS_DIR}/libfaad2_dll.lib
+            IMPORTED_LOCATION ${DAB_LIBS_DIR}/libfaad2_dll.dll
+            INTERFACE_INCLUDE_DIRECTORIES ${DAB_LIBS_INCLUDE_DIR}
+        )
+        list(APPEND DAB_AUDIO_LINK_TARGETS dab_faad2)
+        list(APPEND DAB_AUDIO_RUNTIME_DLLS ${DAB_LIBS_DIR}/libfaad2_dll.dll)
+        set(DAB_FAAD2_FOUND ON)
+    endif()
+
+    if(DAB_PORTAUDIO_FOUND AND DAB_FAAD2_FOUND)
+        set(DAB_AUDIO_PLAYBACK_AVAILABLE ON)
+    endif()
+
+    if(EXISTS ${DAB_LIBS_INCLUDE_DIR}/wx/wx.h)
+        add_library(dab_wxwidgets INTERFACE)
+        target_include_directories(dab_wxwidgets INTERFACE ${DAB_LIBS_INCLUDE_DIR})
+        target_compile_definitions(dab_wxwidgets INTERFACE __WXMSW__ WXUSINGDLL UNICODE _UNICODE)
+        target_link_libraries(dab_wxwidgets INTERFACE
+            $<$<CONFIG:Debug>:${DAB_LIBS_DIR}/wxmsw32ud_adv.lib>
+            $<$<NOT:$<CONFIG:Debug>>:${DAB_LIBS_DIR}/wxmsw32u_adv.lib>
+            $<$<CONFIG:Debug>:${DAB_LIBS_DIR}/wxmsw32ud_core.lib>
+            $<$<NOT:$<CONFIG:Debug>>:${DAB_LIBS_DIR}/wxmsw32u_core.lib>
+            $<$<CONFIG:Debug>:${DAB_LIBS_DIR}/wxmsw32ud_gl.lib>
+            $<$<NOT:$<CONFIG:Debug>>:${DAB_LIBS_DIR}/wxmsw32u_gl.lib>
+            $<$<CONFIG:Debug>:${DAB_LIBS_DIR}/wxbase32ud.lib>
+            $<$<NOT:$<CONFIG:Debug>>:${DAB_LIBS_DIR}/wxbase32u.lib>
+            $<$<CONFIG:Debug>:${DAB_LIBS_DIR}/wxpngd.lib>
+            $<$<NOT:$<CONFIG:Debug>>:${DAB_LIBS_DIR}/wxpng.lib>
+            $<$<CONFIG:Debug>:${DAB_LIBS_DIR}/wxjpegd.lib>
+            $<$<NOT:$<CONFIG:Debug>>:${DAB_LIBS_DIR}/wxjpeg.lib>
+            $<$<CONFIG:Debug>:${DAB_LIBS_DIR}/wxtiffd.lib>
+            $<$<NOT:$<CONFIG:Debug>>:${DAB_LIBS_DIR}/wxtiff.lib>
+            $<$<CONFIG:Debug>:${DAB_LIBS_DIR}/wxzlibd.lib>
+            $<$<NOT:$<CONFIG:Debug>>:${DAB_LIBS_DIR}/wxzlib.lib>
+            $<$<CONFIG:Debug>:${DAB_LIBS_DIR}/wxregexud.lib>
+            $<$<NOT:$<CONFIG:Debug>>:${DAB_LIBS_DIR}/wxregexu.lib>
+            $<$<CONFIG:Debug>:${DAB_LIBS_DIR}/wxexpatd.lib>
+            $<$<NOT:$<CONFIG:Debug>>:${DAB_LIBS_DIR}/wxexpat.lib>
+            comctl32
+            rpcrt4
+            shlwapi
+            uxtheme
+            version
+            winmm
+            imm32
+            oleacc
+            ole32
+            uuid
+        )
+        set(DAB_WXWIDGETS_FOUND ON)
+        set(DAB_WXWIDGETS_TARGET dab_wxwidgets)
+        set(DAB_WXWIDGETS_RUNTIME_DLLS
+            $<$<CONFIG:Debug>:${DAB_LIBS_DIR}/wxbase32ud_vc14x_x64.dll>
+            $<$<NOT:$<CONFIG:Debug>>:${DAB_LIBS_DIR}/wxbase32u_vc14x_x64.dll>
+            $<$<CONFIG:Debug>:${DAB_LIBS_DIR}/wxmsw32ud_adv_vc14x_x64.dll>
+            $<$<NOT:$<CONFIG:Debug>>:${DAB_LIBS_DIR}/wxmsw32u_adv_vc14x_x64.dll>
+            $<$<CONFIG:Debug>:${DAB_LIBS_DIR}/wxmsw32ud_core_vc14x_x64.dll>
+            $<$<NOT:$<CONFIG:Debug>>:${DAB_LIBS_DIR}/wxmsw32u_core_vc14x_x64.dll>
+            $<$<CONFIG:Debug>:${DAB_LIBS_DIR}/wxmsw32ud_gl_vc14x_x64.dll>
+            $<$<NOT:$<CONFIG:Debug>>:${DAB_LIBS_DIR}/wxmsw32u_gl_vc14x_x64.dll>
+        )
+    endif()
+elseif(PkgConfig_FOUND)
+    pkg_check_modules(FDK_AAC IMPORTED_TARGET QUIET fdk-aac)
+    pkg_check_modules(FAAD2 IMPORTED_TARGET QUIET faad2)
+    pkg_check_modules(PORTAUDIO IMPORTED_TARGET QUIET portaudio-2.0)
+
+    if(PORTAUDIO_FOUND AND (FDK_AAC_FOUND OR FAAD2_FOUND))
+        set(DAB_AUDIO_PLAYBACK_AVAILABLE ON)
+        list(APPEND DAB_AUDIO_LINK_TARGETS PkgConfig::PORTAUDIO)
+        if(FDK_AAC_FOUND)
+            list(APPEND DAB_AUDIO_LINK_TARGETS PkgConfig::FDK_AAC)
+        endif()
+        if(FAAD2_FOUND)
+            list(APPEND DAB_AUDIO_LINK_TARGETS PkgConfig::FAAD2)
+        endif()
+    endif()
 endif()
 
 add_library(dab
@@ -63,17 +206,17 @@ target_include_directories(dab
 
 if(DAB_BUILD_GUI)
     find_package(OpenGL QUIET)
-    find_package(wxWidgets QUIET COMPONENTS core base gl)
-    if(wxWidgets_FOUND)
-        include(${wxWidgets_USE_FILE})
+    if(NOT WIN32 OR NOT DAB_USE_BUNDLED_WINDOWS_DEPS)
+        find_package(wxWidgets QUIET COMPONENTS core base gl)
+        if(wxWidgets_FOUND)
+            include(${wxWidgets_USE_FILE})
+            set(DAB_WXWIDGETS_FOUND ON)
+            set(DAB_WXWIDGETS_TARGET ${wxWidgets_LIBRARIES})
+        endif()
+    endif()
 
-        add_executable(dab_sdrplay_scan
-            tools/dab_sdrplay_scan.c
-        )
-
-        target_link_libraries(dab_sdrplay_scan PRIVATE dab m)
-
-        add_executable(dab_gui
+    if(DAB_WXWIDGETS_FOUND)
+        add_executable(dab_gui WIN32
             src/gui/main.cpp
             src/gui/main_frame.cpp
             src/gui/embedded_audio_playback_backend.c
@@ -87,27 +230,33 @@ if(DAB_BUILD_GUI)
             ${CMAKE_CURRENT_SOURCE_DIR}/tools
         )
 
-        target_link_libraries(dab_gui PRIVATE dab ${wxWidgets_LIBRARIES})
+        target_link_libraries(dab_gui PRIVATE dab ${DAB_WXWIDGETS_TARGET})
         if(OpenGL_FOUND)
             target_link_libraries(dab_gui PRIVATE OpenGL::GL)
         endif()
-        add_dependencies(dab_gui dab_sdrplay_scan dab_sdrplay_audio)
-        if(PORTAUDIO_FOUND AND (FDK_AAC_FOUND OR FAAD2_FOUND))
+        if(DAB_AUDIO_PLAYBACK_AVAILABLE)
             target_compile_definitions(dab_gui PRIVATE DAB_HAVE_AUDIO_PLAYBACK=1)
-            target_link_libraries(dab_gui PRIVATE PkgConfig::PORTAUDIO)
+            target_link_libraries(dab_gui PRIVATE ${DAB_AUDIO_LINK_TARGETS})
             if(FDK_AAC_FOUND)
                 target_compile_definitions(dab_gui PRIVATE DAB_HAVE_FDK_AAC=1)
-                target_link_libraries(dab_gui PRIVATE PkgConfig::FDK_AAC)
             endif()
-            if(FAAD2_FOUND)
+            if(DAB_FAAD2_FOUND OR FAAD2_FOUND)
                 target_compile_definitions(dab_gui PRIVATE DAB_HAVE_FAAD2=1)
-                target_link_libraries(dab_gui PRIVATE PkgConfig::FAAD2)
             endif()
         endif()
+        dab_set_windows_stack_size(dab_gui 8388608)
+        dab_copy_runtime_dlls(dab_gui ${DAB_AUDIO_RUNTIME_DLLS} ${DAB_WXWIDGETS_RUNTIME_DLLS})
     else()
         message(WARNING "wxWidgets not found; dab_gui target will not be built")
     endif()
 endif()
+
+add_executable(dab_sdrplay_scan
+    tools/dab_sdrplay_scan.c
+)
+
+target_link_libraries(dab_sdrplay_scan PRIVATE dab)
+dab_target_link_math(dab_sdrplay_scan)
 
 add_executable(dab_sdrplay_probe
     tools/sdrplay_probe.c
@@ -140,46 +289,24 @@ add_executable(dab_sync_file_replay
 )
 
 target_link_libraries(dab_sync_file_replay PRIVATE dab)
-if(PkgConfig_FOUND)
-    pkg_check_modules(FDK_AAC IMPORTED_TARGET QUIET fdk-aac)
-    pkg_check_modules(FAAD2 IMPORTED_TARGET QUIET faad2)
-    pkg_check_modules(PORTAUDIO IMPORTED_TARGET QUIET portaudio-2.0)
-    if(PORTAUDIO_FOUND AND (FDK_AAC_FOUND OR FAAD2_FOUND))
-        target_compile_definitions(dab_sync_file_replay PRIVATE DAB_HAVE_AUDIO_PLAYBACK=1)
-        target_link_libraries(dab_sync_file_replay PRIVATE PkgConfig::PORTAUDIO)
-        if(FDK_AAC_FOUND)
-            target_compile_definitions(dab_sync_file_replay PRIVATE DAB_HAVE_FDK_AAC=1)
-            target_link_libraries(dab_sync_file_replay PRIVATE PkgConfig::FDK_AAC)
-        endif()
-        if(FAAD2_FOUND)
-            target_compile_definitions(dab_sync_file_replay PRIVATE DAB_HAVE_FAAD2=1)
-            target_link_libraries(dab_sync_file_replay PRIVATE PkgConfig::FAAD2)
-        endif()
-
-        target_compile_definitions(dab_sdrplay_audio PRIVATE DAB_HAVE_AUDIO_PLAYBACK=1)
-        target_link_libraries(dab_sdrplay_audio PRIVATE PkgConfig::PORTAUDIO)
-        if(FDK_AAC_FOUND)
-            target_compile_definitions(dab_sdrplay_audio PRIVATE DAB_HAVE_FDK_AAC=1)
-            target_link_libraries(dab_sdrplay_audio PRIVATE PkgConfig::FDK_AAC)
-        endif()
-        if(FAAD2_FOUND)
-            target_compile_definitions(dab_sdrplay_audio PRIVATE DAB_HAVE_FAAD2=1)
-            target_link_libraries(dab_sdrplay_audio PRIVATE PkgConfig::FAAD2)
-        endif()
+if(DAB_AUDIO_PLAYBACK_AVAILABLE)
+    target_compile_definitions(dab_sync_file_replay PRIVATE DAB_HAVE_AUDIO_PLAYBACK=1)
+    target_link_libraries(dab_sync_file_replay PRIVATE ${DAB_AUDIO_LINK_TARGETS})
+    target_compile_definitions(dab_sdrplay_audio PRIVATE DAB_HAVE_AUDIO_PLAYBACK=1)
+    target_link_libraries(dab_sdrplay_audio PRIVATE ${DAB_AUDIO_LINK_TARGETS})
+    if(FDK_AAC_FOUND)
+        target_compile_definitions(dab_sync_file_replay PRIVATE DAB_HAVE_FDK_AAC=1)
+        target_compile_definitions(dab_sdrplay_audio PRIVATE DAB_HAVE_FDK_AAC=1)
+    endif()
+    if(DAB_FAAD2_FOUND OR FAAD2_FOUND)
+        target_compile_definitions(dab_sync_file_replay PRIVATE DAB_HAVE_FAAD2=1)
+        target_compile_definitions(dab_sdrplay_audio PRIVATE DAB_HAVE_FAAD2=1)
     endif()
 endif()
-
-set(DAB_REF_IMPL_AUDIO_SOURCE ref-impl/dabplus/audio_stub.c)
-set(DAB_REF_IMPL_AUDIO_LIBS "")
-set(DAB_REF_IMPL_AUDIO_DEFINES "")
-if(PkgConfig_FOUND)
-    pkg_check_modules(FAAD2 IMPORTED_TARGET QUIET faad2)
-    if(PORTAUDIO_FOUND AND FAAD2_FOUND)
-        set(DAB_REF_IMPL_AUDIO_SOURCE ref-impl/dabplus/paudio.c)
-        set(DAB_REF_IMPL_AUDIO_LIBS PkgConfig::PORTAUDIO PkgConfig::FAAD2)
-        set(DAB_REF_IMPL_AUDIO_DEFINES PORTAUDIO=1)
-    endif()
-endif()
+dab_set_windows_stack_size(dab_sdrplay_audio 8388608)
+dab_set_windows_stack_size(dab_sync_file_replay 8388608)
+dab_copy_runtime_dlls(dab_sdrplay_audio ${DAB_AUDIO_RUNTIME_DLLS})
+dab_copy_runtime_dlls(dab_sync_file_replay ${DAB_AUDIO_RUNTIME_DLLS})
 
 add_executable(dab_gen_mode_i_prs_table
     tools/gen_mode_i_prs_table.c
@@ -284,118 +411,6 @@ add_executable(dab_fic_qpsk_compare
 
 target_link_libraries(dab_fic_qpsk_compare PRIVATE dab)
 
-add_executable(dab_ref_impl_replay
-    tools/ref_impl_replay.c
-    tools/ref_impl_backend_stubs.c
-    ref-impl/dabplus/approx.c
-    ${DAB_REF_IMPL_AUDIO_SOURCE}
-    ref-impl/dabplus/backend_defaults.c
-    ref-impl/dabplus/cagc.c
-    ref-impl/dabplus/cc.c
-    ref-impl/dabplus/ci.c
-    ref-impl/dabplus/dab.c
-    ref-impl/dabplus/dab_fic.c
-    ref-impl/dabplus/fec.c
-    ref-impl/dabplus/fi.c
-    ref-impl/dabplus/fib.c
-    ref-impl/dabplus/fs.c
-    ref-impl/dabplus/gf.c
-    ref-impl/dabplus/mod.c
-    ref-impl/dabplus/ofdm.c
-    ref-impl/dabplus/pilot.c
-    ref-impl/dabplus/rs_255_245_5.c
-    ref-impl/dabplus/sdrplay_api_stub.c
-    ref-impl/dabplus/softbit_fft.c
-    ref-impl/dabplus/util.c
-    ref-impl/dabplus/viterbi47_port.c
-)
-target_link_libraries(dab_ref_impl_replay PRIVATE ${DAB_REF_IMPL_AUDIO_LIBS})
-target_compile_definitions(dab_ref_impl_replay PRIVATE ${DAB_REF_IMPL_AUDIO_DEFINES})
-
-target_include_directories(dab_ref_impl_replay PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/ref-impl/dabplus
-)
-
-add_executable(dab_ref_symbol_dump
-    tools/dab_ref_symbol_dump.c
-    tools/ref_impl_backend_stubs.c
-    ref-impl/dabplus/approx.c
-    ${DAB_REF_IMPL_AUDIO_SOURCE}
-    ref-impl/dabplus/backend_defaults.c
-    ref-impl/dabplus/cagc.c
-    ref-impl/dabplus/cc.c
-    ref-impl/dabplus/ci.c
-    ref-impl/dabplus/dab.c
-    ref-impl/dabplus/dab_fic.c
-    ref-impl/dabplus/fec.c
-    ref-impl/dabplus/fi.c
-    ref-impl/dabplus/fib.c
-    ref-impl/dabplus/fs.c
-    ref-impl/dabplus/gf.c
-    ref-impl/dabplus/mod.c
-    ref-impl/dabplus/ofdm.c
-    ref-impl/dabplus/pilot.c
-    ref-impl/dabplus/rs_255_245_5.c
-    ref-impl/dabplus/sdrplay_api_stub.c
-    ref-impl/dabplus/softbit_fft.c
-    ref-impl/dabplus/util.c
-    ref-impl/dabplus/viterbi47_port.c
-)
-target_link_libraries(dab_ref_symbol_dump PRIVATE ${DAB_REF_IMPL_AUDIO_LIBS})
-target_compile_definitions(dab_ref_symbol_dump PRIVATE ${DAB_REF_IMPL_AUDIO_DEFINES})
-
-target_include_directories(dab_ref_symbol_dump PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/ref-impl/dabplus
-)
-
-add_executable(dab_msc_ref_compare
-    tools/dab_msc_ref_compare.c
-    tools/audio_playback.c
-    tools/ref_impl_backend_stubs.c
-    ref-impl/dabplus/approx.c
-    ${DAB_REF_IMPL_AUDIO_SOURCE}
-    ref-impl/dabplus/backend_defaults.c
-    ref-impl/dabplus/cagc.c
-    ref-impl/dabplus/cc.c
-    ref-impl/dabplus/ci.c
-    ref-impl/dabplus/dab.c
-    ref-impl/dabplus/dab_fic.c
-    ref-impl/dabplus/fec.c
-    ref-impl/dabplus/fi.c
-    ref-impl/dabplus/fib.c
-    ref-impl/dabplus/fs.c
-    ref-impl/dabplus/gf.c
-    ref-impl/dabplus/mod.c
-    ref-impl/dabplus/ofdm.c
-    ref-impl/dabplus/pilot.c
-    ref-impl/dabplus/rs_255_245_5.c
-    ref-impl/dabplus/sdrplay_api_stub.c
-    ref-impl/dabplus/softbit_fft.c
-    ref-impl/dabplus/util.c
-    ref-impl/dabplus/viterbi47_port.c
-)
-
-target_link_libraries(dab_msc_ref_compare PRIVATE dab)
-target_link_libraries(dab_msc_ref_compare PRIVATE ${DAB_REF_IMPL_AUDIO_LIBS})
-target_compile_definitions(dab_msc_ref_compare PRIVATE ${DAB_REF_IMPL_AUDIO_DEFINES})
-if(PkgConfig_FOUND)
-    if(PORTAUDIO_FOUND AND (FDK_AAC_FOUND OR FAAD2_FOUND))
-        target_compile_definitions(dab_msc_ref_compare PRIVATE DAB_HAVE_AUDIO_PLAYBACK=1)
-        target_link_libraries(dab_msc_ref_compare PRIVATE PkgConfig::PORTAUDIO)
-        if(FDK_AAC_FOUND)
-            target_compile_definitions(dab_msc_ref_compare PRIVATE DAB_HAVE_FDK_AAC=1)
-            target_link_libraries(dab_msc_ref_compare PRIVATE PkgConfig::FDK_AAC)
-        endif()
-        if(FAAD2_FOUND)
-            target_compile_definitions(dab_msc_ref_compare PRIVATE DAB_HAVE_FAAD2=1)
-            target_link_libraries(dab_msc_ref_compare PRIVATE PkgConfig::FAAD2)
-        endif()
-    endif()
-endif()
-target_include_directories(dab_msc_ref_compare PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/ref-impl/dabplus
-)
-
 add_executable(dab_symbol_dump_compare
     tools/dab_symbol_dump_compare.c
 )
@@ -419,7 +434,8 @@ add_executable(dab_raw_active_compare
 add_executable(dab_fft_offset_scan_compare
     tools/dab_fft_offset_scan_compare.c
 )
-target_link_libraries(dab_fft_offset_scan_compare PRIVATE dab m)
+target_link_libraries(dab_fft_offset_scan_compare PRIVATE dab)
+dab_target_link_math(dab_fft_offset_scan_compare)
 
 target_compile_definitions(dab
     PRIVATE

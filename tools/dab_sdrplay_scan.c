@@ -3,11 +3,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if !defined(_WIN32)
 #include <sys/select.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+#endif
 
 #include "dab/config.h"
 #include "dab/core/fic.h"
@@ -133,6 +135,7 @@ static int parse_agc_arg(const char *value, dab_sdrplay_gain_mode_t *mode) {
     return -1;
 }
 
+#if !defined(_WIN32)
 static int build_sibling_tool_path(const char *self_path,
                                    const char *tool_name,
                                    char *out,
@@ -436,6 +439,7 @@ static int scan_frequency_via_audio_tool(const char *argv0,
 
     return rc;
 }
+#endif
 
 static const dab_fic_label_t *fic_repo_find_label(const dab_fic_database_t *db,
                                                   dab_fic_label_scope_t scope,
