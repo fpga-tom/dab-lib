@@ -851,8 +851,17 @@ MainFrame::MainFrame()
     SetBackgroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_APPWORKSPACE));
 
     {
+        wxFileName resultsPath;
+#if defined(_WIN32)
+        wxString userDataDir = wxStandardPaths::Get().GetUserLocalDataDir();
+        if (!wxFileName::DirExists(userDataDir)) {
+            (void)wxFileName::Mkdir(userDataDir, wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
+        }
+        resultsPath.Assign(userDataDir, "dab_scan_results.tsv");
+#else
         wxFileName exePath(wxStandardPaths::Get().GetExecutablePath());
-        wxFileName resultsPath(exePath.GetPath(), "dab_scan_results.tsv");
+        resultsPath.Assign(exePath.GetPath(), "dab_scan_results.tsv");
+#endif
         scanResultsPath_ = resultsPath.GetFullPath();
     }
 

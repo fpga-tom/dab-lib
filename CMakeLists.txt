@@ -36,12 +36,7 @@ endfunction()
 function(dab_copy_runtime_dlls target_name)
     if(WIN32 AND ARGN)
         set(runtime_list_file "${CMAKE_CURRENT_BINARY_DIR}/${target_name}-$<CONFIG>-runtime-dlls.cmake")
-        set(runtime_list_content "set(runtime_dlls\n")
-        foreach(runtime_dll IN LISTS ARGN)
-            string(APPEND runtime_list_content "    \"${runtime_dll}\"\n")
-        endforeach()
-        string(APPEND runtime_list_content ")\n")
-        file(GENERATE OUTPUT "${runtime_list_file}" CONTENT "${runtime_list_content}")
+        dab_generate_runtime_dll_list("${runtime_list_file}" ${ARGN})
 
         add_custom_command(TARGET ${target_name} POST_BUILD
             COMMAND ${CMAKE_COMMAND}
@@ -49,6 +44,28 @@ function(dab_copy_runtime_dlls target_name)
                 -Druntime_list_file=${runtime_list_file}
                 -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CopyRuntimeDlls.cmake"
             VERBATIM
+        )
+    endif()
+endfunction()
+
+function(dab_generate_runtime_dll_list output_file)
+    set(runtime_list_content "set(runtime_dlls\n")
+    foreach(runtime_dll IN LISTS ARGN)
+        string(APPEND runtime_list_content "    \"${runtime_dll}\"\n")
+    endforeach()
+    string(APPEND runtime_list_content ")\n")
+    file(GENERATE OUTPUT "${output_file}" CONTENT "${runtime_list_content}")
+endfunction()
+
+function(dab_install_runtime_dlls component_name)
+    if(WIN32 AND ARGN)
+        set(runtime_list_file "${CMAKE_CURRENT_BINARY_DIR}/install-${component_name}-$<CONFIG>-runtime-dlls.cmake")
+        dab_generate_runtime_dll_list("${runtime_list_file}" ${ARGN})
+        install(CODE
+"set(target_dir \"\${CMAKE_INSTALL_PREFIX}\")
+set(runtime_list_file \"${CMAKE_CURRENT_BINARY_DIR}/install-${component_name}-\${CMAKE_INSTALL_CONFIG_NAME}-runtime-dlls.cmake\")
+include(\"${CMAKE_CURRENT_SOURCE_DIR}/cmake/CopyRuntimeDlls.cmake\")"
+            COMPONENT ${component_name}
         )
     endif()
 endfunction()
@@ -246,6 +263,9 @@ if(DAB_BUILD_GUI)
         endif()
         dab_set_windows_stack_size(dab_gui 8388608)
         dab_copy_runtime_dlls(dab_gui ${DAB_AUDIO_RUNTIME_DLLS} ${DAB_WXWIDGETS_RUNTIME_DLLS})
+        install(TARGETS dab_gui RUNTIME DESTINATION . COMPONENT gui)
+        install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/INSTALL.md DESTINATION . COMPONENT gui)
+        dab_install_runtime_dlls(gui ${DAB_AUDIO_RUNTIME_DLLS} ${DAB_WXWIDGETS_RUNTIME_DLLS})
     else()
         message(WARNING "wxWidgets not found; dab_gui target will not be built")
     endif()
