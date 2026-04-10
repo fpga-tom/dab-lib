@@ -987,6 +987,11 @@ int main(int argc, char **argv) {
 #endif
     uint64_t audio_timeout_samples = 0u;
     uint64_t samples_since_audio = 0u;
+    uint64_t last_audio_frame_start_sample = 0u;
+    uint64_t last_audio_blocks_read = 0u;
+    uint32_t last_audio_fic_frames_seen = 0u;
+    uint32_t last_audio_msc_frames_seen = 0u;
+    uint32_t last_audio_tframe_symbol_index = 0u;
     int rc = 1;
 #if defined(DAB_HAVE_AUDIO_PLAYBACK)
     dab_audio_playback_t audio = {0};
@@ -1277,6 +1282,11 @@ int main(int argc, char **argv) {
                 last_logo_generation = 0u;
 #endif
                 samples_since_audio = 0u;
+                last_audio_frame_start_sample = 0u;
+                last_audio_blocks_read = 0u;
+                last_audio_fic_frames_seen = 0u;
+                last_audio_msc_frames_seen = 0u;
+                last_audio_tframe_symbol_index = 0u;
             }
             prev_locked = (uint8_t)(sync.state.locked != 0);
         }
@@ -1302,10 +1312,73 @@ int main(int argc, char **argv) {
             goto cleanup;
         }
         if (playing_reported != 0u && samples_since_audio >= audio_timeout_samples) {
+#if defined(DAB_HAVE_AUDIO_PLAYBACK)
+            dab_msc_dabplus_debug_t audio_debug = {0};
+
+            if (selected_audio_sid_valid != 0u &&
+                dab_msc_get_primary_dabplus_debug(&msc, selected_audio_sid, &audio_debug) == 0) {
+                printf("audio-timeout sid=0x%08x timeout_samples=%llu locked=%d prs_score=%.6f good_frames=%u bad_frames=%u timing_error=%d frame_start=%llu last_audio_frame_start=%llu frame_delta=%lld blocks=%llu last_audio_block=%llu block_delta=%lld fic_frames=%u last_audio_fic=%u fic_delta=%d msc_frames=%u last_audio_msc=%u msc_delta=%d tframe_symbol=%u last_audio_tframe_symbol=%u sync=%u superframe_valid=%u generation=%llu attempts=%u failures=%u rs_last=%u rs_total=%u last_ok=%u runtime_resets=%u reason=0x%02x\n",
+                       selected_audio_sid,
+                       (unsigned long long)samples_since_audio,
+                       sync.state.locked,
+                       sync.state.prs_score,
+                       sync.state.good_frames,
+                       sync.state.bad_frames,
+                       sync.state.timing_error_samples,
+                       (unsigned long long)sync.state.frame_start_sample,
+                       (unsigned long long)last_audio_frame_start_sample,
+                       (long long)(sync.state.frame_start_sample - last_audio_frame_start_sample),
+                       (unsigned long long)blocks_read,
+                       (unsigned long long)last_audio_blocks_read,
+                       (long long)(blocks_read - last_audio_blocks_read),
+                       fic.frames_seen,
+                       last_audio_fic_frames_seen,
+                       (int)(fic.frames_seen - last_audio_fic_frames_seen),
+                       msc.frames_seen,
+                       last_audio_msc_frames_seen,
+                       (int)(msc.frames_seen - last_audio_msc_frames_seen),
+                       tframe.symbol_index,
+                       last_audio_tframe_symbol_index,
+                       audio_debug.synchronized,
+                       audio_debug.superframe_valid,
+                       (unsigned long long)audio_debug.generation,
+                       audio_debug.decode_attempts,
+                       audio_debug.decode_failures,
+                       audio_debug.rs_corrected_last_superframe,
+                       audio_debug.rs_corrected_total,
+                       audio_debug.last_decode_ok,
+                       audio_debug.runtime_reset_count,
+                       audio_debug.last_reconfig_reason);
+            } else {
+                printf("audio-timeout sid=0x%08x timeout_samples=%llu locked=%d prs_score=%.6f good_frames=%u bad_frames=%u timing_error=%d frame_start=%llu last_audio_frame_start=%llu frame_delta=%lld blocks=%llu last_audio_block=%llu block_delta=%lld fic_frames=%u last_audio_fic=%u fic_delta=%d msc_frames=%u last_audio_msc=%u msc_delta=%d tframe_symbol=%u last_audio_tframe_symbol=%u sync=0 superframe_valid=0 generation=0 attempts=0 failures=0 rs_last=0 rs_total=0 last_ok=0 runtime_resets=0 reason=0x00\n",
+                       selected_audio_sid,
+                       (unsigned long long)samples_since_audio,
+                       sync.state.locked,
+                       sync.state.prs_score,
+                       sync.state.good_frames,
+                       sync.state.bad_frames,
+                       sync.state.timing_error_samples,
+                       (unsigned long long)sync.state.frame_start_sample,
+                       (unsigned long long)last_audio_frame_start_sample,
+                       (long long)(sync.state.frame_start_sample - last_audio_frame_start_sample),
+                       (unsigned long long)blocks_read,
+                       (unsigned long long)last_audio_blocks_read,
+                       (long long)(blocks_read - last_audio_blocks_read),
+                       fic.frames_seen,
+                       last_audio_fic_frames_seen,
+                       (int)(fic.frames_seen - last_audio_fic_frames_seen),
+                       msc.frames_seen,
+                       last_audio_msc_frames_seen,
+                       (int)(msc.frames_seen - last_audio_msc_frames_seen),
+                       tframe.symbol_index,
+                       last_audio_tframe_symbol_index);
+            }
+#else
             printf("audio-timeout sid=0x%08x timeout_samples=%llu locked=%d\n",
                    selected_audio_sid,
                    (unsigned long long)samples_since_audio,
                    sync.state.locked);
+#endif
             reset_runtime_state(&detector,
                                 &sync,
                                 &ofdm,
@@ -1325,6 +1398,11 @@ int main(int argc, char **argv) {
             last_logo_generation = 0u;
 #endif
             samples_since_audio = 0u;
+            last_audio_frame_start_sample = 0u;
+            last_audio_blocks_read = 0u;
+            last_audio_fic_frames_seen = 0u;
+            last_audio_msc_frames_seen = 0u;
+            last_audio_tframe_symbol_index = 0u;
             prev_locked = 0u;
             continue;
         }
@@ -1864,6 +1942,11 @@ int main(int argc, char **argv) {
                                                         goto cleanup;
                                                     }
                                                     samples_since_audio = 0u;
+                                                    last_audio_frame_start_sample = sync.state.frame_start_sample;
+                                                    last_audio_blocks_read = blocks_read;
+                                                    last_audio_fic_frames_seen = fic.frames_seen;
+                                                    last_audio_msc_frames_seen = msc.frames_seen;
+                                                    last_audio_tframe_symbol_index = tframe.symbol_index;
                                                     if (playing_reported == 0u) {
                                                         const dab_fic_label_t *label =
                                                             fic_repo_find_label(&fic.repo.current,
@@ -1887,16 +1970,22 @@ int main(int argc, char **argv) {
                                                                                             selected_audio_sid,
                                                                                             &audio_debug) == 0 &&
                                                            waiting_for_audio_reported == 0u) {
-                                                    printf("waiting-for-audio sid=0x%08x", selected_audio_sid);
-                                                    if (label != 0 && label->text[0] != '\0') {
-                                                        printf(" label=\"%s\"", label->text);
-                                                    }
-                                                    printf(" sync=%u superframe_valid=%u attempts=%u failures=%u\n",
-                                                           audio_debug.synchronized,
-                                                           audio_debug.superframe_valid,
-                                                           audio_debug.decode_attempts,
-                                                           audio_debug.decode_failures);
-                                                    waiting_for_audio_reported = 1u;
+                                                        printf("waiting-for-audio sid=0x%08x", selected_audio_sid);
+                                                        if (label != 0 && label->text[0] != '\0') {
+                                                            printf(" label=\"%s\"", label->text);
+                                                        }
+                                                        printf(" sync=%u superframe_valid=%u generation=%llu attempts=%u failures=%u rs_last=%u rs_total=%u last_ok=%u runtime_resets=%u reason=0x%02x\n",
+                                                               audio_debug.synchronized,
+                                                               audio_debug.superframe_valid,
+                                                               (unsigned long long)audio_debug.generation,
+                                                               audio_debug.decode_attempts,
+                                                               audio_debug.decode_failures,
+                                                               audio_debug.rs_corrected_last_superframe,
+                                                               audio_debug.rs_corrected_total,
+                                                               audio_debug.last_decode_ok,
+                                                               audio_debug.runtime_reset_count,
+                                                               audio_debug.last_reconfig_reason);
+                                                        waiting_for_audio_reported = 1u;
                                                 }
 #endif
                                                 if (!fic_dump_written &&
