@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.21)
 
 project(dab_lib C CXX)
 
+set(DAB_APP_VERSION "0.1.1")
+
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
@@ -246,6 +248,7 @@ if(DAB_BUILD_GUI)
             ${CMAKE_CURRENT_SOURCE_DIR}/src/gui
             ${CMAKE_CURRENT_SOURCE_DIR}/tools
         )
+        target_compile_definitions(dab_gui PRIVATE DAB_GUI_APP_VERSION="${DAB_APP_VERSION}")
 
         target_link_libraries(dab_gui PRIVATE dab ${DAB_WXWIDGETS_TARGET})
         if(OpenGL_FOUND)

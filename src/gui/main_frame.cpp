@@ -846,7 +846,15 @@ private:
 }  // namespace
 
 MainFrame::MainFrame()
-    : wxFrame(nullptr, wxID_ANY, "dab-lib GUI", wxDefaultPosition, wxSize(1100, 760)) {
+    : wxFrame(nullptr,
+              wxID_ANY,
+#if defined(DAB_GUI_APP_VERSION)
+              "dab-lib GUI v" DAB_GUI_APP_VERSION,
+#else
+              "dab-lib GUI",
+#endif
+              wxDefaultPosition,
+              wxSize(1100, 760)) {
     SetMinClientSize(wxSize(900, 620));
     SetBackgroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_APPWORKSPACE));
 
