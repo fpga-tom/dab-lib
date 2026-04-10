@@ -19,6 +19,9 @@ typedef struct {
     dab_sdrplay_samples_cb_t callback;
     void *user;
     float api_version_value;
+    uint64_t sample_index_wrap_base;
+    uint32_t last_first_sample_num;
+    int sample_index_initialized;
     int opened;
     int selected;
     int initialized;
@@ -163,12 +166,27 @@ static void dab_sdrplay_real_stream_a_cb(short *xi,
         return;
     }
 
-    adapter->callback(xi,
-                      xq,
-                      num_samples,
-                      params != 0 ? params->firstSampleNum : 0u,
-                      dab_time_monotonic_ns(),
-                      adapter->user);
+    {
+        const uint32_t first_sample_num = params != 0 ? params->firstSampleNum : 0u;
+        uint64_t sample_index = (uint64_t)first_sample_num;
+
+        if (adapter->sample_index_initialized != 0) {
+            if (first_sample_num < adapter->last_first_sample_num) {
+                adapter->sample_index_wrap_base += (1ull << 32u);
+            }
+        } else {
+            adapter->sample_index_initialized = 1;
+        }
+        adapter->last_first_sample_num = first_sample_num;
+        sample_index += adapter->sample_index_wrap_base;
+
+        adapter->callback(xi,
+                          xq,
+                          num_samples,
+                          sample_index,
+                          dab_time_monotonic_ns(),
+                          adapter->user);
+    }
 }
 
 static void dab_sdrplay_real_event_cb(uint32_t event_id,
@@ -255,6 +273,9 @@ static dab_sdr_status_t dab_sdrplay_real_start(dab_sdrplay_adapter_t *base,
     }
     adapter->callback = callback;
     adapter->user = user;
+    adapter->sample_index_wrap_base = 0u;
+    adapter->last_first_sample_num = 0u;
+    adapter->sample_index_initialized = 0;
 
     status = dab_sdrplay_real_open_and_select(adapter);
     if (status != DAB_SDR_STATUS_OK) {

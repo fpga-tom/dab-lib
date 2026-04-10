@@ -1,0 +1,114 @@
+diff --git a/src/hal/sdrplay/sdrplay_adapter_real.c b/src/hal/sdrplay/sdrplay_adapter_real.c
+index 0000000..1111111 100644
+--- a/src/hal/sdrplay/sdrplay_adapter_real.c
++++ b/src/hal/sdrplay/sdrplay_adapter_real.c
+@@
+ typedef struct {
+     dab_sdrplay_adapter_t base;
+     dab_sdrplay_api_t api;
+     dab_sdrplay_api_device_t selected_device;
+     dab_sdrplay_device_params_t *device_params;
+     dab_sdrplay_api_callbacks_t callbacks;
+     dab_sdrplay_samples_cb_t callback;
+     void *user;
+     float api_version_value;
++    uint64_t sample_index_wrap_base;
++    uint32_t last_first_sample_num;
++    int sample_index_initialized;
+     int opened;
+     int selected;
+     int initialized;
+     int started;
+ } dab_sdrplay_real_adapter_t;
+@@
+ static void dab_sdrplay_real_stream_a_cb(short *xi,
+                                          short *xq,
+                                          dab_sdrplay_stream_cb_params_t *params,
+                                          unsigned int num_samples,
+                                          uint32_t reset,
+                                          void *cb_context) {
+     dab_sdrplay_real_adapter_t *adapter = (dab_sdrplay_real_adapter_t *)cb_context;
+ 
+     (void)reset;
+ 
+     if (adapter == 0 || adapter->callback == 0 || xi == 0 || xq == 0 || num_samples == 0u) {
+         return;
+     }
+ 
+-    adapter->callback(xi,
+-                      xq,
+-                      num_samples,
+-                      params != 0 ? params->firstSampleNum : 0u,
+-                      dab_time_monotonic_ns(),
+-                      adapter->user);
++    {
++        const uint32_t first_sample_num = params != 0 ? params->firstSampleNum : 0u;
++        uint64_t sample_index = (uint64_t)first_sample_num;
++
++        if (adapter->sample_index_initialized != 0) {
++            if (first_sample_num < adapter->last_first_sample_num) {
++                adapter->sample_index_wrap_base += (1ull << 32u);
++            }
++        } else {
++            adapter->sample_index_initialized = 1;
++        }
++        adapter->last_first_sample_num = first_sample_num;
++        sample_index += adapter->sample_index_wrap_base;
++
++        adapter->callback(xi,
++                          xq,
++                          num_samples,
++                          sample_index,
++                          dab_time_monotonic_ns(),
++                          adapter->user);
++    }
+ }
+@@
+ static dab_sdr_status_t dab_sdrplay_real_start(dab_sdrplay_adapter_t *base,
+                                                dab_sdrplay_samples_cb_t callback,
+                                                void *user) {
+     dab_sdrplay_real_adapter_t *adapter = (dab_sdrplay_real_adapter_t *)base;
+     dab_sdr_status_t status;
+@@
+     }
+     adapter->callback = callback;
+     adapter->user = user;
++    adapter->sample_index_wrap_base = 0u;
++    adapter->last_first_sample_num = 0u;
++    adapter->sample_index_initialized = 0;
+ 
+     status = dab_sdrplay_real_open_and_select(adapter);
+     if (status != DAB_SDR_STATUS_OK) {
+         (void)dab_sdrplay_real_stop(base);
+         return status;
+diff --git a/src/hal/sdrplay/sdrplay_device.c b/src/hal/sdrplay/sdrplay_device.c
+index 2222222..3333333 100644
+--- a/src/hal/sdrplay/sdrplay_device.c
++++ b/src/hal/sdrplay/sdrplay_device.c
+@@
+ static void dab_sdrplay_stream_on_samples(const int16_t *i_samples,
+                                           const int16_t *q_samples,
+                                           uint32_t sample_count,
+                                           uint64_t sample_index,
+                                           uint64_t timestamp_ns,
+                                           void *user) {
+@@
+     copy_count = sample_count > DAB_IQ_BLOCK_SAMPLES ? DAB_IQ_BLOCK_SAMPLES : sample_count;
+     for (i = 0u; i < copy_count; ++i) {
+         block->iq[2u * i] = i_samples[i];
+         block->iq[(2u * i) + 1u] = q_samples[i];
+     }
+-    block->sequence = sample_index / copy_count;
++    block->sequence = sample_index;
+     block->timestamp_ns = timestamp_ns;
+     block->valid_samples = copy_count;
+     block->flags = 0u;
+@@
+     impl->current_block = next_block;
+     block->iq_interleaved = next_block->iq;
+     block->sample_count = next_block->valid_samples;
+-    block->sample_index = next_block->sequence * next_block->valid_samples;
++    block->sample_index = next_block->sequence;
+     block->timestamp_ns = next_block->timestamp_ns;
+     return DAB_SDR_STATUS_OK;
+ }

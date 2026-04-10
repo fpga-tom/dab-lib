@@ -61,7 +61,7 @@ static void dab_sdrplay_stream_on_samples(const int16_t *i_samples,
         block->iq[2u * i] = i_samples[i];
         block->iq[(2u * i) + 1u] = q_samples[i];
     }
-    block->sequence = sample_index / copy_count;
+    block->sequence = sample_index;
     block->timestamp_ns = timestamp_ns;
     block->valid_samples = copy_count;
     block->flags = 0u;
@@ -153,7 +153,7 @@ static dab_sdr_status_t dab_sdrplay_stream_read(struct dab_sdr_stream *stream, d
     impl->current_block = next_block;
     block->iq_interleaved = next_block->iq;
     block->sample_count = next_block->valid_samples;
-    block->sample_index = next_block->sequence * next_block->valid_samples;
+    block->sample_index = next_block->sequence;
     block->timestamp_ns = next_block->timestamp_ns;
     return DAB_SDR_STATUS_OK;
 }
