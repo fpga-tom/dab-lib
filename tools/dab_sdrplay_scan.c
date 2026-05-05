@@ -19,6 +19,7 @@
 #include "dab/core/sync.h"
 #include "dab/core/tframe.h"
 #include "dab/hal/sdr_device.h"
+#include "dab/hal/rtlsdr_device.h"
 #include "dab/hal/sdrplay_device.h"
 
 typedef struct {
@@ -912,10 +913,13 @@ static int process_locked_frame(scan_runtime_t *runtime,
 
 static int scan_frequency(scan_runtime_t *runtime,
                           dab_sdr_device_t *device,
-                          const dab_sdrplay_config_t *device_config,
+                          const char *driver,
+                          const dab_sdrplay_config_t *sdrplay_config,
+                          const dab_rtlsdr_config_t *rtlsdr_config,
                           const dab_channel_t *channel,
                           uint32_t channel_index,
                           uint32_t per_frequency_seconds,
+                          int gain_db,
                           FILE *results_fp) {
     dab_stream_config_t stream_config;
     dab_sdr_stream_t *stream = 0;
@@ -929,7 +933,7 @@ static int scan_frequency(scan_runtime_t *runtime,
     int have_services = 0;
     int rc = -1;
 
-    if (runtime == 0 || device == 0 || device_config == 0 || channel == 0 || results_fp == 0) {
+    if (runtime == 0 || device == 0 || driver == 0 || channel == 0 || results_fp == 0) {
         return -1;
     }
 
@@ -938,7 +942,7 @@ static int scan_frequency(scan_runtime_t *runtime,
     stream_config.sample_rate = 2048000u;
     stream_config.center_freq_hz = channel->frequency_hz;
     stream_config.bandwidth_hz = 1536000u;
-    stream_config.gain_db = 40;
+    stream_config.gain_db = gain_db;
     block_limit = (per_frequency_seconds * stream_config.sample_rate) / 1334;//DAB_IQ_BLOCK_SAMPLES;
     if (block_limit < 120u) {
         block_limit = 120u;
@@ -955,7 +959,12 @@ static int scan_frequency(scan_runtime_t *runtime,
            (unsigned long long)channel->frequency_hz);
     fflush(stdout);
 
-    if (dab_sdrplay_configure_device(device, device_config) != DAB_SDR_STATUS_OK) {
+    if (strcmp(driver, "rtlsdr") == 0) {
+        if (rtlsdr_config == 0 || dab_rtlsdr_configure_device(device, rtlsdr_config) != DAB_SDR_STATUS_OK) {
+            fprintf(stderr, "device config failed for %s\n", channel->channel);
+            return -1;
+        }
+    } else if (sdrplay_config == 0 || dab_sdrplay_configure_device(device, sdrplay_config) != DAB_SDR_STATUS_OK) {
         fprintf(stderr, "device config failed for %s\n", channel->channel);
         return -1;
     }
@@ -1174,8 +1183,10 @@ cleanup:
 }
 
 int main(int argc, char **argv) {
+    const char *driver = getenv("DAB_SDR_BACKEND");
     dab_sdr_open_params_t params = {"sdrplay", NULL, NULL};
-    dab_sdrplay_config_t device_config;
+    dab_sdrplay_config_t sdrplay_config;
+    dab_rtlsdr_config_t rtlsdr_config;
     dab_sdr_device_t *device = 0;
     scan_runtime_t runtime = {0};
     const char *output_path = 0;
@@ -1188,10 +1199,16 @@ int main(int argc, char **argv) {
     setvbuf(stdout, NULL, _IOLBF, 0);
     setvbuf(stderr, NULL, _IOLBF, 0);
 
-    dab_sdrplay_default_config(&device_config);
-    device_config.gain_mode = DAB_SDRPLAY_GAIN_MODE_AUTO;
-    device_config.if_mode = DAB_SDRPLAY_IF_MODE_ZERO_IF;
-    device_config.antenna = DAB_SDRPLAY_ANTENNA_A;
+    if (driver != 0 && strcmp(driver, "rtlsdr") == 0) {
+        params.driver = "rtlsdr";
+    }
+
+    dab_sdrplay_default_config(&sdrplay_config);
+    sdrplay_config.gain_mode = DAB_SDRPLAY_GAIN_MODE_AUTO;
+    sdrplay_config.if_mode = DAB_SDRPLAY_IF_MODE_ZERO_IF;
+    sdrplay_config.antenna = DAB_SDRPLAY_ANTENNA_A;
+    dab_rtlsdr_default_config(&rtlsdr_config);
+    rtlsdr_config.gain_mode = DAB_RTLSDR_GAIN_MODE_AUTO;
 
     for (channel_index = 1u; channel_index < (uint32_t)argc; ++channel_index) {
         if (strcmp(argv[channel_index], "--output") == 0) {
@@ -1204,10 +1221,12 @@ int main(int argc, char **argv) {
         }
         if (strcmp(argv[channel_index], "--agc") == 0) {
             if (channel_index + 1u >= (uint32_t)argc ||
-                parse_agc_arg(argv[++channel_index], &device_config.gain_mode) != 0) {
+                parse_agc_arg(argv[++channel_index], &sdrplay_config.gain_mode) != 0) {
                 print_usage(argv[0]);
                 return 2;
             }
+            rtlsdr_config.gain_mode = sdrplay_config.gain_mode == DAB_SDRPLAY_GAIN_MODE_AUTO ?
+                DAB_RTLSDR_GAIN_MODE_AUTO : DAB_RTLSDR_GAIN_MODE_MANUAL;
             continue;
         }
         if (strcmp(argv[channel_index], "--per-frequency-seconds") == 0) {
@@ -1247,7 +1266,7 @@ int main(int argc, char **argv) {
         goto cleanup;
     }
     if (dab_sdr_device_open(&params, &device) != DAB_SDR_STATUS_OK || device == 0) {
-        fprintf(stderr, "failed to open SDRplay device\n");
+        fprintf(stderr, "failed to open %s device\n", params.driver);
         goto cleanup;
     }
 
@@ -1255,10 +1274,13 @@ int main(int argc, char **argv) {
         const int services =
             scan_frequency(&runtime,
                            device,
-                           &device_config,
+                           params.driver,
+                           &sdrplay_config,
+                           &rtlsdr_config,
                            &kBandIIIChannels[channel_index],
                            channel_index,
                            per_frequency_seconds,
+                           40,
                            results_fp);
         if (services < 0) {
             printf("SCAN_ERROR\tchannel %s failed\n", kBandIIIChannels[channel_index].channel);

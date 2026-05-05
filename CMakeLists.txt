@@ -81,6 +81,7 @@ if(DAB_BUILD_GUI)
         add_executable(dab_gui
             src/gui/main.cpp
             src/gui/main_frame.cpp
+            src/gui/dab_gui_settings.c
             src/gui/embedded_audio_playback_backend.c
             src/gui/embedded_audio_scan_backend.c
             tools/audio_playback.c

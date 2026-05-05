@@ -41,6 +41,21 @@ typedef struct {
     uint8_t bytes[DAB_GUI_PLAYBACK_LOGO_MAX_BYTES];
 } dab_gui_playback_logo_t;
 
+typedef enum {
+    DAB_GUI_SDR_BACKEND_SDRPLAY = 0,
+    DAB_GUI_SDR_BACKEND_RTLSDR = 1
+} dab_gui_sdr_backend_t;
+
+typedef struct {
+    dab_gui_sdr_backend_t backend;
+    int agc_enabled;
+    int gain_db;
+} dab_gui_sdr_settings_t;
+
+void dab_gui_sdr_default_settings(dab_gui_sdr_settings_t *settings);
+void dab_gui_sdr_set_settings(const dab_gui_sdr_settings_t *settings);
+void dab_gui_sdr_get_settings(dab_gui_sdr_settings_t *settings);
+
 int dab_gui_scan_run(const char *output_path, dab_gui_scan_event_callback_t callback, void *user);
 
 int dab_gui_playback_start(uint64_t frequency_hz, uint32_t sid);

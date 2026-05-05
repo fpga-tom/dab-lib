@@ -19,6 +19,7 @@ typedef int (*dab_rtlsdr_set_sample_rate_fn)(dab_rtlsdr_dev_t *dev, uint32_t rat
 typedef int (*dab_rtlsdr_set_tuner_bandwidth_fn)(dab_rtlsdr_dev_t *dev, uint32_t bw);
 typedef int (*dab_rtlsdr_set_tuner_gain_mode_fn)(dab_rtlsdr_dev_t *dev, int mode);
 typedef int (*dab_rtlsdr_set_tuner_gain_fn)(dab_rtlsdr_dev_t *dev, int gain);
+typedef int (*dab_rtlsdr_get_tuner_gains_fn)(dab_rtlsdr_dev_t *dev, int *gains);
 typedef int (*dab_rtlsdr_set_freq_correction_fn)(dab_rtlsdr_dev_t *dev, int ppm);
 typedef int (*dab_rtlsdr_set_bias_tee_fn)(dab_rtlsdr_dev_t *dev, int on);
 typedef int (*dab_rtlsdr_reset_buffer_fn)(dab_rtlsdr_dev_t *dev);
@@ -42,6 +43,7 @@ typedef struct {
     dab_rtlsdr_set_tuner_bandwidth_fn set_tuner_bandwidth;
     dab_rtlsdr_set_tuner_gain_mode_fn set_tuner_gain_mode;
     dab_rtlsdr_set_tuner_gain_fn set_tuner_gain;
+    dab_rtlsdr_get_tuner_gains_fn get_tuner_gains;
     dab_rtlsdr_set_freq_correction_fn set_freq_correction;
     dab_rtlsdr_set_bias_tee_fn set_bias_tee;
     dab_rtlsdr_reset_buffer_fn reset_buffer;

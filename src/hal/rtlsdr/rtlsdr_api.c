@@ -45,6 +45,7 @@ int dab_rtlsdr_api_try_load(dab_rtlsdr_api_t *api) {
     api->set_tuner_bandwidth = (dab_rtlsdr_set_tuner_bandwidth_fn)dab_shared_lib_symbol(&api->lib, "rtlsdr_set_tuner_bandwidth");
     api->set_tuner_gain_mode = (dab_rtlsdr_set_tuner_gain_mode_fn)dab_shared_lib_symbol(&api->lib, "rtlsdr_set_tuner_gain_mode");
     api->set_tuner_gain = (dab_rtlsdr_set_tuner_gain_fn)dab_shared_lib_symbol(&api->lib, "rtlsdr_set_tuner_gain");
+    api->get_tuner_gains = (dab_rtlsdr_get_tuner_gains_fn)dab_shared_lib_symbol(&api->lib, "rtlsdr_get_tuner_gains");
     api->set_freq_correction = (dab_rtlsdr_set_freq_correction_fn)dab_shared_lib_symbol(&api->lib, "rtlsdr_set_freq_correction");
     api->set_bias_tee = (dab_rtlsdr_set_bias_tee_fn)dab_shared_lib_symbol(&api->lib, "rtlsdr_set_bias_tee");
     api->reset_buffer = (dab_rtlsdr_reset_buffer_fn)dab_shared_lib_symbol(&api->lib, "rtlsdr_reset_buffer");

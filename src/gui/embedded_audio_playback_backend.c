@@ -683,24 +683,31 @@ static void (*dab_gui_embedded_audio_signal(int signum, void (*handler)(int)))(i
 
 static void *dab_gui_playback_thread_main(void *arg) {
     dab_gui_playback_state_t *state = (dab_gui_playback_state_t *)arg;
+    dab_gui_sdr_settings_t settings;
     char freq_arg[32];
     char sid_arg[32];
+    char gain_arg[16];
     char *argv[9];
 
+    dab_gui_sdr_get_settings(&settings);
     snprintf(freq_arg, sizeof(freq_arg), "%llu", (unsigned long long)state->frequency_hz);
     snprintf(sid_arg, sizeof(sid_arg), "0x%08x", state->sid);
+    snprintf(gain_arg, sizeof(gain_arg), "%d", settings.gain_db);
 
     argv[0] = "dab_gui_embedded_audio";
     argv[1] = "--freq";
     argv[2] = freq_arg;
     argv[3] = "--agc";
-    argv[4] = "on";
+    argv[4] = settings.agc_enabled != 0 ? "on" : "off";
     argv[5] = "--debug";
     argv[6] = "off";
     argv[7] = "--sid";
     argv[8] = sid_arg;
 
     setenv("DAB_SDRPLAY_USE_REAL", "1", 1);
+    setenv("DAB_RTLSDR_USE_REAL", "1", 1);
+    setenv("DAB_SDR_BACKEND", settings.backend == DAB_GUI_SDR_BACKEND_RTLSDR ? "rtlsdr" : "sdrplay", 1);
+    setenv("DAB_SYNC_PROBE_GAIN_DB", gain_arg, 1);
     g_stop_requested = 0;
     dab_gui_embedded_audio_status_reset();
     dab_audio_playback_set_spectrum_callback(&dab_gui_embedded_audio_spectrum_callback, 0);

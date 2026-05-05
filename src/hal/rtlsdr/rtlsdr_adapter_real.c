@@ -38,6 +38,54 @@ static void dab_rtlsdr_debug(const char *msg) {
     }
 }
 
+static void dab_rtlsdr_debug_rc(const char *name, int rc) {
+    if (dab_rtlsdr_debug_enabled()) {
+        fprintf(stderr, "rtlsdr-real: %s rc=%d\n", name, rc);
+        fflush(stderr);
+    }
+}
+
+static void dab_rtlsdr_warn_rc(const char *name, int rc) {
+    fprintf(stderr, "rtlsdr-real: warning: %s failed rc=%d; continuing\n", name, rc);
+    fflush(stderr);
+}
+
+static void dab_rtlsdr_error_rc(const char *name, int rc) {
+    fprintf(stderr, "rtlsdr-real: error: %s failed rc=%d\n", name, rc);
+    fflush(stderr);
+}
+
+static int dab_rtlsdr_nearest_gain(dab_rtlsdr_real_adapter_t *adapter, int requested_gain_tenths) {
+    int gains[128];
+    int count;
+    int best_gain;
+    int best_delta;
+    int i;
+
+    if (adapter->api.get_tuner_gains == 0) {
+        return requested_gain_tenths;
+    }
+
+    count = adapter->api.get_tuner_gains(adapter->dev, gains);
+    if (count <= 0) {
+        return requested_gain_tenths;
+    }
+    if (count > (int)(sizeof(gains) / sizeof(gains[0]))) {
+        count = (int)(sizeof(gains) / sizeof(gains[0]));
+    }
+
+    best_gain = gains[0];
+    best_delta = abs(gains[0] - requested_gain_tenths);
+    for (i = 1; i < count; ++i) {
+        const int delta = abs(gains[i] - requested_gain_tenths);
+        if (delta < best_delta) {
+            best_delta = delta;
+            best_gain = gains[i];
+        }
+    }
+    return best_gain;
+}
+
 static void dab_rtlsdr_real_async_cb(unsigned char *buf, uint32_t len, void *ctx) {
     dab_rtlsdr_real_adapter_t *adapter = (dab_rtlsdr_real_adapter_t *)ctx;
     int16_t i_samples[DAB_RTLSDR_ASYNC_BUFFER_BYTES / 2u];
@@ -80,44 +128,75 @@ static int dab_rtlsdr_real_thread(void *arg) {
 
 static dab_sdr_status_t dab_rtlsdr_real_open_and_configure(dab_rtlsdr_real_adapter_t *adapter) {
     uint32_t count;
+    int rc;
 
     count = adapter->api.get_device_count();
     if (adapter->base.device_index >= count) {
         return DAB_SDR_STATUS_NOT_FOUND;
     }
-    if (adapter->api.open(&adapter->dev, adapter->base.device_index) != 0 || adapter->dev == 0) {
+    rc = adapter->api.open(&adapter->dev, adapter->base.device_index);
+    dab_rtlsdr_debug_rc("open", rc);
+    if (rc != 0 || adapter->dev == 0) {
+        dab_rtlsdr_error_rc("open", rc);
         return DAB_SDR_STATUS_BUSY;
     }
     adapter->opened = 1;
     dab_rtlsdr_debug("Open ok");
 
-    if (adapter->api.set_sample_rate(adapter->dev, adapter->base.config.sample_rate) != 0) {
-        return DAB_SDR_STATUS_ERROR;
+    rc = adapter->api.set_freq_correction(adapter->dev, adapter->base.device_config.ppm_correction);
+    dab_rtlsdr_debug_rc("set_freq_correction", rc);
+    if (rc != 0) {
+        dab_rtlsdr_warn_rc("set_freq_correction", rc);
     }
-    if (adapter->api.set_center_freq(adapter->dev, (uint32_t)adapter->base.config.center_freq_hz) != 0) {
-        return DAB_SDR_STATUS_ERROR;
+
+    rc = adapter->api.set_sample_rate(adapter->dev, adapter->base.config.sample_rate);
+    dab_rtlsdr_debug_rc("set_sample_rate", rc);
+    if (rc != 0) {
+        dab_rtlsdr_warn_rc("set_sample_rate", rc);
     }
-    if (adapter->api.set_tuner_bandwidth != 0 &&
-        adapter->api.set_tuner_bandwidth(adapter->dev, adapter->base.config.bandwidth_hz) != 0) {
-        return DAB_SDR_STATUS_ERROR;
+
+    rc = adapter->api.set_center_freq(adapter->dev, (uint32_t)adapter->base.config.center_freq_hz);
+    dab_rtlsdr_debug_rc("set_center_freq", rc);
+    if (rc != 0) {
+        dab_rtlsdr_warn_rc("set_center_freq", rc);
     }
-    if (adapter->api.set_freq_correction(adapter->dev, adapter->base.device_config.ppm_correction) != 0) {
-        return DAB_SDR_STATUS_ERROR;
+
+    if (adapter->api.set_tuner_bandwidth != 0) {
+        rc = adapter->api.set_tuner_bandwidth(adapter->dev, adapter->base.config.bandwidth_hz);
+        dab_rtlsdr_debug_rc("set_tuner_bandwidth", rc);
+        if (rc != 0) {
+            dab_rtlsdr_warn_rc("set_tuner_bandwidth", rc);
+        }
     }
-    if (adapter->api.set_tuner_gain_mode(adapter->dev,
-                                         adapter->base.device_config.gain_mode == DAB_RTLSDR_GAIN_MODE_MANUAL ? 1 : 0) != 0) {
-        return DAB_SDR_STATUS_ERROR;
+
+    rc = adapter->api.set_tuner_gain_mode(adapter->dev,
+                                          adapter->base.device_config.gain_mode == DAB_RTLSDR_GAIN_MODE_MANUAL ? 1 : 0);
+    dab_rtlsdr_debug_rc("set_tuner_gain_mode", rc);
+    if (rc != 0) {
+        dab_rtlsdr_warn_rc("set_tuner_gain_mode", rc);
     }
-    if (adapter->base.device_config.gain_mode == DAB_RTLSDR_GAIN_MODE_MANUAL &&
-        adapter->api.set_tuner_gain(adapter->dev, adapter->base.config.gain_db * 10) != 0) {
-        return DAB_SDR_STATUS_ERROR;
+    if (adapter->base.device_config.gain_mode == DAB_RTLSDR_GAIN_MODE_MANUAL) {
+        const int requested_gain = adapter->base.config.gain_db * 10;
+        const int tuner_gain = dab_rtlsdr_nearest_gain(adapter, requested_gain);
+        rc = adapter->api.set_tuner_gain(adapter->dev, tuner_gain);
+        dab_rtlsdr_debug_rc("set_tuner_gain", rc);
+        if (rc != 0) {
+            dab_rtlsdr_warn_rc("set_tuner_gain", rc);
+        }
     }
-    if (adapter->api.set_bias_tee != 0 &&
-        adapter->api.set_bias_tee(adapter->dev, adapter->base.device_config.bias_tee_enabled) != 0) {
-        return DAB_SDR_STATUS_ERROR;
+
+    if (adapter->api.set_bias_tee != 0) {
+        rc = adapter->api.set_bias_tee(adapter->dev, adapter->base.device_config.bias_tee_enabled);
+        dab_rtlsdr_debug_rc("set_bias_tee", rc);
+        if (rc != 0) {
+            dab_rtlsdr_warn_rc("set_bias_tee", rc);
+        }
     }
-    if (adapter->api.reset_buffer(adapter->dev) != 0) {
-        return DAB_SDR_STATUS_ERROR;
+
+    rc = adapter->api.reset_buffer(adapter->dev);
+    dab_rtlsdr_debug_rc("reset_buffer", rc);
+    if (rc != 0) {
+        dab_rtlsdr_warn_rc("reset_buffer", rc);
     }
     return DAB_SDR_STATUS_OK;
 }

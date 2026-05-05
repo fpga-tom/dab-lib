@@ -16,6 +16,7 @@
 #include "dab/core/tframe.h"
 #include "dab/core/msc.h"
 #include "dab/hal/sdr_device.h"
+#include "dab/hal/rtlsdr_device.h"
 #include "dab/hal/sdrplay_device.h"
 #include "dab/simd/simd.h"
 
@@ -895,11 +896,13 @@ static int history_contains_sample_range(const history_buffer_t *history,
 }
 
 int main(int argc, char **argv) {
+    const char *driver = getenv("DAB_SDR_BACKEND");
     dab_sdr_open_params_t params = {"sdrplay", NULL, NULL};
     dab_sdr_device_t *device = 0;
     dab_sdr_stream_t *stream = 0;
     dab_stream_config_t stream_config;
-    dab_sdrplay_config_t device_config;
+    dab_sdrplay_config_t sdrplay_config;
+    dab_rtlsdr_config_t rtlsdr_config;
     dab_null_detect_t detector;
     dab_null_detect_config_t detector_config;
     dab_prs_acquire_t acquire;
@@ -1003,14 +1006,23 @@ int main(int argc, char **argv) {
         return 2;
     }
 
-    dab_sdrplay_default_config(&device_config);
-    device_config.gain_mode = env_gain_mode("DAB_SYNC_PROBE_GAIN_MODE", DAB_SDRPLAY_GAIN_MODE_MANUAL);
-    device_config.if_mode = DAB_SDRPLAY_IF_MODE_ZERO_IF;
-    device_config.antenna = DAB_SDRPLAY_ANTENNA_A;
-    device_config.lna_state = (unsigned char)env_u32("DAB_SYNC_PROBE_LNA_STATE", 0u);
-    device_config.if_gain_db = env_i32("DAB_SYNC_PROBE_IF_GAIN_DB", 0);
-    device_config.bias_tee_enabled = env_i32("DAB_SYNC_PROBE_BIAS_TEE", 0);
-    device_config.ppm_correction = env_i32("DAB_SYNC_PROBE_PPM", 0);
+    if (driver != 0 && strcmp(driver, "rtlsdr") == 0) {
+        params.driver = "rtlsdr";
+    }
+
+    dab_sdrplay_default_config(&sdrplay_config);
+    sdrplay_config.gain_mode = env_gain_mode("DAB_SYNC_PROBE_GAIN_MODE", DAB_SDRPLAY_GAIN_MODE_MANUAL);
+    sdrplay_config.if_mode = DAB_SDRPLAY_IF_MODE_ZERO_IF;
+    sdrplay_config.antenna = DAB_SDRPLAY_ANTENNA_A;
+    sdrplay_config.lna_state = (unsigned char)env_u32("DAB_SYNC_PROBE_LNA_STATE", 0u);
+    sdrplay_config.if_gain_db = env_i32("DAB_SYNC_PROBE_IF_GAIN_DB", 0);
+    sdrplay_config.bias_tee_enabled = env_i32("DAB_SYNC_PROBE_BIAS_TEE", 0);
+    sdrplay_config.ppm_correction = env_i32("DAB_SYNC_PROBE_PPM", 0);
+    dab_rtlsdr_default_config(&rtlsdr_config);
+    rtlsdr_config.gain_mode = sdrplay_config.gain_mode == DAB_SDRPLAY_GAIN_MODE_AUTO ?
+        DAB_RTLSDR_GAIN_MODE_AUTO : DAB_RTLSDR_GAIN_MODE_MANUAL;
+    rtlsdr_config.ppm_correction = sdrplay_config.ppm_correction;
+    rtlsdr_config.bias_tee_enabled = sdrplay_config.bias_tee_enabled;
 
     stream_config.sample_rate = env_u32("DAB_SYNC_PROBE_SAMPLE_RATE", 2048000u);
     stream_config.center_freq_hz = env_u64("DAB_SYNC_PROBE_CENTER_FREQ_HZ", 220352000ull);
@@ -1036,10 +1048,12 @@ int main(int argc, char **argv) {
                 continue;
             }
             if (strcmp(argv[argi], "--agc") == 0 || strcmp(argv[argi], "-a") == 0) {
-                if (argi + 1 >= argc || parse_agc_arg(argv[argi + 1], &device_config.gain_mode) != 0) {
+                if (argi + 1 >= argc || parse_agc_arg(argv[argi + 1], &sdrplay_config.gain_mode) != 0) {
                     print_usage(argv[0]);
                     return 2;
                 }
+                rtlsdr_config.gain_mode = sdrplay_config.gain_mode == DAB_SDRPLAY_GAIN_MODE_AUTO ?
+                    DAB_RTLSDR_GAIN_MODE_AUTO : DAB_RTLSDR_GAIN_MODE_MANUAL;
                 ++argi;
                 continue;
             }
@@ -1211,7 +1225,12 @@ int main(int argc, char **argv) {
         goto cleanup;
     }
     fprintf(stderr, "configure device\n");
-    if (dab_sdrplay_configure_device(device, &device_config) != DAB_SDR_STATUS_OK) {
+    if (strcmp(params.driver, "rtlsdr") == 0) {
+        if (dab_rtlsdr_configure_device(device, &rtlsdr_config) != DAB_SDR_STATUS_OK) {
+            fprintf(stderr, "device config failed\n");
+            goto cleanup;
+        }
+    } else if (dab_sdrplay_configure_device(device, &sdrplay_config) != DAB_SDR_STATUS_OK) {
         fprintf(stderr, "device config failed\n");
         goto cleanup;
     }
@@ -1234,7 +1253,7 @@ int main(int argc, char **argv) {
     printf("sdrplay-audio start sample_rate=%u center_freq_hz=%llu agc=%s debug=%s simd=%s fft=%s ref_threshold=%.3f",
            stream_config.sample_rate,
            (unsigned long long)stream_config.center_freq_hz,
-           device_config.gain_mode == DAB_SDRPLAY_GAIN_MODE_AUTO ? "on" : "off",
+           sdrplay_config.gain_mode == DAB_SDRPLAY_GAIN_MODE_AUTO ? "on" : "off",
            g_debug_logs != 0 ? "on" : "off",
            simd_ops != 0 ? simd_ops->name : "unknown",
            fft.backend_name != 0 ? fft.backend_name : "unknown",
@@ -2058,7 +2077,8 @@ int main(int argc, char **argv) {
         pending.predicted = 0;
     }
 
-    dropped_blocks = dab_sdrplay_stream_dropped_blocks(stream);
+    dropped_blocks = strcmp(params.driver, "rtlsdr") == 0 ?
+        dab_rtlsdr_stream_dropped_blocks(stream) : dab_sdrplay_stream_dropped_blocks(stream);
     printf("summary blocks=%llu dropped_blocks=%u mode=%d locked=%d frame_start=%llu prs_score=%.6f cfo=%.3f ifo=%d\n",
            (unsigned long long)blocks_read,
            dropped_blocks,
