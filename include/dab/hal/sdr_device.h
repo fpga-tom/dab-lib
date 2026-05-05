@@ -20,7 +20,8 @@ typedef enum {
 
 typedef enum {
     DAB_SDR_DRIVER_UNKNOWN = 0,
-    DAB_SDR_DRIVER_SDRPLAY = 1
+    DAB_SDR_DRIVER_SDRPLAY = 1,
+    DAB_SDR_DRIVER_RTLSDR = 2
 } dab_sdr_driver_kind_t;
 
 typedef struct {

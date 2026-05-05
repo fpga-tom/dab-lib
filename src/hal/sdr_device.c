@@ -5,6 +5,8 @@
 
 const dab_sdr_device_desc_t *dab_sdrplay_device_descs(uint32_t *count);
 dab_sdr_status_t dab_sdrplay_device_open(const dab_sdr_open_params_t *params, dab_sdr_device_t **device);
+const dab_sdr_device_desc_t *dab_rtlsdr_device_descs(uint32_t *count);
+dab_sdr_status_t dab_rtlsdr_device_open(const dab_sdr_open_params_t *params, dab_sdr_device_t **device);
 
 typedef struct {
     const char *driver;
@@ -13,7 +15,8 @@ typedef struct {
 } dab_sdr_driver_registry_t;
 
 static const dab_sdr_driver_registry_t DAB_DRIVER_REGISTRY[] = {
-    {"sdrplay", dab_sdrplay_device_descs, dab_sdrplay_device_open}
+    {"sdrplay", dab_sdrplay_device_descs, dab_sdrplay_device_open},
+    {"rtlsdr", dab_rtlsdr_device_descs, dab_rtlsdr_device_open}
 };
 
 static const dab_sdr_driver_registry_t *dab_sdr_find_driver(const char *driver) {

@@ -325,6 +325,15 @@ Applies SDRplay-specific configuration to a device already opened through the ge
 ### `dab_sdrplay_stream_dropped_blocks`
 Returns the number of dropped blocks observed by the SDRplay stream bridge.
 
+### `dab_rtlsdr_default_config`
+Loads default RTL-SDR-specific gain, PPM, and bias-tee settings.
+
+### `dab_rtlsdr_configure_device`
+Applies RTL-SDR-specific configuration to a device already opened through the generic HAL.
+
+### `dab_rtlsdr_stream_dropped_blocks`
+Returns the number of dropped blocks observed by the RTL-SDR stream bridge.
+
 ## OS And SIMD Support
 
 ### `dab_time_monotonic_ns`
@@ -340,7 +349,7 @@ Portable condition-variable wrappers used by the producer-consumer queue.
 Portable thread creation and join helpers.
 
 ### `dab_shared_lib_open`, `dab_shared_lib_symbol`, `dab_shared_lib_close`
-Portable shared-library loading helpers used by the SDRplay dynamic-loader path.
+Portable shared-library loading helpers used by the SDRplay and RTL-SDR dynamic-loader paths.
 
 ### `dab_simd_init`
 Detects the best SIMD backend for the current platform.
