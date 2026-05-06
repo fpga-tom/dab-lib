@@ -930,10 +930,14 @@ static int scan_frequency(scan_runtime_t *runtime,
     dab_sdr_block_view_t src_block;
     uint32_t block_index;
     uint32_t block_limit;
-    uint32_t metadata_updated_block = 0u;
-    uint32_t label_wait_block_limit = 0u;
+    uint64_t scan_sample_limit;
+    uint64_t label_wait_sample_limit;
+    uint64_t scan_deadline_sample = 0u;
+    uint64_t current_sample_end = 0u;
+    uint64_t metadata_updated_sample = 0u;
     uint32_t best_service_count = 0u;
     uint32_t best_label_count = 0u;
+    int have_scan_start = 0;
     int have_services = 0;
     int rc = -1;
 
@@ -947,13 +951,11 @@ static int scan_frequency(scan_runtime_t *runtime,
     stream_config.center_freq_hz = channel->frequency_hz;
     stream_config.bandwidth_hz = 1536000u;
     stream_config.gain_db = gain_db;
-    block_limit = (per_frequency_seconds * stream_config.sample_rate) / 1334;//DAB_IQ_BLOCK_SAMPLES;
+    scan_sample_limit = (uint64_t)per_frequency_seconds * (uint64_t)stream_config.sample_rate;
+    label_wait_sample_limit = 10ull * (uint64_t)stream_config.sample_rate;
+    block_limit = (uint32_t)(scan_sample_limit / 256u) + 1024u;
     if (block_limit < 120u) {
         block_limit = 120u;
-    }
-    label_wait_block_limit = (10u * stream_config.sample_rate) / 1334;//DAB_IQ_BLOCK_SAMPLES;
-    if (label_wait_block_limit < 24u) {
-        label_wait_block_limit = 24u;
     }
 
     printf("SCAN_PROGRESS\t%u\t%d\t%s\t%llu\n",
@@ -994,6 +996,12 @@ static int scan_frequency(scan_runtime_t *runtime,
             fprintf(stderr, "read failed for %s at block %u\n", channel->channel, block_index);
             goto cleanup;
         }
+        if (!have_scan_start) {
+            scan_deadline_sample = src_block.sample_index + scan_sample_limit;
+            metadata_updated_sample = src_block.sample_index;
+            have_scan_start = 1;
+        }
+        current_sample_end = src_block.sample_index + src_block.sample_count;
 
         history_append(&runtime->history, &src_block);
         if (dab_null_detect_process_i16(&runtime->detector, &src_block, &event) < 0) {
@@ -1023,7 +1031,10 @@ static int scan_frequency(scan_runtime_t *runtime,
         }
 
         if (!runtime->pending.pending) {
-            if (have_services && block_index >= metadata_updated_block + label_wait_block_limit) {
+            if (have_services && current_sample_end >= metadata_updated_sample + label_wait_sample_limit) {
+                break;
+            }
+            if (!have_services && current_sample_end >= scan_deadline_sample) {
                 break;
             }
             continue;
@@ -1142,7 +1153,7 @@ static int scan_frequency(scan_runtime_t *runtime,
                     const uint32_t service_count = runtime->fic.repo.current.service_count;
 
                     if (service_count > best_service_count || label_count > best_label_count) {
-                        metadata_updated_block = block_index;
+                        metadata_updated_sample = current_sample_end;
                         if (service_count > best_service_count) {
                             best_service_count = service_count;
                         }
@@ -1161,11 +1172,17 @@ static int scan_frequency(scan_runtime_t *runtime,
                     fflush(stdout);
                     have_services = 1;
                     if (label_count >= service_count ||
-                        block_index >= metadata_updated_block + label_wait_block_limit) {
+                        current_sample_end >= metadata_updated_sample + label_wait_sample_limit) {
                         break;
                     }
                 }
             }
+        }
+        if (have_services && current_sample_end >= metadata_updated_sample + label_wait_sample_limit) {
+            break;
+        }
+        if (!have_services && current_sample_end >= scan_deadline_sample) {
+            break;
         }
     }
 
