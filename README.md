@@ -204,6 +204,7 @@ Interpretation:
 
 Implemented:
 - SDRplay HAL with stub and real dynamic-loading path
+- RTL-SDR HAL with stub and real dynamic-loading path
 - frontend IQ conversion to planar float and DC removal
 - rolling null-symbol detector
 - phase-reference detection, coarse timing, and coarse CFO tracking

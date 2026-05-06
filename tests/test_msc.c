@@ -203,21 +203,29 @@ static uint16_t test_msc_dabplus_firecode(const uint8_t *data) {
 static void test_msc_build_dabplus_cifs(uint16_t cif_bytes,
                                         uint8_t *data1,
                                         uint8_t cifs[DAB_MSC_DABPLUS_COLUMNS_PER_SUPERFRAME][DAB_MSC_MAX_LOGICAL_FRAME_BYTES_PER_CIF]) {
+    const uint16_t row_count = (uint16_t)(cif_bytes / DAB_MSC_DABPLUS_RESYNC_COLUMNS);
     uint32_t row;
 
-    for (row = 0u; row < cif_bytes; ++row) {
+    for (row = 0u; row < row_count; ++row) {
         uint8_t payload_245[245] = {0};
         uint8_t parity[10];
 
         for (uint32_t col = 0u; col < DAB_MSC_DABPLUS_COLUMNS_PER_RS_PAYLOAD; ++col) {
-            payload_245[135u + col] = data1[(col * cif_bytes) + row];
+            payload_245[135u + col] = data1[(col * row_count) + row];
         }
         test_msc_rs_encode_row_245_10(payload_245, parity);
         for (uint32_t col = 0u; col < DAB_MSC_DABPLUS_COLUMNS_PER_RS_PAYLOAD; ++col) {
-            cifs[col][row] = payload_245[135u + col];
+            const uint32_t cif_index = col / DAB_MSC_DABPLUS_RESYNC_COLUMNS;
+            const uint32_t cif_offset = (col % DAB_MSC_DABPLUS_RESYNC_COLUMNS) * row_count;
+
+            cifs[cif_index][cif_offset + row] = payload_245[135u + col];
         }
         for (uint32_t col = 0u; col < 10u; ++col) {
-            cifs[DAB_MSC_DABPLUS_COLUMNS_PER_RS_PAYLOAD + col][row] = parity[col];
+            const uint32_t rs_col = DAB_MSC_DABPLUS_COLUMNS_PER_RS_PAYLOAD + col;
+            const uint32_t cif_index = rs_col / DAB_MSC_DABPLUS_RESYNC_COLUMNS;
+            const uint32_t cif_offset = (rs_col % DAB_MSC_DABPLUS_RESYNC_COLUMNS) * row_count;
+
+            cifs[cif_index][cif_offset + row] = parity[col];
         }
     }
 }
@@ -621,7 +629,7 @@ void test_msc_ingest_component_payload_builds_dabplus_superframe(void) {
     state.decoded_components[0].tmid = 0u;
     state.decoded_components[0].primary = 1u;
 
-    for (i = 0u; i < (DAB_MSC_DABPLUS_COLUMNS_PER_SUPERFRAME / DAB_MSC_CIFS_PER_FRAME); ++i) {
+    for (i = 0u; i < (DAB_MSC_DABPLUS_COLUMNS_PER_SUPERFRAME / DAB_MSC_DABPLUS_RESYNC_COLUMNS); i += DAB_MSC_CIFS_PER_FRAME) {
         payload = (dab_msc_component_payload_t){0};
         payload.valid = 1u;
         payload.sid = 0x5555u;
@@ -630,10 +638,14 @@ void test_msc_ingest_component_payload_builds_dabplus_superframe(void) {
         payload.primary = 1u;
         payload.kind = DAB_MSC_COMPONENT_STREAM_AUDIO;
         for (uint32_t cif_index = 0u; cif_index < DAB_MSC_CIFS_PER_FRAME; ++cif_index) {
-            const uint32_t column = (i * DAB_MSC_CIFS_PER_FRAME) + cif_index;
+            const uint32_t column = i + cif_index;
+
+            if (column >= (DAB_MSC_DABPLUS_COLUMNS_PER_SUPERFRAME / DAB_MSC_DABPLUS_RESYNC_COLUMNS)) {
+                break;
+            }
 
             payload.cif_valid[cif_index] = 1u;
-            payload.byte_count[cif_index] = 24u;
+            payload.byte_count[cif_index] = 24u * DAB_MSC_DABPLUS_RESYNC_COLUMNS;
             payload.data[cif_index] = cifs[column];
         }
         TEST_ASSERT(dab_msc_ingest_component_payload(&state, &state.decoded_components[0], &payload) == 0);
@@ -642,7 +654,7 @@ void test_msc_ingest_component_payload_builds_dabplus_superframe(void) {
     TEST_ASSERT(dab_msc_get_primary_dabplus_superframe(&state, 0x5555u, &superframe) == 0);
     TEST_ASSERT(superframe.valid == 1u);
     TEST_ASSERT(superframe.synchronized == 1u);
-    TEST_ASSERT(superframe.cif_bytes == 24u);
+    TEST_ASSERT(superframe.cif_bytes == (24u * DAB_MSC_DABPLUS_RESYNC_COLUMNS));
     TEST_ASSERT(superframe.superframe_bytes == sizeof(data1));
     TEST_ASSERT(superframe.au_count == 3u);
     TEST_ASSERT(superframe.dac_rate == 1u);

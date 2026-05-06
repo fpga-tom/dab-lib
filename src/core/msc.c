@@ -506,12 +506,22 @@ static int dab_msc_parse_dabplus_superframe(dab_msc_dabplus_stream_runtime_t *ru
 
 static int dab_msc_dabplus_decode_superframe(dab_msc_dabplus_stream_runtime_t *runtime) {
     uint8_t *header;
+    uint8_t *raw_superframe;
     uint8_t row[120];
     uint32_t row_index;
     uint32_t out_pos = 0u;
+    uint8_t raw_dac_rate = 0u;
+    uint8_t raw_sbr_flag = 0u;
+    uint8_t raw_aac_channel_mode = 0u;
+    uint8_t raw_ps_flag = 0u;
+    uint8_t raw_mpeg_surround_config = 0u;
+    uint8_t raw_au_count = 0u;
+    uint32_t raw_au_start[DAB_MSC_DABPLUS_MAX_AUS] = {0};
+    uint32_t raw_au_length[DAB_MSC_DABPLUS_MAX_AUS] = {0};
     uint16_t firecode_expected;
     uint16_t firecode_actual;
     int header_zero;
+    int raw_parse_ok;
     uint32_t rs_corrected = 0u;
 
     if (runtime == 0 || runtime->columns == 0 || runtime->superframe == 0 ||
@@ -521,6 +531,11 @@ static int dab_msc_dabplus_decode_superframe(dab_msc_dabplus_stream_runtime_t *r
 
     header = (uint8_t *)malloc((size_t)runtime->row_count * 2u);
     if (header == 0) {
+        return -1;
+    }
+    raw_superframe = (uint8_t *)malloc((size_t)runtime->row_count * DAB_MSC_DABPLUS_COLUMNS_PER_RS_PAYLOAD);
+    if (raw_superframe == 0) {
+        free(header);
         return -1;
     }
     for (uint32_t col = 0u; col < 2u; ++col) {
@@ -554,12 +569,32 @@ static int dab_msc_dabplus_decode_superframe(dab_msc_dabplus_stream_runtime_t *r
             dab_msc_dabplus_debug_reject_logs++;
         }
         free(header);
+        free(raw_superframe);
         runtime->synchronized = 0u;
         runtime->superframe_valid = 0u;
         return -1;
     }
 
     runtime->superframe_bytes = (uint32_t)runtime->row_count * DAB_MSC_DABPLUS_COLUMNS_PER_RS_PAYLOAD;
+    for (uint32_t col = 0u; col < DAB_MSC_DABPLUS_COLUMNS_PER_RS_PAYLOAD; ++col) {
+        for (row_index = 0u; row_index < runtime->row_count; ++row_index) {
+            raw_superframe[(col * runtime->row_count) + row_index] =
+                runtime->columns[(row_index * DAB_MSC_DABPLUS_COLUMNS_PER_SUPERFRAME) + col];
+        }
+    }
+    memcpy(runtime->superframe, raw_superframe, runtime->superframe_bytes);
+    raw_parse_ok = dab_msc_parse_dabplus_superframe(runtime, runtime->superframe) == 0;
+    if (raw_parse_ok) {
+        raw_dac_rate = runtime->dac_rate;
+        raw_sbr_flag = runtime->sbr_flag;
+        raw_aac_channel_mode = runtime->aac_channel_mode;
+        raw_ps_flag = runtime->ps_flag;
+        raw_mpeg_surround_config = runtime->mpeg_surround_config;
+        raw_au_count = runtime->au_count;
+        memcpy(raw_au_start, runtime->au_start, sizeof(raw_au_start));
+        memcpy(raw_au_length, runtime->au_length, sizeof(raw_au_length));
+    }
+
     for (row_index = 0u; row_index < runtime->row_count; ++row_index) {
         for (uint32_t col = 0u; col < DAB_MSC_DABPLUS_COLUMNS_PER_SUPERFRAME; ++col) {
             row[col] = runtime->columns[(row_index * DAB_MSC_DABPLUS_COLUMNS_PER_SUPERFRAME) + col];
@@ -580,10 +615,23 @@ static int dab_msc_dabplus_decode_superframe(dab_msc_dabplus_stream_runtime_t *r
     runtime->rs_corrected_last_superframe = rs_corrected;
     runtime->rs_corrected_total += rs_corrected;
     runtime->superframe_valid = dab_msc_parse_dabplus_superframe(runtime, runtime->superframe) == 0 ? 1u : 0u;
+    if (runtime->superframe_valid == 0u && raw_parse_ok) {
+        memcpy(runtime->superframe, raw_superframe, runtime->superframe_bytes);
+        runtime->dac_rate = raw_dac_rate;
+        runtime->sbr_flag = raw_sbr_flag;
+        runtime->aac_channel_mode = raw_aac_channel_mode;
+        runtime->ps_flag = raw_ps_flag;
+        runtime->mpeg_surround_config = raw_mpeg_surround_config;
+        runtime->au_count = raw_au_count;
+        memcpy(runtime->au_start, raw_au_start, sizeof(runtime->au_start));
+        memcpy(runtime->au_length, raw_au_length, sizeof(runtime->au_length));
+        runtime->superframe_valid = 1u;
+    }
     if (runtime->superframe_valid != 0u) {
         runtime->generation++;
     }
     free(header);
+    free(raw_superframe);
     return runtime->superframe_valid != 0u ? 0 : -1;
 }
 

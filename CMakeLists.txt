@@ -209,6 +209,11 @@ add_library(dab
     src/hal/sdrplay/sdrplay_adapter_real.c
     src/hal/sdrplay/sdrplay_adapter_stub.c
     src/hal/sdrplay/sdrplay_device.c
+    src/hal/rtlsdr/rtlsdr_api.c
+    src/hal/rtlsdr/rtlsdr_adapter.c
+    src/hal/rtlsdr/rtlsdr_adapter_real.c
+    src/hal/rtlsdr/rtlsdr_adapter_stub.c
+    src/hal/rtlsdr/rtlsdr_device.c
     src/os/os_cond.c
     src/os/os_mutex.c
     src/os/os_shared_lib.c
@@ -238,6 +243,7 @@ if(DAB_BUILD_GUI)
         add_executable(dab_gui WIN32
             src/gui/main.cpp
             src/gui/main_frame.cpp
+            src/gui/dab_gui_settings.c
             src/gui/embedded_audio_playback_backend.c
             src/gui/embedded_audio_scan_backend.c
             tools/audio_playback.c
@@ -505,6 +511,8 @@ if(DAB_BUILD_TESTS)
         tests/test_os_shared_lib.c
         tests/test_sdrplay_api.c
         tests/test_sdrplay.c
+        tests/test_rtlsdr_api.c
+        tests/test_rtlsdr.c
         tests/test_pc_queue.c
         tests/test_simd.c
         tests/test_prs_acquire.c
@@ -517,7 +525,10 @@ if(DAB_BUILD_TESTS)
     )
 
     target_link_libraries(dab_tests PRIVATE dab)
-    target_include_directories(dab_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/hal/sdrplay)
+    target_include_directories(dab_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/hal/sdrplay
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/hal/rtlsdr
+    )
 
     add_test(NAME dab_tests COMMAND dab_tests)
 endif()

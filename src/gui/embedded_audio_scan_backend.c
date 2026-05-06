@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "../../include/dab/hal/sdr_device.h"
+#include "../../include/dab/hal/rtlsdr_device.h"
 #include "../../include/dab/hal/sdrplay_device.h"
 
 typedef struct {
@@ -16,12 +17,17 @@ typedef struct {
 
 static dab_gui_scan_sink_t g_scan_sink = {0};
 
-static void dab_gui_setenv_real_backend(void) {
+static void dab_gui_setenv_value(const char *name, const char *value) {
 #if defined(_WIN32)
-    (void)_putenv_s("DAB_SDRPLAY_USE_REAL", "1");
+    (void)_putenv_s(name, value);
 #else
-    (void)setenv("DAB_SDRPLAY_USE_REAL", "1", 1);
+    (void)setenv(name, value, 1);
 #endif
+}
+
+static void dab_gui_setenv_real_backend(void) {
+    dab_gui_setenv_value("DAB_SDRPLAY_USE_REAL", "1");
+    dab_gui_setenv_value("DAB_RTLSDR_USE_REAL", "1");
 }
 
 static void dab_gui_scan_emit_line(const char *line) {
@@ -71,8 +77,11 @@ static int dab_gui_scan_printf(const char *fmt, ...) {
 #undef printf
 
 int dab_gui_scan_run(const char *output_path, dab_gui_scan_event_callback_t callback, void *user) {
+    dab_gui_sdr_settings_t settings;
+    const char *driver = "sdrplay";
     dab_sdr_open_params_t params = {"sdrplay", NULL, NULL};
-    dab_sdrplay_config_t device_config;
+    dab_sdrplay_config_t sdrplay_config;
+    dab_rtlsdr_config_t rtlsdr_config;
     dab_sdr_device_t *device = 0;
     scan_runtime_t runtime = {0};
     FILE *results_fp = 0;
@@ -87,12 +96,23 @@ int dab_gui_scan_run(const char *output_path, dab_gui_scan_event_callback_t call
     g_scan_sink.callback = callback;
     g_scan_sink.user = user;
 
+    dab_gui_sdr_get_settings(&settings);
+    if (settings.backend == DAB_GUI_SDR_BACKEND_RTLSDR) {
+        driver = "rtlsdr";
+    }
+    params.driver = driver;
+
     dab_gui_setenv_real_backend();
 
-    dab_sdrplay_default_config(&device_config);
-    device_config.gain_mode = DAB_SDRPLAY_GAIN_MODE_AUTO;
-    device_config.if_mode = DAB_SDRPLAY_IF_MODE_ZERO_IF;
-    device_config.antenna = DAB_SDRPLAY_ANTENNA_A;
+    dab_sdrplay_default_config(&sdrplay_config);
+    sdrplay_config.gain_mode = settings.agc_enabled != 0 ?
+        DAB_SDRPLAY_GAIN_MODE_AUTO : DAB_SDRPLAY_GAIN_MODE_MANUAL;
+    sdrplay_config.if_mode = DAB_SDRPLAY_IF_MODE_ZERO_IF;
+    sdrplay_config.antenna = DAB_SDRPLAY_ANTENNA_A;
+
+    dab_rtlsdr_default_config(&rtlsdr_config);
+    rtlsdr_config.gain_mode = settings.agc_enabled != 0 ?
+        DAB_RTLSDR_GAIN_MODE_AUTO : DAB_RTLSDR_GAIN_MODE_MANUAL;
 
     if (scan_runtime_init(&runtime, 2048000u) != 0) {
         dab_gui_scan_emit_line("SCAN_ERROR\tfailed to initialize scan runtime");
@@ -100,7 +120,11 @@ int dab_gui_scan_run(const char *output_path, dab_gui_scan_event_callback_t call
     }
 
     if (dab_sdr_device_open(&params, &device) != DAB_SDR_STATUS_OK || device == 0) {
-        dab_gui_scan_emit_line("SCAN_ERROR\tfailed to open SDRplay device");
+        if (settings.backend == DAB_GUI_SDR_BACKEND_RTLSDR) {
+            dab_gui_scan_emit_line("SCAN_ERROR\tfailed to open RTL-SDR device");
+        } else {
+            dab_gui_scan_emit_line("SCAN_ERROR\tfailed to open SDRplay device");
+        }
         goto cleanup;
     }
 
@@ -117,10 +141,13 @@ int dab_gui_scan_run(const char *output_path, dab_gui_scan_event_callback_t call
     for (channel_index = 0u; channel_index < (uint32_t)DAB_CHANNEL_COUNT; ++channel_index) {
         const int services = scan_frequency(&runtime,
                                             device,
-                                            &device_config,
+                                            driver,
+                                            &sdrplay_config,
+                                            &rtlsdr_config,
                                             &kBandIIIChannels[channel_index],
                                             channel_index,
                                             4u,
+                                            settings.gain_db,
                                             results_fp);
         if (services < 0) {
             char line[128];

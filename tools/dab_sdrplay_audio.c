@@ -16,6 +16,7 @@
 #include "dab/core/tframe.h"
 #include "dab/core/msc.h"
 #include "dab/hal/sdr_device.h"
+#include "dab/hal/rtlsdr_device.h"
 #include "dab/hal/sdrplay_device.h"
 #include "dab/simd/simd.h"
 
@@ -895,11 +896,13 @@ static int history_contains_sample_range(const history_buffer_t *history,
 }
 
 int main(int argc, char **argv) {
+    const char *driver = getenv("DAB_SDR_BACKEND");
     dab_sdr_open_params_t params = {"sdrplay", NULL, NULL};
     dab_sdr_device_t *device = 0;
     dab_sdr_stream_t *stream = 0;
     dab_stream_config_t stream_config;
-    dab_sdrplay_config_t device_config;
+    dab_sdrplay_config_t sdrplay_config;
+    dab_rtlsdr_config_t rtlsdr_config;
     dab_null_detect_t detector;
     dab_null_detect_config_t detector_config;
     dab_prs_acquire_t acquire;
@@ -987,6 +990,11 @@ int main(int argc, char **argv) {
 #endif
     uint64_t audio_timeout_samples = 0u;
     uint64_t samples_since_audio = 0u;
+    uint64_t last_audio_frame_start_sample = 0u;
+    uint64_t last_audio_blocks_read = 0u;
+    uint32_t last_audio_fic_frames_seen = 0u;
+    uint32_t last_audio_msc_frames_seen = 0u;
+    uint32_t last_audio_tframe_symbol_index = 0u;
     int rc = 1;
 #if defined(DAB_HAVE_AUDIO_PLAYBACK)
     dab_audio_playback_t audio = {0};
@@ -998,14 +1006,23 @@ int main(int argc, char **argv) {
         return 2;
     }
 
-    dab_sdrplay_default_config(&device_config);
-    device_config.gain_mode = env_gain_mode("DAB_SYNC_PROBE_GAIN_MODE", DAB_SDRPLAY_GAIN_MODE_MANUAL);
-    device_config.if_mode = DAB_SDRPLAY_IF_MODE_ZERO_IF;
-    device_config.antenna = DAB_SDRPLAY_ANTENNA_A;
-    device_config.lna_state = (unsigned char)env_u32("DAB_SYNC_PROBE_LNA_STATE", 0u);
-    device_config.if_gain_db = env_i32("DAB_SYNC_PROBE_IF_GAIN_DB", 0);
-    device_config.bias_tee_enabled = env_i32("DAB_SYNC_PROBE_BIAS_TEE", 0);
-    device_config.ppm_correction = env_i32("DAB_SYNC_PROBE_PPM", 0);
+    if (driver != 0 && strcmp(driver, "rtlsdr") == 0) {
+        params.driver = "rtlsdr";
+    }
+
+    dab_sdrplay_default_config(&sdrplay_config);
+    sdrplay_config.gain_mode = env_gain_mode("DAB_SYNC_PROBE_GAIN_MODE", DAB_SDRPLAY_GAIN_MODE_MANUAL);
+    sdrplay_config.if_mode = DAB_SDRPLAY_IF_MODE_ZERO_IF;
+    sdrplay_config.antenna = DAB_SDRPLAY_ANTENNA_A;
+    sdrplay_config.lna_state = (unsigned char)env_u32("DAB_SYNC_PROBE_LNA_STATE", 0u);
+    sdrplay_config.if_gain_db = env_i32("DAB_SYNC_PROBE_IF_GAIN_DB", 0);
+    sdrplay_config.bias_tee_enabled = env_i32("DAB_SYNC_PROBE_BIAS_TEE", 0);
+    sdrplay_config.ppm_correction = env_i32("DAB_SYNC_PROBE_PPM", 0);
+    dab_rtlsdr_default_config(&rtlsdr_config);
+    rtlsdr_config.gain_mode = sdrplay_config.gain_mode == DAB_SDRPLAY_GAIN_MODE_AUTO ?
+        DAB_RTLSDR_GAIN_MODE_AUTO : DAB_RTLSDR_GAIN_MODE_MANUAL;
+    rtlsdr_config.ppm_correction = sdrplay_config.ppm_correction;
+    rtlsdr_config.bias_tee_enabled = sdrplay_config.bias_tee_enabled;
 
     stream_config.sample_rate = env_u32("DAB_SYNC_PROBE_SAMPLE_RATE", 2048000u);
     stream_config.center_freq_hz = env_u64("DAB_SYNC_PROBE_CENTER_FREQ_HZ", 220352000ull);
@@ -1031,10 +1048,12 @@ int main(int argc, char **argv) {
                 continue;
             }
             if (strcmp(argv[argi], "--agc") == 0 || strcmp(argv[argi], "-a") == 0) {
-                if (argi + 1 >= argc || parse_agc_arg(argv[argi + 1], &device_config.gain_mode) != 0) {
+                if (argi + 1 >= argc || parse_agc_arg(argv[argi + 1], &sdrplay_config.gain_mode) != 0) {
                     print_usage(argv[0]);
                     return 2;
                 }
+                rtlsdr_config.gain_mode = sdrplay_config.gain_mode == DAB_SDRPLAY_GAIN_MODE_AUTO ?
+                    DAB_RTLSDR_GAIN_MODE_AUTO : DAB_RTLSDR_GAIN_MODE_MANUAL;
                 ++argi;
                 continue;
             }
@@ -1206,7 +1225,12 @@ int main(int argc, char **argv) {
         goto cleanup;
     }
     fprintf(stderr, "configure device\n");
-    if (dab_sdrplay_configure_device(device, &device_config) != DAB_SDR_STATUS_OK) {
+    if (strcmp(params.driver, "rtlsdr") == 0) {
+        if (dab_rtlsdr_configure_device(device, &rtlsdr_config) != DAB_SDR_STATUS_OK) {
+            fprintf(stderr, "device config failed\n");
+            goto cleanup;
+        }
+    } else if (dab_sdrplay_configure_device(device, &sdrplay_config) != DAB_SDR_STATUS_OK) {
         fprintf(stderr, "device config failed\n");
         goto cleanup;
     }
@@ -1229,7 +1253,7 @@ int main(int argc, char **argv) {
     printf("sdrplay-audio start sample_rate=%u center_freq_hz=%llu agc=%s debug=%s simd=%s fft=%s ref_threshold=%.3f",
            stream_config.sample_rate,
            (unsigned long long)stream_config.center_freq_hz,
-           device_config.gain_mode == DAB_SDRPLAY_GAIN_MODE_AUTO ? "on" : "off",
+           sdrplay_config.gain_mode == DAB_SDRPLAY_GAIN_MODE_AUTO ? "on" : "off",
            g_debug_logs != 0 ? "on" : "off",
            simd_ops != 0 ? simd_ops->name : "unknown",
            fft.backend_name != 0 ? fft.backend_name : "unknown",
@@ -1277,6 +1301,11 @@ int main(int argc, char **argv) {
                 last_logo_generation = 0u;
 #endif
                 samples_since_audio = 0u;
+                last_audio_frame_start_sample = 0u;
+                last_audio_blocks_read = 0u;
+                last_audio_fic_frames_seen = 0u;
+                last_audio_msc_frames_seen = 0u;
+                last_audio_tframe_symbol_index = 0u;
             }
             prev_locked = (uint8_t)(sync.state.locked != 0);
         }
@@ -1302,10 +1331,73 @@ int main(int argc, char **argv) {
             goto cleanup;
         }
         if (playing_reported != 0u && samples_since_audio >= audio_timeout_samples) {
+#if defined(DAB_HAVE_AUDIO_PLAYBACK)
+            dab_msc_dabplus_debug_t audio_debug = {0};
+
+            if (selected_audio_sid_valid != 0u &&
+                dab_msc_get_primary_dabplus_debug(&msc, selected_audio_sid, &audio_debug) == 0) {
+                printf("audio-timeout sid=0x%08x timeout_samples=%llu locked=%d prs_score=%.6f good_frames=%u bad_frames=%u timing_error=%d frame_start=%llu last_audio_frame_start=%llu frame_delta=%lld blocks=%llu last_audio_block=%llu block_delta=%lld fic_frames=%u last_audio_fic=%u fic_delta=%d msc_frames=%u last_audio_msc=%u msc_delta=%d tframe_symbol=%u last_audio_tframe_symbol=%u sync=%u superframe_valid=%u generation=%llu attempts=%u failures=%u rs_last=%u rs_total=%u last_ok=%u runtime_resets=%u reason=0x%02x\n",
+                       selected_audio_sid,
+                       (unsigned long long)samples_since_audio,
+                       sync.state.locked,
+                       sync.state.prs_score,
+                       sync.state.good_frames,
+                       sync.state.bad_frames,
+                       sync.state.timing_error_samples,
+                       (unsigned long long)sync.state.frame_start_sample,
+                       (unsigned long long)last_audio_frame_start_sample,
+                       (long long)(sync.state.frame_start_sample - last_audio_frame_start_sample),
+                       (unsigned long long)blocks_read,
+                       (unsigned long long)last_audio_blocks_read,
+                       (long long)(blocks_read - last_audio_blocks_read),
+                       fic.frames_seen,
+                       last_audio_fic_frames_seen,
+                       (int)(fic.frames_seen - last_audio_fic_frames_seen),
+                       msc.frames_seen,
+                       last_audio_msc_frames_seen,
+                       (int)(msc.frames_seen - last_audio_msc_frames_seen),
+                       tframe.symbol_index,
+                       last_audio_tframe_symbol_index,
+                       audio_debug.synchronized,
+                       audio_debug.superframe_valid,
+                       (unsigned long long)audio_debug.generation,
+                       audio_debug.decode_attempts,
+                       audio_debug.decode_failures,
+                       audio_debug.rs_corrected_last_superframe,
+                       audio_debug.rs_corrected_total,
+                       audio_debug.last_decode_ok,
+                       audio_debug.runtime_reset_count,
+                       audio_debug.last_reconfig_reason);
+            } else {
+                printf("audio-timeout sid=0x%08x timeout_samples=%llu locked=%d prs_score=%.6f good_frames=%u bad_frames=%u timing_error=%d frame_start=%llu last_audio_frame_start=%llu frame_delta=%lld blocks=%llu last_audio_block=%llu block_delta=%lld fic_frames=%u last_audio_fic=%u fic_delta=%d msc_frames=%u last_audio_msc=%u msc_delta=%d tframe_symbol=%u last_audio_tframe_symbol=%u sync=0 superframe_valid=0 generation=0 attempts=0 failures=0 rs_last=0 rs_total=0 last_ok=0 runtime_resets=0 reason=0x00\n",
+                       selected_audio_sid,
+                       (unsigned long long)samples_since_audio,
+                       sync.state.locked,
+                       sync.state.prs_score,
+                       sync.state.good_frames,
+                       sync.state.bad_frames,
+                       sync.state.timing_error_samples,
+                       (unsigned long long)sync.state.frame_start_sample,
+                       (unsigned long long)last_audio_frame_start_sample,
+                       (long long)(sync.state.frame_start_sample - last_audio_frame_start_sample),
+                       (unsigned long long)blocks_read,
+                       (unsigned long long)last_audio_blocks_read,
+                       (long long)(blocks_read - last_audio_blocks_read),
+                       fic.frames_seen,
+                       last_audio_fic_frames_seen,
+                       (int)(fic.frames_seen - last_audio_fic_frames_seen),
+                       msc.frames_seen,
+                       last_audio_msc_frames_seen,
+                       (int)(msc.frames_seen - last_audio_msc_frames_seen),
+                       tframe.symbol_index,
+                       last_audio_tframe_symbol_index);
+            }
+#else
             printf("audio-timeout sid=0x%08x timeout_samples=%llu locked=%d\n",
                    selected_audio_sid,
                    (unsigned long long)samples_since_audio,
                    sync.state.locked);
+#endif
             reset_runtime_state(&detector,
                                 &sync,
                                 &ofdm,
@@ -1325,6 +1417,11 @@ int main(int argc, char **argv) {
             last_logo_generation = 0u;
 #endif
             samples_since_audio = 0u;
+            last_audio_frame_start_sample = 0u;
+            last_audio_blocks_read = 0u;
+            last_audio_fic_frames_seen = 0u;
+            last_audio_msc_frames_seen = 0u;
+            last_audio_tframe_symbol_index = 0u;
             prev_locked = 0u;
             continue;
         }
@@ -1864,6 +1961,11 @@ int main(int argc, char **argv) {
                                                         goto cleanup;
                                                     }
                                                     samples_since_audio = 0u;
+                                                    last_audio_frame_start_sample = sync.state.frame_start_sample;
+                                                    last_audio_blocks_read = blocks_read;
+                                                    last_audio_fic_frames_seen = fic.frames_seen;
+                                                    last_audio_msc_frames_seen = msc.frames_seen;
+                                                    last_audio_tframe_symbol_index = tframe.symbol_index;
                                                     if (playing_reported == 0u) {
                                                         const dab_fic_label_t *label =
                                                             fic_repo_find_label(&fic.repo.current,
@@ -1887,16 +1989,22 @@ int main(int argc, char **argv) {
                                                                                             selected_audio_sid,
                                                                                             &audio_debug) == 0 &&
                                                            waiting_for_audio_reported == 0u) {
-                                                    printf("waiting-for-audio sid=0x%08x", selected_audio_sid);
-                                                    if (label != 0 && label->text[0] != '\0') {
-                                                        printf(" label=\"%s\"", label->text);
-                                                    }
-                                                    printf(" sync=%u superframe_valid=%u attempts=%u failures=%u\n",
-                                                           audio_debug.synchronized,
-                                                           audio_debug.superframe_valid,
-                                                           audio_debug.decode_attempts,
-                                                           audio_debug.decode_failures);
-                                                    waiting_for_audio_reported = 1u;
+                                                        printf("waiting-for-audio sid=0x%08x", selected_audio_sid);
+                                                        if (label != 0 && label->text[0] != '\0') {
+                                                            printf(" label=\"%s\"", label->text);
+                                                        }
+                                                        printf(" sync=%u superframe_valid=%u generation=%llu attempts=%u failures=%u rs_last=%u rs_total=%u last_ok=%u runtime_resets=%u reason=0x%02x\n",
+                                                               audio_debug.synchronized,
+                                                               audio_debug.superframe_valid,
+                                                               (unsigned long long)audio_debug.generation,
+                                                               audio_debug.decode_attempts,
+                                                               audio_debug.decode_failures,
+                                                               audio_debug.rs_corrected_last_superframe,
+                                                               audio_debug.rs_corrected_total,
+                                                               audio_debug.last_decode_ok,
+                                                               audio_debug.runtime_reset_count,
+                                                               audio_debug.last_reconfig_reason);
+                                                        waiting_for_audio_reported = 1u;
                                                 }
 #endif
                                                 if (!fic_dump_written &&
@@ -1969,7 +2077,8 @@ int main(int argc, char **argv) {
         pending.predicted = 0;
     }
 
-    dropped_blocks = dab_sdrplay_stream_dropped_blocks(stream);
+    dropped_blocks = strcmp(params.driver, "rtlsdr") == 0 ?
+        dab_rtlsdr_stream_dropped_blocks(stream) : dab_sdrplay_stream_dropped_blocks(stream);
     printf("summary blocks=%llu dropped_blocks=%u mode=%d locked=%d frame_start=%llu prs_score=%.6f cfo=%.3f ifo=%d\n",
            (unsigned long long)blocks_read,
            dropped_blocks,

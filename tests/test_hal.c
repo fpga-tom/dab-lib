@@ -5,11 +5,14 @@
 void test_hal_enumerates_sdrplay_stub(void) {
     uint32_t count = dab_sdr_device_count();
     const dab_sdr_device_desc_t *desc = dab_sdr_device_desc(0u);
+    const dab_sdr_device_desc_t *rtl_desc = dab_sdr_device_desc(count - 1u);
 
-    TEST_ASSERT(count >= 1u);
+    TEST_ASSERT(count >= 2u);
     TEST_ASSERT(desc != 0);
     TEST_ASSERT(desc->kind == DAB_SDR_DRIVER_SDRPLAY);
     TEST_ASSERT(desc->driver != 0);
+    TEST_ASSERT(rtl_desc != 0);
+    TEST_ASSERT(rtl_desc->kind == DAB_SDR_DRIVER_RTLSDR);
 }
 
 void test_hal_opens_and_configures_sdrplay_stub(void) {

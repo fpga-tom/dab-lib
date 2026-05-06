@@ -11,6 +11,8 @@ enum {
     REF_GROUP_COUNT = 48
 };
 
+static const float kPi = 3.14159265358979323846f;
+
 static const int REF_K[REF_GROUP_COUNT] = {
     -768, -736, -704, -672, -640, -608, -576, -544, -512, -480, -448, -416,
     -384, -352, -320, -288, -256, -224, -192, -160, -128, -96, -64, -32,
@@ -61,7 +63,7 @@ static void build_ref_genpilot(float *ref_i, float *ref_q) {
         {
             const int idx = ref_pilot_idx(k);
             const int l = k - REF_K[idx];
-            const float phase = ((float)M_PI / 2.0f) * (float)REF_H[REF_II[idx]][l];
+            const float phase = (kPi / 2.0f) * (float)REF_H[REF_II[idx]][l];
 
             ref_i[out] = cosf(phase);
             ref_q[out] = sinf(phase);

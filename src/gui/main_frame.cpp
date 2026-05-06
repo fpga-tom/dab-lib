@@ -15,7 +15,9 @@
 #include <vector>
 
 #include <wx/button.h>
+#include <wx/checkbox.h>
 #include <wx/choice.h>
+#include <wx/config.h>
 #include <wx/dialog.h>
 #include <wx/dcbuffer.h>
 #include <wx/dcgraph.h>
@@ -24,11 +26,14 @@
 #include <wx/glcanvas.h>
 #include <wx/image.h>
 #include <wx/log.h>
+#include <wx/menu.h>
 #include <wx/mstream.h>
 #include <wx/panel.h>
+#include <wx/radiobox.h>
 #include <wx/settings.h>
 #include <wx/sizer.h>
 #include <wx/slider.h>
+#include <wx/spinctrl.h>
 #include <wx/stdpaths.h>
 #include <wx/stattext.h>
 #include <wx/timer.h>
@@ -50,6 +55,7 @@ namespace {
 constexpr int kEqualizerTimerId = wxID_HIGHEST + 1;
 constexpr int kScanTimerId = wxID_HIGHEST + 2;
 constexpr int kPlaybackStatusTimerId = wxID_HIGHEST + 3;
+constexpr int kSdrSettingsMenuId = wxID_HIGHEST + 4;
 
 static bool EnvEnabled(const char *name, bool fallback = false) {
     const char *value = std::getenv(name);
@@ -104,7 +110,7 @@ public:
         Bind(wxEVT_TIMER, &SpectrumPanel::OnTimer, this, kEqualizerTimerId);
         Bind(wxEVT_SIZE, &SpectrumPanel::OnSize, this);
         Bind(wxEVT_ERASE_BACKGROUND, &SpectrumPanel::OnEraseBackground, this);
-        timer_.Start(16);
+        timer_.Start(40);
     }
 
     ~SpectrumPanel() override {
@@ -681,6 +687,90 @@ private:
     bool applyingPreset_ = false;
 };
 
+class SdrSettingsDialog : public wxDialog {
+public:
+    SdrSettingsDialog(wxWindow *parent, const dab_gui_sdr_settings_t &settings)
+        : wxDialog(parent, wxID_ANY, "SDR Settings", wxDefaultPosition, wxDefaultSize,
+                   wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER) {
+        auto *outer = new wxBoxSizer(wxVERTICAL);
+        wxString backendChoices[] = {"SDRplay", "RTL-SDR"};
+
+        backendChoice_ = new wxRadioBox(this,
+                                        wxID_ANY,
+                                        "HAL backend",
+                                        wxDefaultPosition,
+                                        wxDefaultSize,
+                                        2,
+                                        backendChoices,
+                                        1,
+                                        wxRA_SPECIFY_COLS);
+        backendChoice_->SetSelection(settings.backend == DAB_GUI_SDR_BACKEND_RTLSDR ? 1 : 0);
+
+        agcCheck_ = new wxCheckBox(this, wxID_ANY, "Automatic gain control");
+        agcCheck_->SetValue(settings.agc_enabled != 0);
+
+        auto *gainRow = new wxBoxSizer(wxHORIZONTAL);
+        gainLabel_ = new wxStaticText(this, wxID_ANY, "Manual gain");
+        gainSpin_ = new wxSpinCtrl(this, wxID_ANY);
+        gainSpin_->SetRange(0, 59);
+        gainSpin_->SetValue(std::clamp(settings.gain_db, 0, 59));
+
+        gainRow->Add(gainLabel_, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 10);
+        gainRow->Add(gainSpin_, 0, wxALIGN_CENTER_VERTICAL);
+        gainRow->Add(new wxStaticText(this, wxID_ANY, "dB"), 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 6);
+
+        auto *buttons = new wxStdDialogButtonSizer();
+        buttons->AddButton(new wxButton(this, wxID_OK));
+        buttons->AddButton(new wxButton(this, wxID_CANCEL));
+        buttons->Realize();
+
+        outer->Add(backendChoice_, 0, wxEXPAND | wxALL, 14);
+        outer->Add(agcCheck_, 0, wxLEFT | wxRIGHT | wxBOTTOM, 14);
+        outer->Add(gainRow, 0, wxLEFT | wxRIGHT | wxBOTTOM, 14);
+        outer->Add(buttons, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 14);
+
+        SetSizerAndFit(outer);
+        SetMinSize(wxSize(360, -1));
+        CentreOnParent();
+
+        agcCheck_->Bind(wxEVT_CHECKBOX, [this](wxCommandEvent &) {
+            UpdateGainControls();
+        });
+        backendChoice_->Bind(wxEVT_RADIOBOX, [this](wxCommandEvent &) {
+            UpdateGainControls();
+        });
+        UpdateGainControls();
+    }
+
+    dab_gui_sdr_settings_t Settings() const {
+        dab_gui_sdr_settings_t settings;
+        settings.backend = backendChoice_->GetSelection() == 1 ?
+            DAB_GUI_SDR_BACKEND_RTLSDR : DAB_GUI_SDR_BACKEND_SDRPLAY;
+        settings.agc_enabled = agcCheck_->GetValue() ? 1 : 0;
+        settings.gain_db = gainSpin_->GetValue();
+        return settings;
+    }
+
+private:
+    void UpdateGainControls() {
+        const bool manual = !agcCheck_->GetValue();
+        const int maxGain = backendChoice_->GetSelection() == 1 ? 49 : 59;
+        if (gainSpin_->GetMax() != maxGain) {
+            gainSpin_->SetRange(0, maxGain);
+        }
+        if (gainSpin_->GetValue() > maxGain) {
+            gainSpin_->SetValue(maxGain);
+        }
+        gainLabel_->Enable(manual);
+        gainSpin_->Enable(manual);
+    }
+
+    wxRadioBox *backendChoice_ = nullptr;
+    wxCheckBox *agcCheck_ = nullptr;
+    wxStaticText *gainLabel_ = nullptr;
+    wxSpinCtrl *gainSpin_ = nullptr;
+};
+
 class ScanDialog : public wxDialog {
 public:
     explicit ScanDialog(wxWindow *parent, wxString resultsPath)
@@ -736,7 +826,10 @@ private:
     }
 
     void StartScan() {
-        statusLabel_->SetLabel("Opening SDRplay backend...");
+        dab_gui_sdr_settings_t settings;
+        dab_gui_sdr_get_settings(&settings);
+        statusLabel_->SetLabel(settings.backend == DAB_GUI_SDR_BACKEND_RTLSDR ?
+            "Opening RTL-SDR backend..." : "Opening SDRplay backend...");
         resultsPathUtf8_ = resultsPath_.ToStdString();
         scanFinished_.store(false);
         scanResultCode_.store(-1);
@@ -855,6 +948,17 @@ MainFrame::MainFrame()
 #endif
               wxDefaultPosition,
               wxSize(1100, 760)) {
+    dab_gui_sdr_default_settings(&sdrSettings_);
+    LoadSdrSettings();
+    ApplySdrSettings();
+
+    auto *menuBar = new wxMenuBar();
+    auto *settingsMenu = new wxMenu();
+    settingsMenu->Append(kSdrSettingsMenuId, "SDR Settings...");
+    menuBar->Append(settingsMenu, "Settings");
+    SetMenuBar(menuBar);
+    Bind(wxEVT_MENU, &MainFrame::OnSdrSettings, this, kSdrSettingsMenuId);
+
     SetMinClientSize(wxSize(900, 620));
     SetBackgroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_APPWORKSPACE));
 
@@ -888,6 +992,47 @@ MainFrame::MainFrame()
     ReloadStationsFromScanResults();
     UpdatePlaybackControls();
     RefreshPlaybackStatus();
+}
+
+void MainFrame::LoadSdrSettings() {
+    wxConfig config("dab-lib");
+    wxString backend;
+    long gain = 40;
+    bool agc = true;
+
+    config.Read("/sdr/backend", &backend, "sdrplay");
+    config.Read("/sdr/agc", &agc, true);
+    config.Read("/sdr/gain_db", &gain, 40);
+
+    sdrSettings_.backend = backend == "rtlsdr" ? DAB_GUI_SDR_BACKEND_RTLSDR : DAB_GUI_SDR_BACKEND_SDRPLAY;
+    sdrSettings_.agc_enabled = agc ? 1 : 0;
+    sdrSettings_.gain_db = std::clamp(static_cast<int>(gain), 0, 59);
+    if (sdrSettings_.backend == DAB_GUI_SDR_BACKEND_RTLSDR && sdrSettings_.gain_db > 49) {
+        sdrSettings_.gain_db = 49;
+    }
+}
+
+void MainFrame::SaveSdrSettings() {
+    wxConfig config("dab-lib");
+    config.Write("/sdr/backend", sdrSettings_.backend == DAB_GUI_SDR_BACKEND_RTLSDR ? "rtlsdr" : "sdrplay");
+    config.Write("/sdr/agc", sdrSettings_.agc_enabled != 0);
+    config.Write("/sdr/gain_db", static_cast<long>(sdrSettings_.gain_db));
+    config.Flush();
+}
+
+void MainFrame::ApplySdrSettings() {
+    if (sdrSettings_.backend == DAB_GUI_SDR_BACKEND_RTLSDR && sdrSettings_.gain_db > 49) {
+        sdrSettings_.gain_db = 49;
+    }
+    dab_gui_sdr_set_settings(&sdrSettings_);
+}
+
+wxString MainFrame::SdrSettingsSummary() const {
+    const wxString backend = sdrSettings_.backend == DAB_GUI_SDR_BACKEND_RTLSDR ? "RTL-SDR" : "SDRplay";
+    if (sdrSettings_.agc_enabled != 0) {
+        return wxString::Format("%s, AGC on", backend);
+    }
+    return wxString::Format("%s, AGC off, gain %d dB", backend, sdrSettings_.gain_db);
 }
 
 wxWindow *MainFrame::CreateBottomPanel(wxWindow *parent) {
@@ -1039,6 +1184,29 @@ void MainFrame::OnStationSelected(wxCommandEvent &) {
         StartPlaybackForCurrentSelection();
     } else if (controlStatusLabel_ != nullptr && stationChoice_->GetSelection() != wxNOT_FOUND) {
         controlStatusLabel_->SetLabel("Station selected. Press Start to play.");
+    }
+    UpdatePlaybackControls();
+}
+
+void MainFrame::OnSdrSettings(wxCommandEvent &) {
+    SdrSettingsDialog dialog(this, sdrSettings_);
+
+    if (dialog.ShowModal() != wxID_OK) {
+        return;
+    }
+
+    const bool wasPlaying = dab_gui_playback_is_running() != 0;
+    sdrSettings_ = dialog.Settings();
+    ApplySdrSettings();
+    SaveSdrSettings();
+
+    if (wasPlaying) {
+        StopPlayback();
+        if (controlStatusLabel_ != nullptr) {
+            controlStatusLabel_->SetLabel("SDR settings saved. Restart playback to use them.");
+        }
+    } else if (controlStatusLabel_ != nullptr) {
+        controlStatusLabel_->SetLabel(wxString::Format("SDR settings: %s", SdrSettingsSummary()));
     }
     UpdatePlaybackControls();
 }

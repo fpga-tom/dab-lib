@@ -6,6 +6,8 @@
 #include <wx/frame.h>
 #include <wx/string.h>
 
+#include "dab_gui_backend.h"
+
 class wxChoice;
 class wxCommandEvent;
 class wxTimerEvent;
@@ -30,7 +32,12 @@ private:
     void OnStartButton(wxCommandEvent &event);
     void OnStopButton(wxCommandEvent &event);
     void OnStationSelected(wxCommandEvent &event);
+    void OnSdrSettings(wxCommandEvent &event);
     wxWindow *CreateBottomPanel(wxWindow *parent);
+    void LoadSdrSettings();
+    void SaveSdrSettings();
+    void ApplySdrSettings();
+    wxString SdrSettingsSummary() const;
     void ReloadStationsFromScanResults();
     void UpdatePlaybackControls();
     void StartPlaybackForCurrentSelection();
@@ -48,6 +55,7 @@ private:
     std::vector<StationEntry> stationEntries_;
     wxTimer *playbackStatusTimer_ = nullptr;
     uint64_t lastLogoGeneration_ = 0u;
+    dab_gui_sdr_settings_t sdrSettings_;
 };
 
 #endif
