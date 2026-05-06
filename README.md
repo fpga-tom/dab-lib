@@ -14,6 +14,29 @@ cmake -S . -B build
 cmake --build build
 ```
 
+## Windows Installer
+
+To stage the GUI application and build an installer on Windows:
+
+```powershell
+cmake --build build-win --config Release --target dab_gui
+cmake --install build-win --config Release --prefix dist/install/Release
+powershell -ExecutionPolicy Bypass -File .\installer\build_installer.ps1 -Config Release
+```
+
+This packages:
+- `dab_gui.exe`
+- the required wxWidgets runtime DLLs
+- `portaudio_x64.dll`
+- `libfaad2_dll.dll`
+- `INSTALL.md`
+
+The Inno Setup script is:
+- `installer/dab_gui.iss`
+
+The generated installer is written to:
+- `dist/installer`
+
 ## Tests
 
 ```sh

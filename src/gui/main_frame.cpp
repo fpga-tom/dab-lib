@@ -46,6 +46,10 @@
 #include <GL/gl.h>
 #endif
 
+#if defined(_WIN32)
+#include <windows.h>
+#endif
+
 namespace {
 
 constexpr int kEqualizerTimerId = wxID_HIGHEST + 1;
@@ -110,6 +114,8 @@ public:
     }
 
     ~SpectrumPanel() override {
+        SetCurrent(*glContext_);
+        DestroyGlFont();
         delete glContext_;
         glContext_ = nullptr;
     }
@@ -162,10 +168,6 @@ private:
         return std::pow(clamped, 0.68f);
     }
 
-    float XToNormalized(int x, const wxRect &rect) const {
-        return -1.0f + (2.0f * static_cast<float>(x - rect.x) / static_cast<float>(std::max(1, rect.width)));
-    }
-
     static wxColour MixColour(const wxColour &a, const wxColour &b, float t, unsigned char alpha) {
         const float clamped = std::clamp(t, 0.0f, 1.0f);
         return wxColour(
@@ -176,27 +178,127 @@ private:
         );
     }
 
-    void DrawGlQuad(int x, int y, int width, int height, const wxRect &rect, const wxColour &base, const wxColour &top) {
-        const float x0 = XToNormalized(x, rect);
-        const float x1 = XToNormalized(x + width, rect);
-        const float y0 = 1.0f - (2.0f * static_cast<float>(y + height - rect.y) / static_cast<float>(std::max(1, rect.height)));
-        const float y1 = 1.0f - (2.0f * static_cast<float>(y - rect.y) / static_cast<float>(std::max(1, rect.height)));
+    static void SetGlColour(const wxColour &colour) {
+        glColor4ub(colour.Red(), colour.Green(), colour.Blue(), colour.Alpha());
+    }
 
+    static void DrawGlQuad(int x, int y, int width, int height, const wxColour &base, const wxColour &top) {
         glBegin(GL_QUADS);
-        glColor4ub(base.Red(), base.Green(), base.Blue(), base.Alpha());
-        glVertex2f(x0, y0);
-        glVertex2f(x1, y0);
-        glColor4ub(top.Red(), top.Green(), top.Blue(), top.Alpha());
-        glVertex2f(x1, y1);
-        glVertex2f(x0, y1);
+        SetGlColour(base);
+        glVertex2i(x, y + height);
+        glVertex2i(x + width, y + height);
+        SetGlColour(top);
+        glVertex2i(x + width, y);
+        glVertex2i(x, y);
         glEnd();
     }
 
-    void RenderOpenGL(const wxRect &plot) {
+    static void DrawGlLine(int x0, int y0, int x1, int y1, const wxColour &colour, float width = 1.0f) {
+        glLineWidth(width);
+        glBegin(GL_LINES);
+        SetGlColour(colour);
+        glVertex2i(x0, y0);
+        glVertex2i(x1, y1);
+        glEnd();
+    }
+
+    static void DrawGlRectOutline(const wxRect &rect, const wxColour &colour) {
+        glLineWidth(1.0f);
+        glBegin(GL_LINE_LOOP);
+        SetGlColour(colour);
+        glVertex2i(rect.x, rect.y);
+        glVertex2i(rect.GetRight(), rect.y);
+        glVertex2i(rect.GetRight(), rect.GetBottom());
+        glVertex2i(rect.x, rect.GetBottom());
+        glEnd();
+    }
+
+    void EnsureGlFont() {
+#if defined(_WIN32)
+        if (glFontReady_) {
+            return;
+        }
+
+        HDC dc = wglGetCurrentDC();
+        if (dc == 0) {
+            return;
+        }
+
+        glFontBase_ = glGenLists(96);
+        if (glFontBase_ == 0) {
+            return;
+        }
+
+        HFONT font = CreateFontA(-13,
+                                 0,
+                                 0,
+                                 0,
+                                 FW_SEMIBOLD,
+                                 FALSE,
+                                 FALSE,
+                                 FALSE,
+                                 ANSI_CHARSET,
+                                 OUT_TT_PRECIS,
+                                 CLIP_DEFAULT_PRECIS,
+                                 ANTIALIASED_QUALITY,
+                                 FF_DONTCARE | DEFAULT_PITCH,
+                                 "Segoe UI");
+        if (font == 0) {
+            glDeleteLists(glFontBase_, 96);
+            glFontBase_ = 0;
+            return;
+        }
+
+        HGDIOBJ old = SelectObject(dc, font);
+        if (!wglUseFontBitmapsA(dc, 32, 96, glFontBase_)) {
+            SelectObject(dc, old);
+            DeleteObject(font);
+            glDeleteLists(glFontBase_, 96);
+            glFontBase_ = 0;
+            return;
+        }
+        SelectObject(dc, old);
+        DeleteObject(font);
+        glFontReady_ = true;
+#endif
+    }
+
+    void DestroyGlFont() {
+#if defined(_WIN32)
+        if (glFontBase_ != 0) {
+            glDeleteLists(glFontBase_, 96);
+            glFontBase_ = 0;
+        }
+        glFontReady_ = false;
+#endif
+    }
+
+    void DrawGlText(int x, int y, const wxColour &colour, const std::string &text) {
+#if defined(_WIN32)
+        EnsureGlFont();
+        if (!glFontReady_ || text.empty()) {
+            return;
+        }
+        SetGlColour(colour);
+        glRasterPos2i(x, y);
+        glListBase(glFontBase_ - 32);
+        glCallLists(static_cast<GLsizei>(text.size()), GL_UNSIGNED_BYTE, text.c_str());
+#else
+        (void)x;
+        (void)y;
+        (void)colour;
+        (void)text;
+#endif
+    }
+
+    void RenderOpenGL(const wxRect &frame, const wxRect &plot) {
         const wxRect rect = GetClientRect();
         const double scale = std::max(1.0, static_cast<double>(GetContentScaleFactor()));
         const int viewportWidth = std::max(1, static_cast<int>(std::lround(static_cast<double>(rect.width) * scale)));
         const int viewportHeight = std::max(1, static_cast<int>(std::lround(static_cast<double>(rect.height) * scale)));
+        const std::array<int, 6> dbLabels = {0, -12, -24, -36, -48, -60};
+        const std::array<float, 10> freqMarkers = {20.0f, 50.0f, 100.0f, 200.0f, 500.0f,
+                                                   1000.0f, 2000.0f, 5000.0f, 10000.0f, 20000.0f};
         size_t i;
         const size_t visibleBins = levels_.size();
         float maxLevel = 0.0f;
@@ -219,11 +321,32 @@ private:
 
         glMatrixMode(GL_PROJECTION);
         glLoadIdentity();
+        glOrtho(0.0, static_cast<double>(rect.width), static_cast<double>(rect.height), 0.0, -1.0, 1.0);
         glMatrixMode(GL_MODELVIEW);
         glLoadIdentity();
 
-        DrawGlQuad(rect.x, rect.y, rect.width, rect.height, rect, wxColour(8, 12, 18, 255), wxColour(10, 16, 22, 255));
-        DrawGlQuad(plot.x, plot.y, plot.width, plot.height, rect, wxColour(14, 22, 30, 255), wxColour(18, 28, 38, 255));
+        DrawGlQuad(rect.x, rect.y, rect.width, rect.height, wxColour(8, 12, 18, 255), wxColour(10, 16, 22, 255));
+        DrawGlQuad(frame.x, frame.y, frame.width, frame.height, wxColour(15, 22, 30, 255), wxColour(15, 22, 30, 255));
+        DrawGlRectOutline(frame, wxColour(38, 51, 64, 255));
+        DrawGlQuad(plot.x, plot.y, plot.width, plot.height, wxColour(14, 22, 30, 255), wxColour(18, 28, 38, 255));
+
+        for (size_t row = 0; row < dbLabels.size(); ++row) {
+            const float t = static_cast<float>(row) / static_cast<float>(dbLabels.size() - 1u);
+            const int y = plot.y + static_cast<int>(std::lround(t * static_cast<float>(plot.height)));
+            const wxColour gridColour = row == 0u ? wxColour(72, 94, 112) : wxColour(33, 44, 56);
+
+            DrawGlLine(plot.x, y, plot.GetRight(), y, gridColour);
+            DrawGlText(frame.x + 6, y + 4, wxColour(122, 138, 152), std::to_string(dbLabels[row]));
+        }
+
+        for (float marker : freqMarkers) {
+            const int x = FrequencyToX(plot, marker);
+            DrawGlLine(x, plot.y, x, plot.GetBottom(), wxColour(24, 35, 45));
+            DrawGlText(x - 12, plot.GetBottom() + 18, wxColour(98, 116, 132), FormatFrequencyLabel(marker).ToStdString());
+        }
+
+        DrawGlText(frame.x + 10, frame.y + 16, wxColour(210, 221, 230), "Spectrum Analyzer");
+        DrawGlText(frame.GetRight() - 185, frame.y + 16, wxColour(120, 146, 163), "FFT 1024  |  LOG FREQ  |  PEAK HOLD");
 
         for (i = 0; i < visibleBins; ++i) {
             const int x = plot.x + static_cast<int>((static_cast<long long>(i) * plot.width) / static_cast<int>(visibleBins));
@@ -263,7 +386,6 @@ private:
                        std::max(plot.y, glowTop + 2),
                        width + 8,
                        std::min(plot.height, glowHeight - 4),
-                       rect,
                        wxColour(glowColor.Red(), glowColor.Green(), glowColor.Blue(), 10),
                        wxColour(glowColor.Red(), glowColor.Green(), glowColor.Blue(), 36));
 
@@ -281,7 +403,6 @@ private:
                            ledTopY,
                            width,
                            ledHeight,
-                           rect,
                            wxColour(14, 20, 26, 180),
                            wxColour(26, 36, 48, 210));
 
@@ -300,14 +421,12 @@ private:
                                ledTopY,
                                width,
                                ledHeight,
-                               rect,
                                barBase,
                                barTop);
                     DrawGlQuad(insetX,
                                ledTopY,
                                width,
                                std::max(2, ledHeight / 3),
-                               rect,
                                wxColour(255, 255, 255, 24),
                                wxColour(255, 255, 255, 96));
                 } else if (partiallyLit) {
@@ -315,18 +434,12 @@ private:
                                ledBottom - partialHeight,
                                width,
                                partialHeight,
-                               rect,
                                wxColour(barBase.Red(), barBase.Green(), barBase.Blue(), 160),
                                wxColour(barTop.Red(), barTop.Green(), barTop.Blue(), 200));
                 }
             }
 
-            glLineWidth(2.0f);
-            glBegin(GL_LINES);
-            glColor4ub(255, 200, 118, 255);
-            glVertex2f(XToNormalized(insetX, rect), 1.0f - (2.0f * static_cast<float>(peakY - rect.y) / static_cast<float>(std::max(1, rect.height))));
-            glVertex2f(XToNormalized(insetX + width, rect), 1.0f - (2.0f * static_cast<float>(peakY - rect.y) / static_cast<float>(std::max(1, rect.height))));
-            glEnd();
+            DrawGlLine(insetX, peakY, insetX + width, peakY, wxColour(255, 200, 118, 255), 2.0f);
         }
 
         glFlush();
@@ -368,50 +481,7 @@ private:
         const std::array<float, 10> freqMarkers = {20.0f, 50.0f, 100.0f, 200.0f, 500.0f,
                                                    1000.0f, 2000.0f, 5000.0f, 10000.0f, 20000.0f};
 
-        RenderOpenGL(plot);
-
-        wxGCDC gcdc(dc);
-        wxDC &draw = gcdc.IsOk() ? static_cast<wxDC &>(gcdc) : static_cast<wxDC &>(dc);
-
-        draw.SetPen(*wxTRANSPARENT_PEN);
-        draw.SetBrush(wxBrush(wxColour(15, 22, 30)));
-        draw.DrawRoundedRectangle(frame, 10);
-
-        draw.SetPen(wxPen(wxColour(38, 51, 64), 1));
-        draw.SetBrush(*wxTRANSPARENT_BRUSH);
-        draw.DrawRoundedRectangle(frame, 10);
-
-        for (size_t row = 0; row < dbLabels.size(); ++row) {
-            const float t = static_cast<float>(row) / static_cast<float>(dbLabels.size() - 1u);
-            const int y = plot.y + static_cast<int>(std::lround(t * static_cast<float>(plot.height)));
-            const wxColour gridColour = row == 0u ? wxColour(72, 94, 112) : wxColour(33, 44, 56);
-
-            draw.SetPen(wxPen(gridColour, 1));
-            draw.DrawLine(plot.x, y, plot.GetRight(), y);
-            draw.SetTextForeground(wxColour(122, 138, 152));
-            draw.DrawText(wxString::Format("%d", dbLabels[row]), frame.x + 6, y - 8);
-        }
-
-        for (float marker : freqMarkers) {
-            const int x = FrequencyToX(plot, marker);
-
-            draw.SetPen(wxPen(wxColour(24, 35, 45), 1));
-            draw.DrawLine(x, plot.y, x, plot.GetBottom());
-            draw.SetTextForeground(wxColour(98, 116, 132));
-            draw.DrawText(FormatFrequencyLabel(marker), x - 10, plot.GetBottom() + 4);
-        }
-
-        draw.SetTextForeground(wxColour(210, 221, 230));
-        wxFont titleFont = GetFont();
-        titleFont.SetWeight(wxFONTWEIGHT_BOLD);
-        draw.SetFont(titleFont);
-        draw.DrawText("Spectrum Analyzer", frame.x + 10, frame.y + 6);
-
-        wxFont metaFont = GetFont();
-        metaFont.SetPointSize(std::max(7, metaFont.GetPointSize() - 1));
-        draw.SetFont(metaFont);
-        draw.SetTextForeground(wxColour(120, 146, 163));
-        draw.DrawText("FFT 1024  |  LOG FREQ  |  PEAK HOLD", frame.GetRight() - 188, frame.y + 8);
+        RenderOpenGL(frame, plot);
     }
 
     void OnSize(wxSizeEvent &event) {
@@ -426,6 +496,8 @@ private:
     std::array<float, DAB_AUDIO_SPECTRUM_DISPLAY_BINS> peaks_;
     wxGLContext *glContext_ = nullptr;
     wxTimer timer_;
+    GLuint glFontBase_ = 0;
+    bool glFontReady_ = false;
 };
 
 class StationLogoPanel : public wxPanel {
@@ -867,7 +939,15 @@ private:
 }  // namespace
 
 MainFrame::MainFrame()
-    : wxFrame(nullptr, wxID_ANY, "dab-lib GUI", wxDefaultPosition, wxSize(1100, 760)) {
+    : wxFrame(nullptr,
+              wxID_ANY,
+#if defined(DAB_GUI_APP_VERSION)
+              "dab-lib GUI v" DAB_GUI_APP_VERSION,
+#else
+              "dab-lib GUI",
+#endif
+              wxDefaultPosition,
+              wxSize(1100, 760)) {
     dab_gui_sdr_default_settings(&sdrSettings_);
     LoadSdrSettings();
     ApplySdrSettings();
@@ -883,8 +963,17 @@ MainFrame::MainFrame()
     SetBackgroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_APPWORKSPACE));
 
     {
+        wxFileName resultsPath;
+#if defined(_WIN32)
+        wxString userDataDir = wxStandardPaths::Get().GetUserLocalDataDir();
+        if (!wxFileName::DirExists(userDataDir)) {
+            (void)wxFileName::Mkdir(userDataDir, wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
+        }
+        resultsPath.Assign(userDataDir, "dab_scan_results.tsv");
+#else
         wxFileName exePath(wxStandardPaths::Get().GetExecutablePath());
-        wxFileName resultsPath(exePath.GetPath(), "dab_scan_results.tsv");
+        resultsPath.Assign(exePath.GetPath(), "dab_scan_results.tsv");
+#endif
         scanResultsPath_ = resultsPath.GetFullPath();
     }
 

@@ -15,7 +15,9 @@
 #if defined(DAB_HAVE_FAAD2)
 #include <neaacdec.h>
 #endif
-#include <pthread.h>
+#include "dab/os/os_cond.h"
+#include "dab/os/os_mutex.h"
+#include "dab/os/os_thread.h"
 #include <portaudio.h>
 
 enum {
@@ -48,9 +50,9 @@ typedef struct {
     size_t ring_read;
     size_t ring_write;
     size_t ring_count;
-    pthread_mutex_t ring_mutex;
-    pthread_cond_t ring_cond;
-    pthread_t thread;
+    dab_mutex_t ring_mutex;
+    dab_cond_t ring_cond;
+    dab_thread_t thread;
     uint8_t ring_ready;
     uint8_t thread_running;
     uint8_t thread_stop;

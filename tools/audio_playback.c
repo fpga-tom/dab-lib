@@ -11,30 +11,41 @@ enum {
     DAB_AUDIO_PREFILL_BLOCKS = 3
 };
 
-static pthread_mutex_t g_spectrum_callback_mutex = PTHREAD_MUTEX_INITIALIZER;
+static dab_mutex_t g_spectrum_callback_mutex;
 static dab_audio_playback_spectrum_callback_t g_spectrum_callback = 0;
 static void *g_spectrum_callback_user = 0;
-static pthread_mutex_t g_equalizer_mutex = PTHREAD_MUTEX_INITIALIZER;
+static dab_mutex_t g_equalizer_mutex;
 static float g_equalizer_gains[DAB_AUDIO_EQ_BAND_COUNT] = {0};
 static uint64_t g_equalizer_gain_version = 1u;
+static int g_audio_playback_globals_ready = 0;
+
+static void dab_audio_playback_ensure_globals(void) {
+    if (g_audio_playback_globals_ready == 0) {
+        (void)dab_mutex_init(&g_spectrum_callback_mutex);
+        (void)dab_mutex_init(&g_equalizer_mutex);
+        g_audio_playback_globals_ready = 1;
+    }
+}
 
 void dab_audio_playback_set_spectrum_callback(dab_audio_playback_spectrum_callback_t callback,
                                               void *user) {
-    (void)pthread_mutex_lock(&g_spectrum_callback_mutex);
+    dab_audio_playback_ensure_globals();
+    dab_mutex_lock(&g_spectrum_callback_mutex);
     g_spectrum_callback = callback;
     g_spectrum_callback_user = user;
-    (void)pthread_mutex_unlock(&g_spectrum_callback_mutex);
+    dab_mutex_unlock(&g_spectrum_callback_mutex);
 }
 
 void dab_audio_playback_set_equalizer_gains(const float *gains_db, uint32_t count) {
     uint32_t i;
 
-    (void)pthread_mutex_lock(&g_equalizer_mutex);
+    dab_audio_playback_ensure_globals();
+    dab_mutex_lock(&g_equalizer_mutex);
     for (i = 0u; i < DAB_AUDIO_EQ_BAND_COUNT; ++i) {
         g_equalizer_gains[i] = (gains_db != 0 && i < count) ? gains_db[i] : 0.0f;
     }
     g_equalizer_gain_version++;
-    (void)pthread_mutex_unlock(&g_equalizer_mutex);
+    dab_mutex_unlock(&g_equalizer_mutex);
 }
 
 static void dab_audio_playback_sync_equalizer(dab_audio_playback_t *audio) {
@@ -45,10 +56,11 @@ static void dab_audio_playback_sync_equalizer(dab_audio_playback_t *audio) {
         return;
     }
 
-    (void)pthread_mutex_lock(&g_equalizer_mutex);
+    dab_audio_playback_ensure_globals();
+    dab_mutex_lock(&g_equalizer_mutex);
     memcpy(gains, g_equalizer_gains, sizeof(gains));
     version = g_equalizer_gain_version;
-    (void)pthread_mutex_unlock(&g_equalizer_mutex);
+    dab_mutex_unlock(&g_equalizer_mutex);
 
     if (audio->eq.configured == 0u) {
         dab_audio_eq_init(&audio->eq);
@@ -101,10 +113,11 @@ static void dab_audio_playback_publish_spectrum(dab_audio_playback_t *audio,
         return;
     }
 
-    (void)pthread_mutex_lock(&g_spectrum_callback_mutex);
+    dab_audio_playback_ensure_globals();
+    dab_mutex_lock(&g_spectrum_callback_mutex);
     callback = g_spectrum_callback;
     user = g_spectrum_callback_user;
-    (void)pthread_mutex_unlock(&g_spectrum_callback_mutex);
+    dab_mutex_unlock(&g_spectrum_callback_mutex);
 
     if (callback != 0 && display != 0 && bin_count != 0u) {
         callback(display, bin_count, audio->sample_rate, user);
@@ -142,14 +155,14 @@ static int dab_audio_ring_init(dab_audio_playback_t *audio, size_t frames) {
     }
     audio->ring_frames = frames;
     dab_audio_ring_reset_locked(audio);
-    if (pthread_mutex_init(&audio->ring_mutex, 0) != 0) {
+    if (dab_mutex_init(&audio->ring_mutex) != 0) {
         free(audio->ring);
         audio->ring = 0;
         audio->ring_frames = 0u;
         return -1;
     }
-    if (pthread_cond_init(&audio->ring_cond, 0) != 0) {
-        (void)pthread_mutex_destroy(&audio->ring_mutex);
+    if (dab_cond_init(&audio->ring_cond) != 0) {
+        dab_mutex_destroy(&audio->ring_mutex);
         free(audio->ring);
         audio->ring = 0;
         audio->ring_frames = 0u;
@@ -164,8 +177,8 @@ static void dab_audio_ring_deinit(dab_audio_playback_t *audio) {
         return;
     }
     if (audio->ring_ready != 0u) {
-        (void)pthread_cond_destroy(&audio->ring_cond);
-        (void)pthread_mutex_destroy(&audio->ring_mutex);
+        dab_cond_destroy(&audio->ring_cond);
+        dab_mutex_destroy(&audio->ring_mutex);
         audio->ring_ready = 0u;
     }
     free(audio->ring);
@@ -195,7 +208,7 @@ static void dab_audio_ring_write_frames(dab_audio_playback_t *audio,
         frames = keep;
     }
 
-    (void)pthread_mutex_lock(&audio->ring_mutex);
+    dab_mutex_lock(&audio->ring_mutex);
     free_frames = audio->ring_frames - audio->ring_count;
     if (frames > free_frames) {
         const size_t drop = frames - free_frames;
@@ -219,8 +232,8 @@ static void dab_audio_ring_write_frames(dab_audio_playback_t *audio,
     }
     audio->ring_write = (audio->ring_write + frames) % audio->ring_frames;
     audio->ring_count += frames;
-    (void)pthread_cond_signal(&audio->ring_cond);
-    (void)pthread_mutex_unlock(&audio->ring_mutex);
+    dab_cond_signal(&audio->ring_cond);
+    dab_mutex_unlock(&audio->ring_mutex);
 }
 
 static size_t dab_audio_ring_read_frames(dab_audio_playback_t *audio,
@@ -235,7 +248,7 @@ static size_t dab_audio_ring_read_frames(dab_audio_playback_t *audio,
         return 0u;
     }
 
-    (void)pthread_mutex_lock(&audio->ring_mutex);
+    dab_mutex_lock(&audio->ring_mutex);
     got = audio->ring_count < frames ? audio->ring_count : frames;
     if (got > 0u) {
         first = got;
@@ -254,11 +267,11 @@ static size_t dab_audio_ring_read_frames(dab_audio_playback_t *audio,
         audio->ring_read = (audio->ring_read + got) % audio->ring_frames;
         audio->ring_count -= got;
     }
-    (void)pthread_mutex_unlock(&audio->ring_mutex);
+    dab_mutex_unlock(&audio->ring_mutex);
     return got;
 }
 
-static void *dab_audio_playback_thread_main(void *arg) {
+static int dab_audio_playback_thread_main(void *arg) {
     dab_audio_playback_t *audio = (dab_audio_playback_t *)arg;
     int16_t *out;
     const size_t channels = (size_t)audio->channels;
@@ -270,16 +283,16 @@ static void *dab_audio_playback_thread_main(void *arg) {
     }
     while (audio->thread_stop == 0u) {
         if (audio->ring_ready != 0u) {
-            (void)pthread_mutex_lock(&audio->ring_mutex);
+            dab_mutex_lock(&audio->ring_mutex);
             while (audio->thread_stop == 0u &&
                    audio->prebuffer_done == 0u &&
                    audio->ring_count < prefill_frames) {
-                (void)pthread_cond_wait(&audio->ring_cond, &audio->ring_mutex);
+                dab_cond_wait(&audio->ring_cond, &audio->ring_mutex);
             }
             if (audio->thread_stop == 0u && audio->ring_count >= prefill_frames) {
                 audio->prebuffer_done = 1u;
             }
-            (void)pthread_mutex_unlock(&audio->ring_mutex);
+            dab_mutex_unlock(&audio->ring_mutex);
         }
         if (audio->thread_stop != 0u) {
             break;
@@ -310,12 +323,12 @@ static void dab_audio_playback_stop_thread(dab_audio_playback_t *audio) {
     }
     audio->thread_stop = 1u;
     if (audio->ring_ready != 0u) {
-        (void)pthread_mutex_lock(&audio->ring_mutex);
-        (void)pthread_cond_broadcast(&audio->ring_cond);
-        (void)pthread_mutex_unlock(&audio->ring_mutex);
+        dab_mutex_lock(&audio->ring_mutex);
+        dab_cond_broadcast(&audio->ring_cond);
+        dab_mutex_unlock(&audio->ring_mutex);
     }
     if (audio->thread_running != 0u) {
-        (void)pthread_join(audio->thread, 0);
+        (void)dab_thread_join(&audio->thread, 0);
         audio->thread_running = 0u;
     }
 }
@@ -516,7 +529,7 @@ static int dab_audio_playback_open_stream(dab_audio_playback_t *audio,
     }
     audio->thread_stop = 0u;
     audio->prebuffer_done = 0u;
-    if (pthread_create(&audio->thread, 0, dab_audio_playback_thread_main, audio) != 0) {
+    if (dab_thread_create(&audio->thread, dab_audio_playback_thread_main, audio, "dab_audio_playback") != 0) {
         fprintf(stderr, "audio playback: failed to create playback thread\n");
         dab_audio_ring_deinit(audio);
         Pa_StopStream(audio->stream);

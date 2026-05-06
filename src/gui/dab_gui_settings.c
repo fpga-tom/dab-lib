@@ -1,13 +1,21 @@
 #include "dab_gui_backend.h"
 
-#include <pthread.h>
+#include "dab/os/os_mutex.h"
 
-static pthread_mutex_t g_sdr_settings_mutex = PTHREAD_MUTEX_INITIALIZER;
+static dab_mutex_t g_sdr_settings_mutex;
+static int g_sdr_settings_mutex_ready = 0;
 static dab_gui_sdr_settings_t g_sdr_settings = {
     DAB_GUI_SDR_BACKEND_SDRPLAY,
     1,
     40
 };
+
+static void dab_gui_sdr_settings_ensure_mutex(void) {
+    if (g_sdr_settings_mutex_ready == 0) {
+        (void)dab_mutex_init(&g_sdr_settings_mutex);
+        g_sdr_settings_mutex_ready = 1;
+    }
+}
 
 void dab_gui_sdr_default_settings(dab_gui_sdr_settings_t *settings) {
     if (settings == 0) {
@@ -41,9 +49,10 @@ void dab_gui_sdr_set_settings(const dab_gui_sdr_settings_t *settings) {
         normalized.gain_db = 49;
     }
 
-    (void)pthread_mutex_lock(&g_sdr_settings_mutex);
+    dab_gui_sdr_settings_ensure_mutex();
+    dab_mutex_lock(&g_sdr_settings_mutex);
     g_sdr_settings = normalized;
-    (void)pthread_mutex_unlock(&g_sdr_settings_mutex);
+    dab_mutex_unlock(&g_sdr_settings_mutex);
 }
 
 void dab_gui_sdr_get_settings(dab_gui_sdr_settings_t *settings) {
@@ -51,7 +60,8 @@ void dab_gui_sdr_get_settings(dab_gui_sdr_settings_t *settings) {
         return;
     }
 
-    (void)pthread_mutex_lock(&g_sdr_settings_mutex);
+    dab_gui_sdr_settings_ensure_mutex();
+    dab_mutex_lock(&g_sdr_settings_mutex);
     *settings = g_sdr_settings;
-    (void)pthread_mutex_unlock(&g_sdr_settings_mutex);
+    dab_mutex_unlock(&g_sdr_settings_mutex);
 }

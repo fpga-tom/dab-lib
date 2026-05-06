@@ -5,4 +5,8 @@ build/
 build-release/
 tags
 build-asan/
+.vs/
+build-win/
+libs/
+out/
 *.patch
