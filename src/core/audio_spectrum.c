@@ -88,22 +88,40 @@ static void build_display_bins(dab_audio_spectrum_analyzer_t *analyzer) {
     const float bin_hz = analyzer->sample_rate != 0u
                              ? (float)analyzer->sample_rate / (float)DAB_AUDIO_SPECTRUM_FFT_SIZE
                              : 1.0f;
+    const float min_band_hz = min_hz > bin_hz ? min_hz : bin_hz;
+    const float nyquist_hz = bin_hz * (float)DAB_AUDIO_SPECTRUM_HALF_FFT;
+    const float max_band_hz = max_hz < nyquist_hz ? max_hz : nyquist_hz;
+    uint32_t edges[DAB_AUDIO_SPECTRUM_DISPLAY_BINS + 1u];
     uint32_t band;
 
+    edges[0] = 1u;
+    for (band = 1u; band < DAB_AUDIO_SPECTRUM_DISPLAY_BINS; ++band) {
+        const float t = (float)band / (float)DAB_AUDIO_SPECTRUM_DISPLAY_BINS;
+        const float edge_hz = min_band_hz * powf(max_band_hz / min_band_hz, t);
+        uint32_t edge = (uint32_t)floorf((edge_hz / bin_hz) + 0.5f);
+        const uint32_t min_edge = edges[band - 1u] + 1u;
+        const uint32_t remaining_bands = DAB_AUDIO_SPECTRUM_DISPLAY_BINS - band;
+        const uint32_t max_edge = DAB_AUDIO_SPECTRUM_HALF_FFT > remaining_bands
+                                      ? DAB_AUDIO_SPECTRUM_HALF_FFT - remaining_bands
+                                      : min_edge;
+
+        if (edge < min_edge) {
+            edge = min_edge;
+        }
+        if (edge > max_edge) {
+            edge = max_edge;
+        }
+        edges[band] = edge;
+    }
+    edges[DAB_AUDIO_SPECTRUM_DISPLAY_BINS] = DAB_AUDIO_SPECTRUM_HALF_FFT;
+
     for (band = 0u; band < DAB_AUDIO_SPECTRUM_DISPLAY_BINS; ++band) {
-        const float band_start = (float)band / (float)DAB_AUDIO_SPECTRUM_DISPLAY_BINS;
-        const float band_end = (float)(band + 1u) / (float)DAB_AUDIO_SPECTRUM_DISPLAY_BINS;
-        const float start_hz = min_hz * powf(max_hz / min_hz, band_start);
-        const float end_hz = min_hz * powf(max_hz / min_hz, band_end);
-        uint32_t start = (uint32_t)floorf(start_hz / bin_hz);
-        uint32_t end = (uint32_t)ceilf(end_hz / bin_hz);
+        uint32_t start = edges[band];
+        uint32_t end = edges[band + 1u];
         float sum = 0.0f;
         uint32_t count = 0u;
         uint32_t bin;
 
-        if (start < 1u) {
-            start = 1u;
-        }
         if (end <= start) {
             end = start + 1u;
         }
