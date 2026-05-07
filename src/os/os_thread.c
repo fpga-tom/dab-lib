@@ -1,6 +1,8 @@
 #include "dab/os/os_thread.h"
 
+#include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 #if defined(_WIN32)
 #include <process.h>
@@ -67,37 +69,61 @@ int dab_thread_join(dab_thread_t *thread, int *result) {
 typedef struct {
     dab_thread_entry_t entry;
     void *arg;
+    char name[64];
 } dab_thread_boot_t;
+
+enum {
+    DAB_POSIX_THREAD_STACK_BYTES = 8u * 1024u * 1024u
+};
 
 static void *dab_thread_bootstrap(void *arg) {
     dab_thread_boot_t *boot = (dab_thread_boot_t *)arg;
+#if defined(__APPLE__)
+    if (boot->name[0] != '\0') {
+        pthread_setname_np(boot->name);
+    }
+#elif defined(__linux__)
+    if (boot->name[0] != '\0') {
+        pthread_setname_np(pthread_self(), boot->name);
+    }
+#endif
     int result = boot->entry(boot->arg);
     free(boot);
     return (void *)(intptr_t)result;
 }
 
 int dab_thread_create(dab_thread_t *thread, dab_thread_entry_t entry, void *arg, const char *name) {
+    pthread_attr_t attr;
+    int attr_ready = 0;
+    int create_rc;
     dab_thread_boot_t *boot = (dab_thread_boot_t *)malloc(sizeof(*boot));
     if (boot == 0) {
         return -1;
     }
     boot->entry = entry;
     boot->arg = arg;
-    if (pthread_create(&thread->handle, 0, dab_thread_bootstrap, boot) != 0) {
+    boot->name[0] = '\0';
+    if (name != 0) {
+        strncpy(boot->name, name, sizeof(boot->name) - 1u);
+        boot->name[sizeof(boot->name) - 1u] = '\0';
+    }
+
+    if (pthread_attr_init(&attr) == 0) {
+        attr_ready = 1;
+        (void)pthread_attr_setstacksize(&attr, DAB_POSIX_THREAD_STACK_BYTES);
+    }
+
+    create_rc = pthread_create(&thread->handle,
+                               attr_ready ? &attr : 0,
+                               dab_thread_bootstrap,
+                               boot);
+    if (attr_ready) {
+        pthread_attr_destroy(&attr);
+    }
+    if (create_rc != 0) {
         free(boot);
         return -1;
     }
-#if defined(__APPLE__)
-    if (name != 0) {
-        pthread_setname_np(name);
-    }
-#elif defined(__linux__)
-    if (name != 0) {
-        pthread_setname_np(thread->handle, name);
-    }
-#else
-    (void)name;
-#endif
     return 0;
 }
 

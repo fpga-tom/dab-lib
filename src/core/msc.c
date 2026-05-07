@@ -1419,7 +1419,7 @@ int dab_msc_init(dab_msc_state_t *state) {
     if (state == 0) {
         return -1;
     }
-    dab_msc_reset(state);
+    *state = (dab_msc_state_t){0};
     return 0;
 }
 

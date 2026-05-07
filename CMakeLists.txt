@@ -119,8 +119,22 @@ if(WIN32 AND DAB_USE_BUNDLED_WINDOWS_DEPS)
     endif()
 
     if(EXISTS ${DAB_LIBS_INCLUDE_DIR}/wx/wx.h)
+        set(DAB_WXWIDGETS_SETUP_SHIM_DIR ${CMAKE_CURRENT_BINARY_DIR}/wxwidgets-setup-shim)
+        file(MAKE_DIRECTORY ${DAB_WXWIDGETS_SETUP_SHIM_DIR}/wx)
+        file(WRITE ${DAB_WXWIDGETS_SETUP_SHIM_DIR}/wx/setup.h
+"#ifndef DAB_WX_SETUP_SHIM_H
+#define DAB_WX_SETUP_SHIM_H
+
+#include <wx/msw/setup.h>
+
+#endif
+")
+
         add_library(dab_wxwidgets INTERFACE)
-        target_include_directories(dab_wxwidgets INTERFACE ${DAB_LIBS_INCLUDE_DIR})
+        target_include_directories(dab_wxwidgets INTERFACE
+            ${DAB_WXWIDGETS_SETUP_SHIM_DIR}
+            ${DAB_LIBS_INCLUDE_DIR}
+        )
         target_compile_definitions(dab_wxwidgets INTERFACE __WXMSW__ WXUSINGDLL UNICODE _UNICODE)
         target_link_libraries(dab_wxwidgets INTERFACE
             $<$<CONFIG:Debug>:${DAB_LIBS_DIR}/wxmsw32ud_adv.lib>
