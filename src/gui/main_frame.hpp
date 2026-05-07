@@ -33,9 +33,12 @@ private:
     void OnStopButton(wxCommandEvent &event);
     void OnStationSelected(wxCommandEvent &event);
     void OnSdrSettings(wxCommandEvent &event);
+    void OnSpectrumSettings(wxCommandEvent &event);
     wxWindow *CreateBottomPanel(wxWindow *parent);
     void LoadSdrSettings();
     void SaveSdrSettings();
+    void LoadSpectrumSettings();
+    void SaveSpectrumSettings();
     void ApplySdrSettings();
     wxString SdrSettingsSummary() const;
     void ReloadStationsFromScanResults();
@@ -56,6 +59,7 @@ private:
     wxTimer *playbackStatusTimer_ = nullptr;
     uint64_t lastLogoGeneration_ = 0u;
     dab_gui_sdr_settings_t sdrSettings_;
+    int spectrumDisplayMode_ = 0;
 };
 
 #endif

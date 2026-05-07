@@ -79,20 +79,31 @@ static void fft_execute(float *re,
 }
 
 static void build_display_bins(dab_audio_spectrum_analyzer_t *analyzer) {
-    const float epsilon = 1.0e-12f;
-    const float high_shelf_boost = 2.4f;
-    float max_db = -120.0f;
+    const float min_hz = 20.0f;
+    const float max_hz = 20000.0f;
+    const float min_db = -70.0f;
+    const float epsilon = 1.0e-20f;
+    const float fft_ref = 32768.0f * (float)DAB_AUDIO_SPECTRUM_FFT_SIZE * 0.5f;
+    const float ref_power = fft_ref * fft_ref;
+    const float bin_hz = analyzer->sample_rate != 0u
+                             ? (float)analyzer->sample_rate / (float)DAB_AUDIO_SPECTRUM_FFT_SIZE
+                             : 1.0f;
     uint32_t band;
 
     for (band = 0u; band < DAB_AUDIO_SPECTRUM_DISPLAY_BINS; ++band) {
         const float band_start = (float)band / (float)DAB_AUDIO_SPECTRUM_DISPLAY_BINS;
         const float band_end = (float)(band + 1u) / (float)DAB_AUDIO_SPECTRUM_DISPLAY_BINS;
-        uint32_t start = 1u + (uint32_t)(band_start * (float)(DAB_AUDIO_SPECTRUM_HALF_FFT - 1u));
-        uint32_t end = 1u + (uint32_t)(band_end * (float)(DAB_AUDIO_SPECTRUM_HALF_FFT - 1u));
+        const float start_hz = min_hz * powf(max_hz / min_hz, band_start);
+        const float end_hz = min_hz * powf(max_hz / min_hz, band_end);
+        uint32_t start = (uint32_t)floorf(start_hz / bin_hz);
+        uint32_t end = (uint32_t)ceilf(end_hz / bin_hz);
         float sum = 0.0f;
         uint32_t count = 0u;
         uint32_t bin;
 
+        if (start < 1u) {
+            start = 1u;
+        }
         if (end <= start) {
             end = start + 1u;
         }
@@ -111,25 +122,22 @@ static void build_display_bins(dab_audio_spectrum_analyzer_t *analyzer) {
         }
 
         {
-            const float t = DAB_AUDIO_SPECTRUM_DISPLAY_BINS > 1u
-                                ? (float)band / (float)(DAB_AUDIO_SPECTRUM_DISPLAY_BINS - 1u)
-                                : 0.0f;
-            const float emphasis = 1.0f + ((high_shelf_boost - 1.0f) * t * t);
             const float power = sum / (float)count;
-            const float db = 10.0f * log10f((power * emphasis) + epsilon);
+            const float dbfs = 10.0f * log10f((power / ref_power) + epsilon);
+            const float normalized = (dbfs - min_db) / -min_db;
 
-            analyzer->display[band] = db;
-            if (db > max_db) {
-                max_db = db;
-            }
+            analyzer->display[band] = normalized;
         }
     }
 
     for (band = 0u; band < DAB_AUDIO_SPECTRUM_DISPLAY_BINS; ++band) {
-        const float normalized = (analyzer->display[band] - (max_db - 70.0f)) / 70.0f;
-        const float clamped = normalized < 0.0f ? 0.0f : (normalized > 1.0f ? 1.0f : normalized);
+        const float clamped = analyzer->display[band] < 0.0f
+                                  ? 0.0f
+                                  : (analyzer->display[band] > 1.0f ? 1.0f : analyzer->display[band]);
 
-        analyzer->smoothed[band] = (analyzer->smoothed[band] * 0.52f) + (clamped * 0.48f);
+        analyzer->smoothed[band] = analyzer->ready != 0u
+                                       ? (analyzer->smoothed[band] * 0.52f) + (clamped * 0.48f)
+                                       : clamped;
         analyzer->display[band] = analyzer->smoothed[band];
     }
 }
