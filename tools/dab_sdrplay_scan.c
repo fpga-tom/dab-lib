@@ -24,6 +24,10 @@
 #include "dab/hal/rtlsdr_device.h"
 #include "dab/hal/sdrplay_device.h"
 
+#ifndef DAB_SCAN_CANCEL_REQUESTED
+#define DAB_SCAN_CANCEL_REQUESTED() 0
+#endif
+
 typedef struct {
     const char *channel;
     uint64_t frequency_hz;
@@ -944,6 +948,9 @@ static int scan_frequency(scan_runtime_t *runtime,
     if (runtime == 0 || device == 0 || driver == 0 || channel == 0 || results_fp == 0) {
         return -1;
     }
+    if (DAB_SCAN_CANCEL_REQUESTED()) {
+        return -2;
+    }
 
     scan_runtime_reset(runtime);
 
@@ -964,6 +971,10 @@ static int scan_frequency(scan_runtime_t *runtime,
            channel->channel,
            (unsigned long long)channel->frequency_hz);
     fflush(stdout);
+
+    if (DAB_SCAN_CANCEL_REQUESTED()) {
+        return -2;
+    }
 
     if (strcmp(driver, "rtlsdr") == 0) {
         if (rtlsdr_config == 0 || dab_rtlsdr_configure_device(device, rtlsdr_config) != DAB_SDR_STATUS_OK) {
@@ -992,8 +1003,16 @@ static int scan_frequency(scan_runtime_t *runtime,
         dab_sdr_block_view_t hist_view;
         dab_null_event_t event = {0};
 
+        if (DAB_SCAN_CANCEL_REQUESTED()) {
+            rc = -2;
+            goto cleanup;
+        }
         if (stream->vtbl->read(stream, &src_block) != DAB_SDR_STATUS_OK) {
             fprintf(stderr, "read failed for %s at block %u\n", channel->channel, block_index);
+            goto cleanup;
+        }
+        if (DAB_SCAN_CANCEL_REQUESTED()) {
+            rc = -2;
             goto cleanup;
         }
         if (!have_scan_start) {

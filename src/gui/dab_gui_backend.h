@@ -57,6 +57,7 @@ void dab_gui_sdr_set_settings(const dab_gui_sdr_settings_t *settings);
 void dab_gui_sdr_get_settings(dab_gui_sdr_settings_t *settings);
 
 int dab_gui_scan_run(const char *output_path, dab_gui_scan_event_callback_t callback, void *user);
+void dab_gui_scan_cancel_current(void);
 
 int dab_gui_playback_start(uint64_t frequency_hz, uint32_t sid);
 void dab_gui_playback_stop(void);

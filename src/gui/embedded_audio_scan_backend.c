@@ -9,6 +9,7 @@
 #include "../../include/dab/hal/sdr_device.h"
 #include "../../include/dab/hal/rtlsdr_device.h"
 #include "../../include/dab/hal/sdrplay_device.h"
+#include "../../include/dab/os/os_mutex.h"
 
 typedef struct {
     dab_gui_scan_event_callback_t callback;
@@ -16,6 +17,32 @@ typedef struct {
 } dab_gui_scan_sink_t;
 
 static dab_gui_scan_sink_t g_scan_sink = {0};
+static dab_mutex_t g_scan_cancel_mutex;
+static int g_scan_cancel_mutex_ready = 0;
+static int g_scan_cancel_requested = 0;
+
+static void dab_gui_scan_cancel_ensure_mutex(void) {
+    if (g_scan_cancel_mutex_ready == 0) {
+        (void)dab_mutex_init(&g_scan_cancel_mutex);
+        g_scan_cancel_mutex_ready = 1;
+    }
+}
+
+static void dab_gui_scan_cancel_set(int requested) {
+    dab_gui_scan_cancel_ensure_mutex();
+    dab_mutex_lock(&g_scan_cancel_mutex);
+    g_scan_cancel_requested = requested != 0 ? 1 : 0;
+    dab_mutex_unlock(&g_scan_cancel_mutex);
+}
+
+static int dab_gui_scan_cancel_requested(void) {
+    int requested;
+    dab_gui_scan_cancel_ensure_mutex();
+    dab_mutex_lock(&g_scan_cancel_mutex);
+    requested = g_scan_cancel_requested;
+    dab_mutex_unlock(&g_scan_cancel_mutex);
+    return requested;
+}
 
 static void dab_gui_setenv_value(const char *name, const char *value) {
 #if defined(_WIN32)
@@ -72,9 +99,15 @@ static int dab_gui_scan_printf(const char *fmt, ...) {
 
 #define printf dab_gui_scan_printf
 #define main dab_gui_embedded_scan_tool_main
+#define DAB_SCAN_CANCEL_REQUESTED() dab_gui_scan_cancel_requested()
 #include "../../tools/dab_sdrplay_scan.c"
+#undef DAB_SCAN_CANCEL_REQUESTED
 #undef main
 #undef printf
+
+void dab_gui_scan_cancel_current(void) {
+    dab_gui_scan_cancel_set(1);
+}
 
 int dab_gui_scan_run(const char *output_path, dab_gui_scan_event_callback_t callback, void *user) {
     dab_gui_sdr_settings_t settings;
@@ -95,6 +128,7 @@ int dab_gui_scan_run(const char *output_path, dab_gui_scan_event_callback_t call
 
     g_scan_sink.callback = callback;
     g_scan_sink.user = user;
+    dab_gui_scan_cancel_set(0);
 
     dab_gui_sdr_get_settings(&settings);
     if (settings.backend == DAB_GUI_SDR_BACKEND_RTLSDR) {
@@ -139,16 +173,21 @@ int dab_gui_scan_run(const char *output_path, dab_gui_scan_event_callback_t call
     }
 
     for (channel_index = 0u; channel_index < (uint32_t)DAB_CHANNEL_COUNT; ++channel_index) {
-        const int services = scan_frequency(&runtime,
-                                            device,
-                                            driver,
-                                            &sdrplay_config,
-                                            &rtlsdr_config,
-                                            &kBandIIIChannels[channel_index],
-                                            channel_index,
-                                            4u,
-                                            settings.gain_db,
-                                            results_fp);
+        const int services = dab_gui_scan_cancel_requested() ? -2 :
+            scan_frequency(&runtime,
+                           device,
+                           driver,
+                           &sdrplay_config,
+                           &rtlsdr_config,
+                           &kBandIIIChannels[channel_index],
+                           channel_index,
+                           4u,
+                           settings.gain_db,
+                           results_fp);
+        if (services == -2) {
+            rc = -2;
+            goto cleanup;
+        }
         if (services < 0) {
             char line[128];
             snprintf(line, sizeof(line), "SCAN_ERROR\tchannel %s failed", kBandIIIChannels[channel_index].channel);
@@ -174,5 +213,6 @@ cleanup:
     }
     scan_runtime_destroy(&runtime);
     g_scan_sink = (dab_gui_scan_sink_t){0};
+    dab_gui_scan_cancel_set(0);
     return rc;
 }

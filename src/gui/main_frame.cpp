@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <deque>
@@ -791,8 +792,7 @@ public:
         progress_ = new wxGauge(this, wxID_ANY, 1);
         progress_->SetValue(0);
 
-        closeButton_ = new wxButton(this, wxID_OK, "Done");
-        closeButton_->Enable(false);
+        closeButton_ = new wxButton(this, wxID_ANY, "Cancel");
 
         outer->Add(title, 0, wxALL, 16);
         outer->Add(statusLabel_, 0, wxLEFT | wxRIGHT | wxBOTTOM, 16);
@@ -805,13 +805,13 @@ public:
         CentreOnParent();
 
         Bind(wxEVT_TIMER, &ScanDialog::OnPollTimer, this, kScanTimerId);
+        Bind(wxEVT_CLOSE_WINDOW, &ScanDialog::OnClose, this);
+        closeButton_->Bind(wxEVT_BUTTON, &ScanDialog::OnCloseButton, this);
         StartScan();
     }
 
     ~ScanDialog() override {
-        if (workerThread_.joinable()) {
-            workerThread_.join();
-        }
+        StopScanWorker();
     }
 
     bool ScanSucceeded() const {
@@ -822,6 +822,9 @@ private:
     static void OnScanEvent(const char *line, void *user) {
         auto *dialog = static_cast<ScanDialog *>(user);
         std::lock_guard<std::mutex> lock(dialog->linesMutex_);
+        if (!dialog->callbacksEnabled_) {
+            return;
+        }
         dialog->pendingLines_.push_back(wxString::FromUTF8(line));
     }
 
@@ -853,19 +856,77 @@ private:
         }
 
         if (scanFinished_.load()) {
-            pollTimer_.Stop();
-            if (workerThread_.joinable()) {
-                workerThread_.join();
+            FinalizeScan();
+        }
+    }
+
+    void OnCloseButton(wxCommandEvent &) {
+        CloseDialog();
+    }
+
+    void OnClose(wxCloseEvent &) {
+        CloseDialog();
+    }
+
+    void CloseDialog() {
+        const bool finished = scanFinished_.load();
+
+        if (finished) {
+            FinalizeScan();
+        } else {
+            if (statusLabel_ != nullptr) {
+                statusLabel_->SetLabel("Cancelling scan...");
             }
-            scanSucceeded_ = scanResultCode_.load() == 0;
-            if (scanSucceeded_) {
-                statusLabel_->SetLabel("Scan complete.");
-                channelLabel_->SetLabel(wxString::Format("Results saved to %s", resultsPath_));
-            } else {
-                statusLabel_->SetLabel("Scan failed before completion.");
+            if (closeButton_ != nullptr) {
+                closeButton_->Enable(false);
             }
-            closeButton_->SetLabel(scanSucceeded_ ? "Done" : "Close");
-            closeButton_->Enable(true);
+            StopScanWorker();
+        }
+        EndModal(scanSucceeded_ ? wxID_OK : wxID_CANCEL);
+    }
+
+    void FinalizeScan() {
+        if (scanFinalized_) {
+            return;
+        }
+        pollTimer_.Stop();
+        if (workerThread_.joinable()) {
+            workerThread_.join();
+        }
+        {
+            std::lock_guard<std::mutex> lock(linesMutex_);
+            callbacksEnabled_ = false;
+        }
+        scanSucceeded_ = scanResultCode_.load() == 0;
+        if (scanSucceeded_) {
+            statusLabel_->SetLabel("Scan complete.");
+            channelLabel_->SetLabel(wxString::Format("Results saved to %s", resultsPath_));
+        } else if (scanResultCode_.load() == -2) {
+            statusLabel_->SetLabel("Scan cancelled.");
+        } else {
+            statusLabel_->SetLabel("Scan failed before completion.");
+        }
+        closeButton_->SetLabel(scanSucceeded_ ? "Done" : "Close");
+        closeButton_->Enable(true);
+        scanFinalized_ = true;
+    }
+
+    void StopScanWorker() {
+        pollTimer_.Stop();
+        if (!scanFinished_.load()) {
+            dab_gui_scan_cancel_current();
+        }
+        {
+            std::lock_guard<std::mutex> lock(linesMutex_);
+            callbacksEnabled_ = false;
+            pendingLines_.clear();
+        }
+        if (workerThread_.joinable()) {
+            workerThread_.join();
+        }
+        if (!scanFinished_.load()) {
+            scanResultCode_.store(-2);
+            scanFinished_.store(true);
         }
     }
 
@@ -931,9 +992,11 @@ private:
     std::thread workerThread_;
     std::mutex linesMutex_;
     std::deque<wxString> pendingLines_;
+    bool callbacksEnabled_ = true;
     std::atomic<bool> scanFinished_{false};
     std::atomic<int> scanResultCode_{-1};
     bool scanSucceeded_ = false;
+    bool scanFinalized_ = false;
 };
 
 }  // namespace
