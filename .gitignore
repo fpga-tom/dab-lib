@@ -26,4 +26,5 @@ out/
 .cxx
 local.properties
 build-android/
-third_party/
+adab/app/src/main/jniLibs/**/*.so
+!adab/app/src/main/jniLibs/README.md
