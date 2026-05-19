@@ -234,6 +234,7 @@ add_library(dab STATIC
     src/os/os_shared_lib.c
     src/os/os_thread.c
     src/os/os_time.c
+    src/scan/scan.c
     src/simd/simd.c
     src/simd/simd_scalar.c
 )
@@ -492,7 +493,6 @@ endif()
 target_compile_definitions(dab
     PRIVATE
         $<$<BOOL:${DAB_ENABLE_AVX2}>:DAB_ENABLE_AVX2=1>
-        $<$<BOOL:${DAB_ENABLE_NEON}>:DAB_ENABLE_NEON=1>
 )
 
 if(DAB_ENABLE_AVX2)
@@ -511,6 +511,7 @@ if(DAB_ENABLE_NEON)
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64|ARM64|armv8)")
         target_sources(dab PRIVATE src/simd/simd_neon.c)
         target_sources(dab PRIVATE src/core/prs_fft_neon.c)
+        target_compile_definitions(dab PRIVATE DAB_ENABLE_NEON=1)
         if(NOT MSVC AND NOT APPLE AND NOT ANDROID)
             target_compile_options(dab PRIVATE -mfpu=neon)
         endif()

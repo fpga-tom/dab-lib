@@ -9,6 +9,14 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
 
+    interface ScanCallback {
+        fun onScanProgress(index: Int, total: Int, channel: String, frequencyHz: Long)
+        fun onScanLock(index: Int, total: Int, channel: String, frequencyHz: Long, serviceCount: Int, labelCount: Int)
+        fun onScanService(channel: String, frequencyHz: Long, serviceId: Int, label: String)
+        fun onScanComplete(totalServices: Int)
+        fun onScanError(message: String)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -24,6 +32,8 @@ class MainActivity : AppCompatActivity() {
      * which is packaged with this application.
      */
     external fun stringFromJNI(): String
+    external fun startRtlsdrScan(callback: ScanCallback, perFrequencySeconds: Int): Int
+    external fun cancelScan()
 
     companion object {
         // Used to load the 'adab' library on application startup.
