@@ -12,11 +12,24 @@
         android:id="@+id/titleText"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
+        android:layout_marginEnd="12dp"
         android:text="@string/scan_title"
         android:textAppearance="@style/TextAppearance.MaterialComponents.Headline5"
         android:textStyle="bold"
-        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintEnd_toStartOf="@id/scanToggleButton"
         app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <ImageButton
+        android:id="@+id/scanToggleButton"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:contentDescription="@string/show_scan_controls"
+        android:padding="12dp"
+        android:src="@android:drawable/ic_menu_search"
+        android:tint="?android:attr/textColorPrimary"
+        app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 
     <TextView
@@ -31,44 +44,48 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/titleText" />
 
-    <com.google.android.material.progressindicator.LinearProgressIndicator
-        android:id="@+id/scanProgress"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="14dp"
-        android:max="38"
-        android:progress="0"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/statusText" />
-
     <LinearLayout
-        android:id="@+id/buttonRow"
+        android:id="@+id/scanControls"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginTop="14dp"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
+        android:orientation="vertical"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/scanProgress">
+        app:layout_constraintTop_toBottomOf="@id/statusText">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/startScanButton"
-            android:layout_width="0dp"
-            android:layout_height="48dp"
-            android:layout_weight="1"
-            android:text="@string/start_scan" />
+        <com.google.android.material.progressindicator.LinearProgressIndicator
+            android:id="@+id/scanProgress"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="38"
+            android:progress="0" />
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/cancelScanButton"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-            android:layout_width="0dp"
-            android:layout_height="48dp"
-            android:layout_marginStart="12dp"
-            android:layout_weight="1"
-            android:enabled="false"
-            android:text="@string/cancel_scan" />
+        <LinearLayout
+            android:id="@+id/buttonRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/startScanButton"
+                android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_weight="1"
+                android:text="@string/start_scan" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/cancelScanButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_marginStart="12dp"
+                android:layout_weight="1"
+                android:enabled="false"
+                android:text="@string/cancel_scan" />
+        </LinearLayout>
     </LinearLayout>
 
     <TextView
@@ -81,7 +98,7 @@
         android:textStyle="bold"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/buttonRow" />
+        app:layout_constraintTop_toBottomOf="@id/scanControls" />
 
     <LinearLayout
         android:id="@+id/playbackRow"

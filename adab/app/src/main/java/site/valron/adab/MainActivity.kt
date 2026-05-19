@@ -54,6 +54,7 @@ class MainActivity : AppCompatActivity() {
     private var playbackEngine: AacPlaybackEngine? = null
     private var receiverPrimedThisSession = false
     private var retuneService: ServiceRow? = null
+    private var scanControlsVisible = true
 
     private val usbPermissionReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -125,8 +126,12 @@ class MainActivity : AppCompatActivity() {
         binding.cancelScanButton.setOnClickListener { requestCancel() }
         binding.playButton.setOnClickListener { startPlayback() }
         binding.stopButton.setOnClickListener { requestStopPlayback() }
+        binding.scanToggleButton.setOnClickListener {
+            setScanControlsVisible(!scanControlsVisible)
+        }
         registerUsbPermissionReceiver()
         loadPersistedServices()
+        setScanControlsVisible(services.isEmpty())
         renderServices()
         refreshUsbStatus()
     }
@@ -161,6 +166,7 @@ class MainActivity : AppCompatActivity() {
         services.clear()
         selectedService = null
         renderServices()
+        setScanControlsVisible(true)
         setPlaybackUi(false)
         setScanningUi(true)
         binding.scanProgress.progress = 0
@@ -510,6 +516,15 @@ class MainActivity : AppCompatActivity() {
         binding.playButton.isEnabled = !active && !scanning.get() && selectedService != null
         binding.stopButton.isEnabled = active
         binding.startScanButton.isEnabled = !active && !scanning.get()
+    }
+
+    private fun setScanControlsVisible(visible: Boolean) {
+        scanControlsVisible = visible
+        binding.scanControls.visibility = if (visible) View.VISIBLE else View.GONE
+        binding.scanToggleButton.contentDescription = getString(
+            if (visible) R.string.hide_scan_controls else R.string.show_scan_controls
+        )
+        binding.scanToggleButton.alpha = if (visible) 1.0f else 0.72f
     }
 
     private fun refreshUsbStatus() {
