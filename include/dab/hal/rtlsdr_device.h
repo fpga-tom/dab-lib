@@ -12,6 +12,7 @@ typedef struct {
     dab_rtlsdr_gain_mode_t gain_mode;
     int ppm_correction;
     int bias_tee_enabled;
+    int android_usb_fd;
 } dab_rtlsdr_config_t;
 
 void dab_rtlsdr_default_config(dab_rtlsdr_config_t *config);

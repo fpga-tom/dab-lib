@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.Typeface
 import android.hardware.usb.UsbDevice
+import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbManager
 import android.os.Build
 import android.os.Bundle
@@ -28,6 +29,7 @@ class MainActivity : AppCompatActivity() {
     private val scanning = AtomicBoolean(false)
     private val services = linkedMapOf<String, ServiceRow>()
     private var pendingScanAfterPermission = false
+    private var usbConnection: UsbDeviceConnection? = null
 
     private val usbPermissionReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -41,7 +43,7 @@ class MainActivity : AppCompatActivity() {
                 binding.statusText.text = "RTL-SDR USB permission granted."
                 if (pendingScanAfterPermission) {
                     pendingScanAfterPermission = false
-                    startNativeScan()
+                    startNativeScan(device)
                 }
             } else {
                 pendingScanAfterPermission = false
@@ -118,10 +120,19 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        startNativeScan()
+        startNativeScan(device)
     }
 
-    private fun startNativeScan() {
+    private fun startNativeScan(device: UsbDevice) {
+        val connection = usbManager.openDevice(device)
+        if (connection == null) {
+            scanning.set(false)
+            setScanningUi(false)
+            binding.statusText.text = "Failed to open RTL-SDR USB device."
+            return
+        }
+
+        usbConnection = connection
         binding.statusText.text = "Starting RTL-SDR scan..."
 
         scannerExecutor.execute {
@@ -172,10 +183,13 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                 },
-                4
+                4,
+                connection.fileDescriptor
             )
 
             runOnUiThread {
+                usbConnection?.close()
+                usbConnection = null
                 scanning.set(false)
                 setScanningUi(false)
                 if (rc != 0 && !binding.statusText.text.startsWith("Scan error")) {
@@ -199,6 +213,8 @@ class MainActivity : AppCompatActivity() {
         }
         if (scanning.get()) {
             cancelScan()
+            usbConnection?.close()
+            usbConnection = null
             binding.statusText.text = "Cancelling scan..."
             binding.cancelScanButton.isEnabled = false
         }
@@ -299,7 +315,7 @@ class MainActivity : AppCompatActivity() {
      * which is packaged with this application.
      */
     external fun stringFromJNI(): String
-    external fun startRtlsdrScan(callback: ScanCallback, perFrequencySeconds: Int): Int
+    external fun startRtlsdrScan(callback: ScanCallback, perFrequencySeconds: Int, usbFileDescriptor: Int): Int
     external fun cancelScan()
     external fun isRtlsdrLibraryAvailable(): Boolean
 

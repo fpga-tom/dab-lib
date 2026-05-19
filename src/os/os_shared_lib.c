@@ -31,7 +31,7 @@ int dab_shared_lib_open(dab_shared_lib_t *lib, const char *path) {
     if (lib == 0 || path == 0) {
         return -1;
     }
-    lib->handle = dlopen(path, RTLD_LAZY | RTLD_LOCAL);
+    lib->handle = dlopen(path, RTLD_NOW | RTLD_LOCAL);
     return lib->handle == 0 ? -1 : 0;
 }
 

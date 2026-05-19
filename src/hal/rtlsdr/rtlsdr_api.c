@@ -2,6 +2,11 @@
 
 #include <string.h>
 
+#if defined(__ANDROID__)
+#include <android/log.h>
+#include <dlfcn.h>
+#endif
+
 static const char *const DAB_RTLSDR_LIBRARY_NAMES[] = {
 #if defined(_WIN32)
     "rtlsdr.dll",
@@ -30,15 +35,26 @@ int dab_rtlsdr_api_try_load(dab_rtlsdr_api_t *api) {
             api->loaded = 1;
             break;
         }
+#if defined(__ANDROID__)
+        __android_log_print(ANDROID_LOG_WARN,
+                            "adab",
+                            "failed to load %s: %s",
+                            DAB_RTLSDR_LIBRARY_NAMES[i],
+                            dlerror());
+#endif
     }
     if (!api->loaded) {
         return -1;
     }
+#if defined(__ANDROID__)
+    __android_log_print(ANDROID_LOG_INFO, "adab", "loaded %s", DAB_RTLSDR_LIBRARY_NAMES[i]);
+#endif
 
     api->get_device_count = (dab_rtlsdr_get_device_count_fn)dab_shared_lib_symbol(&api->lib, "rtlsdr_get_device_count");
     api->get_device_name = (dab_rtlsdr_get_device_name_fn)dab_shared_lib_symbol(&api->lib, "rtlsdr_get_device_name");
     api->get_device_usb_strings = (dab_rtlsdr_get_device_usb_strings_fn)dab_shared_lib_symbol(&api->lib, "rtlsdr_get_device_usb_strings");
     api->open = (dab_rtlsdr_open_fn)dab_shared_lib_symbol(&api->lib, "rtlsdr_open");
+    api->open_fd = (dab_rtlsdr_open_fd_fn)dab_shared_lib_symbol(&api->lib, "rtlsdr_open_fd");
     api->close = (dab_rtlsdr_close_fn)dab_shared_lib_symbol(&api->lib, "rtlsdr_close");
     api->set_center_freq = (dab_rtlsdr_set_center_freq_fn)dab_shared_lib_symbol(&api->lib, "rtlsdr_set_center_freq");
     api->set_sample_rate = (dab_rtlsdr_set_sample_rate_fn)dab_shared_lib_symbol(&api->lib, "rtlsdr_set_sample_rate");
@@ -58,6 +74,20 @@ int dab_rtlsdr_api_is_usable(const dab_rtlsdr_api_t *api) {
     if (api == 0 || !api->loaded) {
         return 0;
     }
+#if defined(__ANDROID__)
+    if (api->get_device_count == 0) {
+        __android_log_write(ANDROID_LOG_ERROR, "adab", "librtlsdr missing rtlsdr_get_device_count");
+    }
+    if (api->open == 0) {
+        __android_log_write(ANDROID_LOG_ERROR, "adab", "librtlsdr missing rtlsdr_open");
+    }
+    if (api->open_fd == 0) {
+        __android_log_write(ANDROID_LOG_WARN, "adab", "librtlsdr missing Android rtlsdr_open_fd");
+    }
+    if (api->read_async == 0) {
+        __android_log_write(ANDROID_LOG_ERROR, "adab", "librtlsdr missing rtlsdr_read_async");
+    }
+#endif
     return api->get_device_count != 0 &&
            api->get_device_name != 0 &&
            api->get_device_usb_strings != 0 &&

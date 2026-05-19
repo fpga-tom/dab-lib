@@ -141,7 +141,8 @@ Java_site_valron_adab_MainActivity_startRtlsdrScan(
         JNIEnv* env,
         jobject /* this */,
         jobject callback,
-        jint perFrequencySeconds) {
+        jint perFrequencySeconds,
+        jint usbFileDescriptor) {
     dab_scan_config_t config;
     JniScanContext context{};
 
@@ -156,6 +157,7 @@ Java_site_valron_adab_MainActivity_startRtlsdrScan(
     config.agc_enabled = 1;
     config.gain_db = 40;
     config.use_real_device = 1;
+    config.android_usb_fd = usbFileDescriptor;
     config.cancel = scanCancelRequested;
 
     return static_cast<jint>(dab_scan_band_iii(&config, scanCallback, &context));

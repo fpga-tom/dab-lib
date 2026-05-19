@@ -131,6 +131,25 @@ static int scan_emit_event(const dab_scan_context_t *context, const dab_scan_eve
     return context->callback(event, context->user);
 }
 
+static int scan_emit_error(const dab_scan_context_t *context, const char *message) {
+    dab_scan_event_t event = {0};
+    event.type = DAB_SCAN_EVENT_ERROR;
+    event.message = message;
+    return scan_emit_event(context, &event);
+}
+
+static int scan_emit_channel_error(const dab_scan_context_t *context,
+                                   const dab_channel_t *channel,
+                                   const char *message) {
+    char buffer[160];
+
+    if (channel != 0 && channel->channel != 0 && message != 0) {
+        snprintf(buffer, sizeof(buffer), "%s: %s", channel->channel, message);
+        return scan_emit_error(context, buffer);
+    }
+    return scan_emit_error(context, message != 0 ? message : "channel scan failed");
+}
+
 #ifndef DAB_SCAN_NO_MAIN
 static void print_usage(const char *argv0) {
     fprintf(stderr,
@@ -1029,22 +1048,27 @@ static int scan_frequency(scan_runtime_t *runtime,
     if (strcmp(driver, "rtlsdr") == 0) {
         if (rtlsdr_config == 0 || dab_rtlsdr_configure_device(device, rtlsdr_config) != DAB_SDR_STATUS_OK) {
             fprintf(stderr, "device config failed for %s\n", channel->channel);
+            (void)scan_emit_channel_error(scan_context, channel, "RTL-SDR device config failed");
             return -1;
         }
     } else if (sdrplay_config == 0 || dab_sdrplay_configure_device(device, sdrplay_config) != DAB_SDR_STATUS_OK) {
         fprintf(stderr, "device config failed for %s\n", channel->channel);
+        (void)scan_emit_channel_error(scan_context, channel, "SDRplay device config failed");
         return -1;
     }
     if (device->vtbl->configure(device, &stream_config) != DAB_SDR_STATUS_OK) {
         fprintf(stderr, "stream config failed for %s\n", channel->channel);
+        (void)scan_emit_channel_error(scan_context, channel, "stream config failed");
         return -1;
     }
     if (device->vtbl->open_stream(device, &stream) != DAB_SDR_STATUS_OK || stream == 0) {
         fprintf(stderr, "open stream failed for %s\n", channel->channel);
+        (void)scan_emit_channel_error(scan_context, channel, "open stream failed");
         return -1;
     }
     if (stream->vtbl->start(stream) != DAB_SDR_STATUS_OK) {
         fprintf(stderr, "start stream failed for %s\n", channel->channel);
+        (void)scan_emit_channel_error(scan_context, channel, "start stream failed");
         dab_sdr_stream_close(stream);
         return -1;
     }
@@ -1059,6 +1083,7 @@ static int scan_frequency(scan_runtime_t *runtime,
         }
         if (stream->vtbl->read(stream, &src_block) != DAB_SDR_STATUS_OK) {
             fprintf(stderr, "read failed for %s at block %u\n", channel->channel, block_index);
+            (void)scan_emit_channel_error(scan_context, channel, "sample read failed");
             goto cleanup;
         }
         if (scan_cancel_requested(scan_context)) {
@@ -1075,6 +1100,7 @@ static int scan_frequency(scan_runtime_t *runtime,
         history_append(&runtime->history, &src_block);
         if (dab_null_detect_process_i16(&runtime->detector, &src_block, &event) < 0) {
             fprintf(stderr, "null detector failed for %s\n", channel->channel);
+            (void)scan_emit_channel_error(scan_context, channel, "null detector failed");
             goto cleanup;
         }
 
@@ -1264,6 +1290,7 @@ static int scan_frequency(scan_runtime_t *runtime,
     if (have_services) {
         if (write_scan_results(results_fp, channel, &runtime->fic.repo.current, scan_context) != 0) {
             fprintf(stderr, "failed to write scan results for %s\n", channel->channel);
+            (void)scan_emit_channel_error(scan_context, channel, "failed to report scan results");
             goto cleanup;
         }
         rc = (int)runtime->fic.repo.current.service_count;
@@ -1288,6 +1315,7 @@ void dab_scan_default_config(dab_scan_config_t *config) {
     config->gain_db = 40;
     config->agc_enabled = 1;
     config->use_real_device = 1;
+    config->android_usb_fd = -1;
 }
 
 static void scan_set_rtlsdr_real_adapter(int enabled) {
@@ -1296,13 +1324,6 @@ static void scan_set_rtlsdr_real_adapter(int enabled) {
 #else
     setenv("DAB_RTLSDR_USE_REAL", enabled ? "1" : "0", 1);
 #endif
-}
-
-static int scan_emit_error(const dab_scan_context_t *context, const char *message) {
-    dab_scan_event_t event = {0};
-    event.type = DAB_SCAN_EVENT_ERROR;
-    event.message = message;
-    return scan_emit_event(context, &event);
 }
 
 int dab_scan_band_iii(const dab_scan_config_t *config, dab_scan_callback_t callback, void *user) {
@@ -1345,6 +1366,7 @@ int dab_scan_band_iii(const dab_scan_config_t *config, dab_scan_callback_t callb
     rtlsdr_config.gain_mode = config->agc_enabled ? DAB_RTLSDR_GAIN_MODE_AUTO : DAB_RTLSDR_GAIN_MODE_MANUAL;
     rtlsdr_config.ppm_correction = config->ppm_correction;
     rtlsdr_config.bias_tee_enabled = config->bias_tee_enabled ? 1 : 0;
+    rtlsdr_config.android_usb_fd = config->android_usb_fd;
 
     if (strcmp(params.driver, "rtlsdr") == 0) {
         scan_set_rtlsdr_real_adapter(config->use_real_device);
@@ -1373,7 +1395,9 @@ int dab_scan_band_iii(const dab_scan_config_t *config, dab_scan_callback_t callb
                            0,
                            &scan_context);
         if (services < 0) {
-            (void)scan_emit_error(&scan_context, services == -2 ? "scan cancelled" : "channel scan failed");
+            if (services == -2) {
+                (void)scan_emit_error(&scan_context, "scan cancelled");
+            }
             rc = services;
             goto cleanup;
         }

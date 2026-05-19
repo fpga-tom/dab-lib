@@ -39,6 +39,7 @@ typedef struct {
     int ppm_correction;
     int bias_tee_enabled;
     int use_real_device;
+    int android_usb_fd;
     dab_scan_cancel_callback_t cancel;
     void *cancel_user;
 } dab_scan_config_t;
