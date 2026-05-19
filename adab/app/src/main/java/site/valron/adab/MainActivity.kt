@@ -50,6 +50,7 @@ class MainActivity : AppCompatActivity() {
     private var selectedService: ServiceRow? = null
     private var playbackEngine: AacPlaybackEngine? = null
     private var receiverPrimedThisSession = false
+    private var retuneService: ServiceRow? = null
 
     private val usbPermissionReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -260,6 +261,10 @@ class MainActivity : AppCompatActivity() {
             binding.statusText.text = "Select a service first."
             return
         }
+        startPlaybackForService(service)
+    }
+
+    private fun startPlaybackForService(service: ServiceRow) {
         if (!playing.compareAndSet(false, true)) {
             return
         }
@@ -438,6 +443,13 @@ class MainActivity : AppCompatActivity() {
                 playbackUsbConnection = null
                 playing.set(false)
                 setPlaybackUi(false)
+                val nextService = retuneService
+                retuneService = null
+                if (nextService != null) {
+                    binding.statusText.text = "Retuning to ${nextService.label.ifBlank { formatServiceId(nextService.serviceId) }}..."
+                    startPlaybackForService(nextService)
+                    return@runOnUiThread
+                }
                 if (rc != 0 && !binding.statusText.text.startsWith("Playback error") && !binding.statusText.text.startsWith("Audio")) {
                     binding.statusText.text = if (rc == -2) {
                         "Playback stopped."
@@ -469,12 +481,14 @@ class MainActivity : AppCompatActivity() {
     private fun requestStopPlayback() {
         if (pendingPlaybackService != null) {
             pendingPlaybackService = null
+            retuneService = null
             playing.set(false)
             binding.statusText.text = "Playback cancelled."
             setPlaybackUi(false)
             return
         }
         if (playing.get()) {
+            retuneService = null
             cancelScan()
             stopPlayback()
             binding.statusText.text = "Stopping playback..."
@@ -609,8 +623,17 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener {
                 selectedService = service
                 renderServices()
-                binding.statusText.text =
-                    "Selected ${service.label.ifBlank { formatServiceId(service.serviceId) }} on ${service.channel}."
+                if (playing.get()) {
+                    retuneService = service
+                    binding.statusText.text =
+                        "Retuning to ${service.label.ifBlank { formatServiceId(service.serviceId) }}..."
+                    cancelScan()
+                    stopPlayback()
+                    binding.stopButton.isEnabled = false
+                } else {
+                    binding.statusText.text =
+                        "Selected ${service.label.ifBlank { formatServiceId(service.serviceId) }} on ${service.channel}."
+                }
             }
         }
 
