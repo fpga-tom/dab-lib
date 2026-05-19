@@ -12,7 +12,9 @@
         android:id="@+id/titleText"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
+        android:layout_marginTop="24dp"
         android:layout_marginEnd="12dp"
+        android:paddingBottom="6dp"
         android:text="@string/scan_title"
         android:textAppearance="@style/TextAppearance.MaterialComponents.Headline5"
         android:textStyle="bold"
@@ -30,7 +32,8 @@
         android:src="@android:drawable/ic_menu_search"
         android:tint="?android:attr/textColorPrimary"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
+        app:layout_constraintBottom_toBottomOf="@id/titleText"
+        app:layout_constraintTop_toTopOf="@id/titleText" />
 
     <TextView
         android:id="@+id/statusText"
@@ -163,7 +166,9 @@
         android:id="@+id/footerText"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
+        android:layout_marginBottom="20dp"
         android:paddingTop="8dp"
+        android:paddingBottom="8dp"
         android:text="@string/scan_thread_note"
         android:textAppearance="@style/TextAppearance.MaterialComponents.Caption"
         android:textColor="?android:attr/textColorSecondary"
