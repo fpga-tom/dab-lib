@@ -25,3 +25,5 @@ out/
 .externalNativeBuild
 .cxx
 local.properties
+build-android/
+third_party/

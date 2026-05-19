@@ -1,6 +1,7 @@
 #include <jni.h>
 #include <android/log.h>
 #include <atomic>
+#include <dlfcn.h>
 #include <string>
 
 #include "dab/scan.h"
@@ -165,4 +166,17 @@ Java_site_valron_adab_MainActivity_cancelScan(
         JNIEnv* /* env */,
         jobject /* this */) {
     g_cancelScan.store(true);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_site_valron_adab_MainActivity_isRtlsdrLibraryAvailable(
+        JNIEnv* /* env */,
+        jobject /* this */) {
+    void* handle = dlopen("librtlsdr.so", RTLD_NOW | RTLD_LOCAL);
+    if (handle == nullptr) {
+        __android_log_print(ANDROID_LOG_ERROR, "adab", "librtlsdr.so not loadable: %s", dlerror());
+        return JNI_FALSE;
+    }
+    dlclose(handle);
+    return JNI_TRUE;
 }
