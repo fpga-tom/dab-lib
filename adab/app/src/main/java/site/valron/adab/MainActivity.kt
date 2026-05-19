@@ -6,6 +6,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.SharedPreferences
 import android.graphics.Typeface
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbDeviceConnection
@@ -16,6 +17,8 @@ import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
 import site.valron.adab.databinding.ActivityMainBinding
+import org.json.JSONArray
+import org.json.JSONObject
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -25,6 +28,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var usbManager: UsbManager
+    private lateinit var preferences: SharedPreferences
     private val scannerExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val scanning = AtomicBoolean(false)
     private val services = linkedMapOf<String, ServiceRow>()
@@ -73,6 +77,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
 
         usbManager = getSystemService(USB_SERVICE) as UsbManager
+        preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
@@ -80,6 +85,8 @@ class MainActivity : AppCompatActivity() {
         binding.startScanButton.setOnClickListener { startScan() }
         binding.cancelScanButton.setOnClickListener { requestCancel() }
         registerUsbPermissionReceiver()
+        loadPersistedServices()
+        renderServices()
         refreshUsbStatus()
     }
 
@@ -166,6 +173,7 @@ class MainActivity : AppCompatActivity() {
                         runOnUiThread {
                             val key = "$channel:$frequencyHz:$serviceId"
                             services[key] = ServiceRow(channel, frequencyHz, serviceId, label)
+                            persistServices()
                             renderServices()
                         }
                     }
@@ -278,6 +286,39 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun loadPersistedServices() {
+        val raw = preferences.getString(PREF_SERVICES, null) ?: return
+        val loaded = runCatching { JSONArray(raw) }.getOrNull() ?: return
+
+        services.clear()
+        for (index in 0 until loaded.length()) {
+            val item = loaded.optJSONObject(index) ?: continue
+            val service = ServiceRow(
+                channel = item.optString("channel"),
+                frequencyHz = item.optLong("frequencyHz"),
+                serviceId = item.optInt("serviceId"),
+                label = item.optString("label")
+            )
+            if (service.channel.isNotBlank() && service.frequencyHz > 0) {
+                services["${service.channel}:${service.frequencyHz}:${service.serviceId}"] = service
+            }
+        }
+    }
+
+    private fun persistServices() {
+        val items = JSONArray()
+        for (service in services.values) {
+            items.put(
+                JSONObject()
+                    .put("channel", service.channel)
+                    .put("frequencyHz", service.frequencyHz)
+                    .put("serviceId", service.serviceId)
+                    .put("label", service.label)
+            )
+        }
+        preferences.edit().putString(PREF_SERVICES, items.toString()).apply()
+    }
+
     private fun createServiceRow(service: ServiceRow): View {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -321,6 +362,8 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val ACTION_USB_PERMISSION = "site.valron.adab.USB_PERMISSION"
+        private const val PREFS_NAME = "adab_scan"
+        private const val PREF_SERVICES = "services"
         private const val RTLSDR_VENDOR_ID = 0x0bda
         private val RTLSDR_PRODUCT_IDS = setOf(
             0x2832,
