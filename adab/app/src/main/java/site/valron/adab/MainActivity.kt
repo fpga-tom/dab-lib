@@ -9,6 +9,9 @@ import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.LayerDrawable
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbManager
@@ -614,12 +617,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun createServiceRow(service: ServiceRow): View {
+        val selected = service == selectedService
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, 14.dp, 0, 14.dp)
+            setPadding(if (selected) 18.dp else 0, 14.dp, 0, 14.dp)
             showDividers = LinearLayout.SHOW_DIVIDER_NONE
             isClickable = true
-            setBackgroundColor(if (service == selectedService) 0x1F006D3B else Color.TRANSPARENT)
+            background = if (selected) selectedServiceBackground() else ColorDrawable(Color.TRANSPARENT)
             setOnClickListener {
                 selectedService = service
                 renderServices()
@@ -641,16 +645,31 @@ class MainActivity : AppCompatActivity() {
             text = service.label.ifBlank { "Service ${formatServiceId(service.serviceId)}" }
             textSize = 16f
             typeface = Typeface.DEFAULT_BOLD
+            setTextColor(if (selected) Color.rgb(0, 72, 38) else currentTextColor)
         }
 
         val detail = TextView(this).apply {
             text = "${service.channel}  |  ${formatFrequency(service.frequencyHz)}  |  SID ${formatServiceId(service.serviceId)}"
             textSize = 13f
+            setTextColor(if (selected) Color.rgb(0, 96, 52) else currentTextColor)
         }
 
         row.addView(title)
         row.addView(detail)
         return row
+    }
+
+    private fun selectedServiceBackground(): LayerDrawable {
+        val fill = GradientDrawable().apply {
+            setColor(Color.rgb(213, 244, 226))
+            setStroke(1.dp, Color.rgb(0, 109, 59))
+            cornerRadius = 6.dp.toFloat()
+        }
+        val stripe = ColorDrawable(Color.rgb(0, 109, 59))
+        return LayerDrawable(arrayOf(fill, stripe)).apply {
+            setLayerInset(1, 0, 0, 0, 0)
+            setLayerWidth(1, 6.dp)
+        }
     }
 
     private fun formatFrequency(frequencyHz: Long): String =
