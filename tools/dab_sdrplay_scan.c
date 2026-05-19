@@ -1424,6 +1424,98 @@ cleanup:
     return rc;
 }
 
+int dab_scan_frequency_hz(const dab_scan_config_t *config,
+                          const char *channel,
+                          uint64_t frequency_hz,
+                          dab_scan_callback_t callback,
+                          void *user) {
+    dab_scan_config_t default_config;
+    dab_scan_context_t scan_context;
+    dab_sdr_open_params_t params = {"rtlsdr", NULL, NULL};
+    dab_sdrplay_config_t sdrplay_config;
+    dab_rtlsdr_config_t rtlsdr_config;
+    dab_sdr_device_t *device = 0;
+    scan_runtime_t runtime = {0};
+    dab_channel_t single_channel = {0};
+    int rc = -1;
+
+    if (frequency_hz == 0u) {
+        return -1;
+    }
+    if (config == 0) {
+        dab_scan_default_config(&default_config);
+        config = &default_config;
+    }
+
+    scan_context.config = config;
+    scan_context.callback = callback;
+    scan_context.user = user;
+    single_channel.channel = (channel != 0 && channel[0] != '\0') ? channel : "selected";
+    single_channel.frequency_hz = frequency_hz;
+
+    params.driver = (config->driver != 0 && config->driver[0] != '\0') ? config->driver : "rtlsdr";
+    if (strcmp(params.driver, "rtlsdr") != 0 && strcmp(params.driver, "sdrplay") != 0) {
+        (void)scan_emit_error(&scan_context, "unsupported SDR scan driver");
+        return -1;
+    }
+    if (scan_cancel_requested(&scan_context)) {
+        return -2;
+    }
+
+    dab_sdrplay_default_config(&sdrplay_config);
+    sdrplay_config.gain_mode = config->agc_enabled ? DAB_SDRPLAY_GAIN_MODE_AUTO : DAB_SDRPLAY_GAIN_MODE_MANUAL;
+    sdrplay_config.if_mode = DAB_SDRPLAY_IF_MODE_ZERO_IF;
+    sdrplay_config.antenna = DAB_SDRPLAY_ANTENNA_A;
+
+    dab_rtlsdr_default_config(&rtlsdr_config);
+    rtlsdr_config.gain_mode = config->agc_enabled ? DAB_RTLSDR_GAIN_MODE_AUTO : DAB_RTLSDR_GAIN_MODE_MANUAL;
+    rtlsdr_config.ppm_correction = config->ppm_correction;
+    rtlsdr_config.bias_tee_enabled = config->bias_tee_enabled ? 1 : 0;
+    rtlsdr_config.android_usb_fd = config->android_usb_fd;
+
+    if (strcmp(params.driver, "rtlsdr") == 0) {
+        scan_set_rtlsdr_real_adapter(config->use_real_device);
+    }
+    if (scan_runtime_init(&runtime, 2048000u) != 0) {
+        (void)scan_emit_error(&scan_context, "failed to initialize scan runtime");
+        goto cleanup;
+    }
+    if (dab_sdr_device_open(&params, &device) != DAB_SDR_STATUS_OK || device == 0) {
+        (void)scan_emit_error(&scan_context, "failed to open SDR device");
+        goto cleanup;
+    }
+
+    rc = scan_frequency(&runtime,
+                        device,
+                        params.driver,
+                        &sdrplay_config,
+                        &rtlsdr_config,
+                        &single_channel,
+                        0u,
+                        config->per_frequency_seconds != 0u ? config->per_frequency_seconds : 4u,
+                        config->gain_db,
+                        0,
+                        &scan_context);
+    if (rc >= 0) {
+        dab_scan_event_t event = {0};
+        event.type = DAB_SCAN_EVENT_COMPLETE;
+        event.total = 1u;
+        event.service_count = (uint32_t)rc;
+        if (scan_emit_event(&scan_context, &event) != 0) {
+            rc = -2;
+        } else {
+            rc = 0;
+        }
+    }
+
+cleanup:
+    if (device != 0) {
+        dab_sdr_device_close(device);
+    }
+    scan_runtime_destroy(&runtime);
+    return rc;
+}
+
 #ifndef DAB_SCAN_NO_MAIN
 static int cli_scan_callback(const dab_scan_event_t *event, void *user) {
     (void)user;

@@ -46,6 +46,11 @@ typedef struct {
 
 void dab_scan_default_config(dab_scan_config_t *config);
 int dab_scan_band_iii(const dab_scan_config_t *config, dab_scan_callback_t callback, void *user);
+int dab_scan_frequency_hz(const dab_scan_config_t *config,
+                          const char *channel,
+                          uint64_t frequency_hz,
+                          dab_scan_callback_t callback,
+                          void *user);
 
 #ifdef __cplusplus
 }

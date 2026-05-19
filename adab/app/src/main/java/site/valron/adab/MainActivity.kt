@@ -49,6 +49,7 @@ class MainActivity : AppCompatActivity() {
     private var playbackUsbConnection: UsbDeviceConnection? = null
     private var selectedService: ServiceRow? = null
     private var playbackEngine: AacPlaybackEngine? = null
+    private var receiverPrimedThisSession = false
 
     private val usbPermissionReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -66,7 +67,11 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     pendingPlaybackService?.let { service ->
                         pendingPlaybackService = null
-                        startNativePlayback(device, service)
+                        binding.root.postDelayed({
+                            if (playing.get()) {
+                                startNativePlayback(device, service)
+                            }
+                        }, 300L)
                     }
                 }
             } else {
@@ -209,6 +214,7 @@ class MainActivity : AppCompatActivity() {
                         runOnUiThread {
                             val key = "$channel:$frequencyHz:$serviceId"
                             services[key] = ServiceRow(channel, frequencyHz, serviceId, label)
+                            receiverPrimedThisSession = true
                             persistServices()
                             renderServices()
                         }
@@ -216,6 +222,7 @@ class MainActivity : AppCompatActivity() {
 
                     override fun onScanComplete(totalServices: Int) {
                         runOnUiThread {
+                            receiverPrimedThisSession = true
                             binding.scanProgress.progress = binding.scanProgress.max
                             binding.statusText.text = "Scan complete: $totalServices services found."
                         }
@@ -299,7 +306,90 @@ class MainActivity : AppCompatActivity() {
 
         playbackExecutor.execute {
             val engine = AacPlaybackEngine()
+            var activeConnection = connection
             playbackEngine = engine
+            if (!receiverPrimedThisSession) {
+                runOnUiThread {
+                    binding.statusText.text = "Acquiring ${service.channel} before playback..."
+                }
+                val preflightRc = preflightRtlsdrFrequency(
+                    object : ScanCallback {
+                        override fun onScanProgress(index: Int, total: Int, channel: String, frequencyHz: Long) {
+                            runOnUiThread {
+                                binding.statusText.text = "Tuning $channel (${formatFrequency(frequencyHz)})..."
+                            }
+                        }
+
+                        override fun onScanLock(
+                            index: Int,
+                            total: Int,
+                            channel: String,
+                            frequencyHz: Long,
+                            serviceCount: Int,
+                            labelCount: Int
+                        ) {
+                            runOnUiThread {
+                                binding.statusText.text = "Locked $channel: $serviceCount services."
+                            }
+                        }
+
+                        override fun onScanService(channel: String, frequencyHz: Long, serviceId: Int, label: String) {
+                            runOnUiThread {
+                                val key = "$channel:$frequencyHz:$serviceId"
+                                services[key] = ServiceRow(channel, frequencyHz, serviceId, label)
+                                persistServices()
+                                renderServices()
+                            }
+                        }
+
+                        override fun onScanComplete(totalServices: Int) {
+                            runOnUiThread {
+                                binding.statusText.text = "Acquire complete: $totalServices services."
+                            }
+                        }
+
+                        override fun onScanError(message: String) {
+                            runOnUiThread {
+                                binding.statusText.text = "Acquire error: $message"
+                            }
+                        }
+                    },
+                    service.channel,
+                    service.frequencyHz,
+                    activeConnection.fileDescriptor
+                )
+                activeConnection.close()
+                if (preflightRc != 0) {
+                    engine.close()
+                    playbackEngine = null
+                    runOnUiThread {
+                        if (playbackUsbConnection === activeConnection) {
+                            playbackUsbConnection = null
+                        }
+                        playing.set(false)
+                        setPlaybackUi(false)
+                        if (!binding.statusText.text.startsWith("Acquire error")) {
+                            binding.statusText.text = "Acquire failed with native status $preflightRc."
+                        }
+                    }
+                    return@execute
+                }
+                receiverPrimedThisSession = true
+                val reopenedConnection = usbManager.openDevice(device)
+                if (reopenedConnection == null) {
+                    engine.close()
+                    playbackEngine = null
+                    runOnUiThread {
+                        playbackUsbConnection = null
+                        playing.set(false)
+                        setPlaybackUi(false)
+                        binding.statusText.text = "Failed to reopen RTL-SDR USB device."
+                    }
+                    return@execute
+                }
+                activeConnection = reopenedConnection
+                playbackUsbConnection = activeConnection
+            }
             val rc = startRtlsdrPlayback(
                 object : PlaybackCallback {
                     override fun onPlaybackStatus(message: String) {
@@ -338,13 +428,13 @@ class MainActivity : AppCompatActivity() {
                 },
                 service.frequencyHz,
                 service.serviceId,
-                connection.fileDescriptor
+                activeConnection.fileDescriptor
             )
 
             engine.close()
             playbackEngine = null
+            activeConnection.close()
             runOnUiThread {
-                playbackUsbConnection?.close()
                 playbackUsbConnection = null
                 playing.set(false)
                 setPlaybackUi(false)
@@ -385,10 +475,8 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (playing.get()) {
+            cancelScan()
             stopPlayback()
-            playbackEngine?.close()
-            playbackUsbConnection?.close()
-            playbackUsbConnection = null
             binding.statusText.text = "Stopping playback..."
             binding.stopButton.isEnabled = false
         }
@@ -468,13 +556,14 @@ class MainActivity : AppCompatActivity() {
         services.clear()
         for (index in 0 until loaded.length()) {
             val item = loaded.optJSONObject(index) ?: continue
+            val serviceId = parsePersistedServiceId(item)
             val service = ServiceRow(
                 channel = item.optString("channel"),
                 frequencyHz = item.optLong("frequencyHz"),
-                serviceId = item.optInt("serviceId"),
+                serviceId = serviceId,
                 label = item.optString("label")
             )
-            if (service.channel.isNotBlank() && service.frequencyHz > 0) {
+            if (service.channel.isNotBlank() && service.frequencyHz > 0 && service.serviceId != 0) {
                 services["${service.channel}:${service.frequencyHz}:${service.serviceId}"] = service
             }
         }
@@ -487,11 +576,27 @@ class MainActivity : AppCompatActivity() {
                 JSONObject()
                     .put("channel", service.channel)
                     .put("frequencyHz", service.frequencyHz)
-                    .put("serviceId", service.serviceId)
+                    .put("serviceId", formatServiceId(service.serviceId))
                     .put("label", service.label)
             )
         }
         preferences.edit().putString(PREF_SERVICES, items.toString()).apply()
+    }
+
+    private fun parsePersistedServiceId(item: JSONObject): Int {
+        val raw = item.opt("serviceId") ?: return 0
+        return when (raw) {
+            is Number -> raw.toInt()
+            is String -> {
+                val value = raw.trim()
+                if (value.startsWith("0x", ignoreCase = true)) {
+                    value.substring(2).toLongOrNull(16)?.toInt() ?: 0
+                } else {
+                    value.toLongOrNull()?.toInt() ?: value.toLongOrNull(16)?.toInt() ?: 0
+                }
+            }
+            else -> 0
+        }
     }
 
     private fun createServiceRow(service: ServiceRow): View {
@@ -660,6 +765,7 @@ class MainActivity : AppCompatActivity() {
     external fun stringFromJNI(): String
     external fun startRtlsdrScan(callback: ScanCallback, perFrequencySeconds: Int, usbFileDescriptor: Int): Int
     external fun cancelScan()
+    external fun preflightRtlsdrFrequency(callback: ScanCallback, channel: String, frequencyHz: Long, usbFileDescriptor: Int): Int
     external fun startRtlsdrPlayback(callback: PlaybackCallback, frequencyHz: Long, serviceId: Int, usbFileDescriptor: Int): Int
     external fun stopPlayback()
     external fun isRtlsdrLibraryAvailable(): Boolean

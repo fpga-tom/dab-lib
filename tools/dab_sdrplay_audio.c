@@ -1117,6 +1117,8 @@ int main(int argc, char **argv) {
 #endif
 #if defined(DAB_RECEIVE_NO_MAIN)
     uint64_t last_receive_generation = 0u;
+    uint8_t selected_sid_fallback_reported = 0u;
+    uint8_t lock_reported = 0u;
 #endif
     uint64_t audio_timeout_samples = 0u;
     uint64_t samples_since_audio = 0u;
@@ -1413,6 +1415,36 @@ int main(int argc, char **argv) {
         goto cleanup;
     }
 
+#if defined(DAB_RECEIVE_NO_MAIN)
+    {
+        uint64_t warmup_samples = (uint64_t)stream_config.sample_rate * 3u;
+        uint64_t discarded_samples = 0u;
+
+        if (receive_emit_status(receive_callback,
+                                receive_user,
+                                DAB_RECEIVE_EVENT_STATUS,
+                                "Warming up RTL-SDR tuner...") != 0) {
+            rc = -2;
+            goto cleanup;
+        }
+        while (discarded_samples < warmup_samples) {
+            if (receive_config->cancel != 0 && receive_config->cancel(receive_config->cancel_user) != 0) {
+                rc = -2;
+                goto cleanup;
+            }
+            if (stream->vtbl->read(stream, &src_block) != DAB_SDR_STATUS_OK) {
+                fprintf(stderr, "warmup read failed\n");
+                (void)receive_emit_status(receive_callback,
+                                          receive_user,
+                                          DAB_RECEIVE_EVENT_ERROR,
+                                          "warmup read failed");
+                goto cleanup;
+            }
+            discarded_samples += src_block.sample_count;
+        }
+    }
+#endif
+
     printf("sdrplay-audio start sample_rate=%u center_freq_hz=%llu agc=%s debug=%s simd=%s fft=%s ref_threshold=%.3f",
            stream_config.sample_rate,
            (unsigned long long)stream_config.center_freq_hz,
@@ -1427,9 +1459,17 @@ int main(int argc, char **argv) {
     printf("\n");
     publish_playback_status(&sync);
 #if defined(DAB_RECEIVE_NO_MAIN)
-    if (receive_emit_status(receive_callback, receive_user, DAB_RECEIVE_EVENT_STATUS, "Receiver started") != 0) {
-        rc = -2;
-        goto cleanup;
+    {
+        char status_message[128];
+        snprintf(status_message,
+                 sizeof(status_message),
+                 "Receiver started: %.3f MHz SID 0x%08x",
+                 (double)stream_config.center_freq_hz / 1000000.0,
+                 selected_audio_sid);
+        if (receive_emit_status(receive_callback, receive_user, DAB_RECEIVE_EVENT_STATUS, status_message) != 0) {
+            rc = -2;
+            goto cleanup;
+        }
     }
 #endif
 
@@ -1446,6 +1486,21 @@ int main(int argc, char **argv) {
 
         if (prev_locked != locked_now) {
             if (locked_now != 0u) {
+#if defined(DAB_RECEIVE_NO_MAIN)
+                if (lock_reported == 0u) {
+                    char status_message[128];
+                    snprintf(status_message,
+                             sizeof(status_message),
+                             "Signal locked: prs %.3f cfo %.1f Hz",
+                             sync.state.prs_score,
+                             sync.state.coarse_freq_error_hz);
+                    if (receive_emit_status(receive_callback, receive_user, DAB_RECEIVE_EVENT_STATUS, status_message) != 0) {
+                        rc = -2;
+                        goto cleanup;
+                    }
+                    lock_reported = 1u;
+                }
+#endif
                 if (reacquire_report_pending != 0u) {
                     printf("reacquired frame_start=%llu cfo=%.3f ifo=%d\n",
                            (unsigned long long)sync.state.frame_start_sample,
@@ -1475,6 +1530,9 @@ int main(int argc, char **argv) {
                 waiting_for_audio_reported = 0u;
 #if defined(DAB_GUI_PLAYBACK_EMBEDDED)
                 last_logo_generation = 0u;
+#endif
+#if defined(DAB_RECEIVE_NO_MAIN)
+                lock_reported = 0u;
 #endif
                 samples_since_audio = 0u;
                 last_audio_frame_start_sample = 0u;
@@ -2091,6 +2149,34 @@ int main(int argc, char **argv) {
                                                     selected_audio_sid_valid != 0u
                                                         ? find_selected_audio_component(&msc, selected_audio_sid)
                                                         : 0;
+#if defined(DAB_RECEIVE_NO_MAIN)
+                                                if (audio_component == 0 &&
+                                                    selected_audio_sid_valid != 0u &&
+                                                    selected_sid_fallback_reported == 0u &&
+                                                    fic.frames_seen > 30u) {
+                                                    const dab_msc_decoded_component_t *fallback_component =
+                                                        find_first_audio_component(&msc);
+                                                    if (fallback_component != 0) {
+                                                        char status_message[160];
+                                                        snprintf(status_message,
+                                                                 sizeof(status_message),
+                                                                 "Selected SID 0x%08x not found; playing SID 0x%08x",
+                                                                 selected_audio_sid,
+                                                                 fallback_component->sid);
+                                                        if (receive_emit_status(receive_callback,
+                                                                                receive_user,
+                                                                                DAB_RECEIVE_EVENT_STATUS,
+                                                                                status_message) != 0) {
+                                                            rc = -2;
+                                                            goto cleanup;
+                                                        }
+                                                        selected_audio_sid = fallback_component->sid;
+                                                        selected_audio_sid_valid = 1u;
+                                                        selected_sid_fallback_reported = 1u;
+                                                        audio_component = fallback_component;
+                                                    }
+                                                }
+#endif
                                                 if (audio_component == 0 && selected_audio_sid_valid == 0u) {
                                                     audio_component = find_first_audio_component(&msc);
                                                     if (audio_component != 0) {

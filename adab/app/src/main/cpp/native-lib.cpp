@@ -301,6 +301,49 @@ Java_site_valron_adab_MainActivity_startRtlsdrPlayback(
     return static_cast<jint>(dab_receive_service(&config, playbackCallback, &context));
 }
 
+extern "C" JNIEXPORT jint JNICALL
+Java_site_valron_adab_MainActivity_preflightRtlsdrFrequency(
+        JNIEnv* env,
+        jobject /* this */,
+        jobject callback,
+        jstring channelName,
+        jlong frequencyHz,
+        jint usbFileDescriptor) {
+    dab_scan_config_t config;
+    JniScanContext context{};
+    const char* channel = nullptr;
+    jint rc;
+
+    if (!initScanContext(env, callback, &context)) {
+        return -1;
+    }
+
+    if (channelName != nullptr) {
+        channel = env->GetStringUTFChars(channelName, nullptr);
+    }
+
+    g_cancelScan.store(false);
+    dab_scan_default_config(&config);
+    config.driver = "rtlsdr";
+    config.per_frequency_seconds = 5u;
+    config.agc_enabled = 1;
+    config.gain_db = 40;
+    config.use_real_device = 1;
+    config.android_usb_fd = usbFileDescriptor;
+    config.cancel = scanCancelRequested;
+
+    rc = static_cast<jint>(dab_scan_frequency_hz(&config,
+                                                 channel != nullptr ? channel : "selected",
+                                                 static_cast<uint64_t>(frequencyHz),
+                                                 scanCallback,
+                                                 &context));
+
+    if (channel != nullptr) {
+        env->ReleaseStringUTFChars(channelName, channel);
+    }
+    return rc;
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_site_valron_adab_MainActivity_stopPlayback(
         JNIEnv* /* env */,
