@@ -234,6 +234,7 @@ add_library(dab STATIC
     src/os/os_shared_lib.c
     src/os/os_thread.c
     src/os/os_time.c
+    src/receive/receive.c
     src/scan/scan.c
     src/simd/simd.c
     src/simd/simd_scalar.c

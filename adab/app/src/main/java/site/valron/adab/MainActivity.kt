@@ -7,10 +7,18 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
+import android.graphics.Color
 import android.graphics.Typeface
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbManager
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioManager
+import android.media.AudioTrack
+import android.media.MediaCodec
+import android.media.MediaCodecInfo
+import android.media.MediaFormat
 import android.os.Build
 import android.os.Bundle
 import android.view.View
@@ -19,6 +27,7 @@ import android.widget.TextView
 import site.valron.adab.databinding.ActivityMainBinding
 import org.json.JSONArray
 import org.json.JSONObject
+import java.nio.ByteBuffer
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -30,10 +39,16 @@ class MainActivity : AppCompatActivity() {
     private lateinit var usbManager: UsbManager
     private lateinit var preferences: SharedPreferences
     private val scannerExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private val playbackExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val scanning = AtomicBoolean(false)
+    private val playing = AtomicBoolean(false)
     private val services = linkedMapOf<String, ServiceRow>()
     private var pendingScanAfterPermission = false
+    private var pendingPlaybackService: ServiceRow? = null
     private var usbConnection: UsbDeviceConnection? = null
+    private var playbackUsbConnection: UsbDeviceConnection? = null
+    private var selectedService: ServiceRow? = null
+    private var playbackEngine: AacPlaybackEngine? = null
 
     private val usbPermissionReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -48,12 +63,20 @@ class MainActivity : AppCompatActivity() {
                 if (pendingScanAfterPermission) {
                     pendingScanAfterPermission = false
                     startNativeScan(device)
+                } else {
+                    pendingPlaybackService?.let { service ->
+                        pendingPlaybackService = null
+                        startNativePlayback(device, service)
+                    }
                 }
             } else {
                 pendingScanAfterPermission = false
+                pendingPlaybackService = null
                 binding.statusText.text = "RTL-SDR USB permission denied."
                 setScanningUi(false)
                 scanning.set(false)
+                setPlaybackUi(false)
+                playing.set(false)
             }
         }
     }
@@ -73,6 +96,13 @@ class MainActivity : AppCompatActivity() {
         fun onScanError(message: String)
     }
 
+    interface PlaybackCallback {
+        fun onPlaybackStatus(message: String)
+        fun onPlaybackFormat(sampleRate: Int, channels: Int, asc: ByteArray)
+        fun onPlaybackAudio(au: ByteArray)
+        fun onPlaybackError(message: String)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -84,6 +114,8 @@ class MainActivity : AppCompatActivity() {
         binding.statusText.text = stringFromJNI()
         binding.startScanButton.setOnClickListener { startScan() }
         binding.cancelScanButton.setOnClickListener { requestCancel() }
+        binding.playButton.setOnClickListener { startPlayback() }
+        binding.stopButton.setOnClickListener { requestStopPlayback() }
         registerUsbPermissionReceiver()
         loadPersistedServices()
         renderServices()
@@ -92,8 +124,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         requestCancel()
+        requestStopPlayback()
         unregisterReceiver(usbPermissionReceiver)
         scannerExecutor.shutdownNow()
+        playbackExecutor.shutdownNow()
         super.onDestroy()
     }
 
@@ -116,7 +150,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         services.clear()
+        selectedService = null
         renderServices()
+        setPlaybackUi(false)
         setScanningUi(true)
         binding.scanProgress.progress = 0
 
@@ -211,6 +247,118 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun startPlayback() {
+        val service = selectedService
+        if (service == null) {
+            binding.statusText.text = "Select a service first."
+            return
+        }
+        if (!playing.compareAndSet(false, true)) {
+            return
+        }
+        if (scanning.get()) {
+            playing.set(false)
+            binding.statusText.text = "Stop scanning before playback."
+            return
+        }
+        if (!isRtlsdrLibraryAvailable()) {
+            playing.set(false)
+            binding.statusText.text = "Missing librtlsdr.so. Add ABI builds under app/src/main/jniLibs."
+            return
+        }
+
+        val device = findRtlsdrDevice()
+        if (device == null) {
+            playing.set(false)
+            binding.statusText.text = "No RTL-SDR USB device found."
+            return
+        }
+
+        setPlaybackUi(true)
+        if (!usbManager.hasPermission(device)) {
+            pendingPlaybackService = service
+            binding.statusText.text = "Requesting RTL-SDR USB permission..."
+            usbManager.requestPermission(device, usbPermissionIntent())
+            return
+        }
+
+        startNativePlayback(device, service)
+    }
+
+    private fun startNativePlayback(device: UsbDevice, service: ServiceRow) {
+        val connection = usbManager.openDevice(device)
+        if (connection == null) {
+            playing.set(false)
+            setPlaybackUi(false)
+            binding.statusText.text = "Failed to open RTL-SDR USB device."
+            return
+        }
+
+        playbackUsbConnection = connection
+        binding.statusText.text = "Starting ${service.label.ifBlank { formatServiceId(service.serviceId) }}..."
+
+        playbackExecutor.execute {
+            val engine = AacPlaybackEngine()
+            playbackEngine = engine
+            val rc = startRtlsdrPlayback(
+                object : PlaybackCallback {
+                    override fun onPlaybackStatus(message: String) {
+                        runOnUiThread {
+                            binding.statusText.text = message
+                        }
+                    }
+
+                    override fun onPlaybackFormat(sampleRate: Int, channels: Int, asc: ByteArray) {
+                        runCatching {
+                            engine.configure(sampleRate, channels, asc)
+                        }.onFailure { error ->
+                            runOnUiThread {
+                                binding.statusText.text = "Audio decoder error: ${error.message}"
+                            }
+                            stopPlayback()
+                        }
+                    }
+
+                    override fun onPlaybackAudio(au: ByteArray) {
+                        runCatching {
+                            engine.queueAccessUnit(au)
+                        }.onFailure { error ->
+                            runOnUiThread {
+                                binding.statusText.text = "Audio output error: ${error.message}"
+                            }
+                            stopPlayback()
+                        }
+                    }
+
+                    override fun onPlaybackError(message: String) {
+                        runOnUiThread {
+                            binding.statusText.text = "Playback error: $message"
+                        }
+                    }
+                },
+                service.frequencyHz,
+                service.serviceId,
+                connection.fileDescriptor
+            )
+
+            engine.close()
+            playbackEngine = null
+            runOnUiThread {
+                playbackUsbConnection?.close()
+                playbackUsbConnection = null
+                playing.set(false)
+                setPlaybackUi(false)
+                if (rc != 0 && !binding.statusText.text.startsWith("Playback error") && !binding.statusText.text.startsWith("Audio")) {
+                    binding.statusText.text = if (rc == -2) {
+                        "Playback stopped."
+                    } else {
+                        "Playback failed with native status $rc."
+                    }
+                }
+            }
+        }
+    }
+
     private fun requestCancel() {
         if (pendingScanAfterPermission) {
             pendingScanAfterPermission = false
@@ -228,10 +376,35 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun requestStopPlayback() {
+        if (pendingPlaybackService != null) {
+            pendingPlaybackService = null
+            playing.set(false)
+            binding.statusText.text = "Playback cancelled."
+            setPlaybackUi(false)
+            return
+        }
+        if (playing.get()) {
+            stopPlayback()
+            playbackEngine?.close()
+            playbackUsbConnection?.close()
+            playbackUsbConnection = null
+            binding.statusText.text = "Stopping playback..."
+            binding.stopButton.isEnabled = false
+        }
+    }
+
     private fun setScanningUi(active: Boolean) {
         binding.startScanButton.isEnabled = !active
         binding.cancelScanButton.isEnabled = active
         binding.scanProgress.isIndeterminate = false
+        binding.playButton.isEnabled = !active && !playing.get() && selectedService != null
+    }
+
+    private fun setPlaybackUi(active: Boolean) {
+        binding.playButton.isEnabled = !active && !scanning.get() && selectedService != null
+        binding.stopButton.isEnabled = active
+        binding.startScanButton.isEnabled = !active && !scanning.get()
     }
 
     private fun refreshUsbStatus() {
@@ -278,12 +451,14 @@ class MainActivity : AppCompatActivity() {
         if (services.isEmpty()) {
             binding.servicesContainer.addView(binding.emptyResultsText)
             binding.emptyResultsText.visibility = View.VISIBLE
+            binding.playButton.isEnabled = false
             return
         }
 
         for (service in services.values) {
             binding.servicesContainer.addView(createServiceRow(service))
         }
+        binding.playButton.isEnabled = selectedService != null && !scanning.get() && !playing.get()
     }
 
     private fun loadPersistedServices() {
@@ -324,6 +499,14 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(0, 14.dp, 0, 14.dp)
             showDividers = LinearLayout.SHOW_DIVIDER_NONE
+            isClickable = true
+            setBackgroundColor(if (service == selectedService) 0x1F006D3B else Color.TRANSPARENT)
+            setOnClickListener {
+                selectedService = service
+                renderServices()
+                binding.statusText.text =
+                    "Selected ${service.label.ifBlank { formatServiceId(service.serviceId) }} on ${service.channel}."
+            }
         }
 
         val title = TextView(this).apply {
@@ -351,6 +534,125 @@ class MainActivity : AppCompatActivity() {
     private val Int.dp: Int
         get() = (this * resources.displayMetrics.density).toInt()
 
+    private class AacPlaybackEngine {
+        private var codec: MediaCodec? = null
+        private var audioTrack: AudioTrack? = null
+        private var sampleRate = 0
+        private var channels = 0
+        private var presentationTimeUs = 0L
+
+        fun configure(sampleRate: Int, channels: Int, asc: ByteArray) {
+            if (codec != null && this.sampleRate == sampleRate && this.channels == channels) {
+                return
+            }
+
+            close()
+            this.sampleRate = sampleRate
+            this.channels = channels.coerceIn(1, 2)
+            val format = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, sampleRate, this.channels).apply {
+                setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectHE)
+                setByteBuffer("csd-0", ByteBuffer.wrap(asc))
+            }
+            codec = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_AUDIO_AAC).apply {
+                configure(format, null, null, 0)
+                start()
+            }
+            presentationTimeUs = 0L
+        }
+
+        fun queueAccessUnit(au: ByteArray) {
+            val decoder = codec ?: return
+            val inputIndex = decoder.dequeueInputBuffer(10_000)
+            if (inputIndex >= 0) {
+                val input = decoder.getInputBuffer(inputIndex) ?: return
+                input.clear()
+                input.put(au)
+                decoder.queueInputBuffer(inputIndex, 0, au.size, presentationTimeUs, 0)
+                presentationTimeUs += 24_000L
+            }
+            drainDecoder(decoder)
+        }
+
+        private fun drainDecoder(decoder: MediaCodec) {
+            val info = MediaCodec.BufferInfo()
+            while (true) {
+                when (val outputIndex = decoder.dequeueOutputBuffer(info, 0)) {
+                    MediaCodec.INFO_TRY_AGAIN_LATER -> return
+                    MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> configureAudioTrack(decoder.outputFormat)
+                    else -> {
+                        if (outputIndex >= 0) {
+                            val output = decoder.getOutputBuffer(outputIndex)
+                            if (output != null && info.size > 0) {
+                                output.position(info.offset)
+                                output.limit(info.offset + info.size)
+                                val pcm = ByteArray(info.size)
+                                output.get(pcm)
+                                ensureAudioTrack(decoder.outputFormat).write(pcm, 0, pcm.size)
+                            }
+                            decoder.releaseOutputBuffer(outputIndex, false)
+                        }
+                    }
+                }
+            }
+        }
+
+        private fun configureAudioTrack(format: MediaFormat) {
+            audioTrack?.release()
+            audioTrack = null
+            sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+            channels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT).coerceIn(1, 2)
+            ensureAudioTrack(format)
+        }
+
+        private fun ensureAudioTrack(format: MediaFormat): AudioTrack {
+            audioTrack?.let { return it }
+            val rate = if (format.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
+                format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+            } else {
+                sampleRate
+            }
+            val count = if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
+                format.getInteger(MediaFormat.KEY_CHANNEL_COUNT).coerceIn(1, 2)
+            } else {
+                channels
+            }
+            val channelMask = if (count == 1) AudioFormat.CHANNEL_OUT_MONO else AudioFormat.CHANNEL_OUT_STEREO
+            val minBuffer = AudioTrack.getMinBufferSize(rate, channelMask, AudioFormat.ENCODING_PCM_16BIT)
+            val track = AudioTrack.Builder()
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build()
+                )
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setSampleRate(rate)
+                        .setChannelMask(channelMask)
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .build()
+                )
+                .setTransferMode(AudioTrack.MODE_STREAM)
+                .setBufferSizeInBytes((minBuffer * 4).coerceAtLeast(rate * count * 2 / 2))
+                .build()
+            track.play()
+            audioTrack = track
+            return track
+        }
+
+        fun close() {
+            runCatching {
+                codec?.stop()
+            }
+            codec?.release()
+            codec = null
+            audioTrack?.pause()
+            audioTrack?.flush()
+            audioTrack?.release()
+            audioTrack = null
+        }
+    }
+
     /**
      * A native method that is implemented by the 'adab' native library,
      * which is packaged with this application.
@@ -358,6 +660,8 @@ class MainActivity : AppCompatActivity() {
     external fun stringFromJNI(): String
     external fun startRtlsdrScan(callback: ScanCallback, perFrequencySeconds: Int, usbFileDescriptor: Int): Int
     external fun cancelScan()
+    external fun startRtlsdrPlayback(callback: PlaybackCallback, frequencyHz: Long, serviceId: Int, usbFileDescriptor: Int): Int
+    external fun stopPlayback()
     external fun isRtlsdrLibraryAvailable(): Boolean
 
     companion object {

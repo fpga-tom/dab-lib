@@ -4,11 +4,13 @@
 #include <dlfcn.h>
 #include <string>
 
+#include "dab/receive.h"
 #include "dab/scan.h"
 
 namespace {
 
 std::atomic_bool g_cancelScan{false};
+std::atomic_bool g_cancelPlayback{false};
 
 struct JniScanContext {
     JNIEnv* env;
@@ -20,12 +22,25 @@ struct JniScanContext {
     jmethodID onError;
 };
 
+struct JniPlaybackContext {
+    JNIEnv* env;
+    jobject callback;
+    jmethodID onStatus;
+    jmethodID onFormat;
+    jmethodID onAudio;
+    jmethodID onError;
+};
+
 jstring newString(JNIEnv* env, const char* value) {
     return env->NewStringUTF(value != nullptr ? value : "");
 }
 
 int scanCancelRequested(void*) {
     return g_cancelScan.load() ? 1 : 0;
+}
+
+int playbackCancelRequested(void*) {
+    return g_cancelPlayback.load() ? 1 : 0;
 }
 
 int scanCallback(const dab_scan_event_t* event, void* user) {
@@ -126,6 +141,93 @@ bool initScanContext(JNIEnv* env, jobject callback, JniScanContext* context) {
            context->onError != nullptr;
 }
 
+jbyteArray newByteArray(JNIEnv* env, const uint8_t* data, uint32_t length) {
+    jbyteArray array = env->NewByteArray(static_cast<jsize>(length));
+    if (array == nullptr || data == nullptr || length == 0u) {
+        return array;
+    }
+
+    env->SetByteArrayRegion(array, 0, static_cast<jsize>(length),
+                            reinterpret_cast<const jbyte*>(data));
+    return array;
+}
+
+int playbackCallback(const dab_receive_event_t* event, void* user) {
+    auto* context = static_cast<JniPlaybackContext*>(user);
+    JNIEnv* env;
+
+    if (event == nullptr || context == nullptr || context->env == nullptr || context->callback == nullptr) {
+        return -1;
+    }
+
+    env = context->env;
+    switch (event->type) {
+        case DAB_RECEIVE_EVENT_STATUS: {
+            jstring message = newString(env, event->message);
+            env->CallVoidMethod(context->callback, context->onStatus, message);
+            env->DeleteLocalRef(message);
+            break;
+        }
+        case DAB_RECEIVE_EVENT_AUDIO_FORMAT: {
+            jbyteArray asc = newByteArray(env, event->asc, event->asc_length);
+            env->CallVoidMethod(context->callback,
+                                context->onFormat,
+                                static_cast<jint>(event->sample_rate),
+                                static_cast<jint>(event->channels),
+                                asc);
+            env->DeleteLocalRef(asc);
+            break;
+        }
+        case DAB_RECEIVE_EVENT_AUDIO_AU: {
+            jbyteArray au = newByteArray(env, event->audio_data, event->audio_length);
+            env->CallVoidMethod(context->callback, context->onAudio, au);
+            env->DeleteLocalRef(au);
+            break;
+        }
+        case DAB_RECEIVE_EVENT_ERROR: {
+            jstring message = newString(env, event->message);
+            env->CallVoidMethod(context->callback, context->onError, message);
+            env->DeleteLocalRef(message);
+            break;
+        }
+        default:
+            break;
+    }
+
+    if (env->ExceptionCheck()) {
+        __android_log_write(ANDROID_LOG_ERROR, "adab", "playback callback threw an exception");
+        return -1;
+    }
+
+    return playbackCancelRequested(nullptr);
+}
+
+bool initPlaybackContext(JNIEnv* env, jobject callback, JniPlaybackContext* context) {
+    jclass callbackClass;
+
+    if (env == nullptr || callback == nullptr || context == nullptr) {
+        return false;
+    }
+
+    callbackClass = env->GetObjectClass(callback);
+    if (callbackClass == nullptr) {
+        return false;
+    }
+
+    context->env = env;
+    context->callback = callback;
+    context->onStatus = env->GetMethodID(callbackClass, "onPlaybackStatus", "(Ljava/lang/String;)V");
+    context->onFormat = env->GetMethodID(callbackClass, "onPlaybackFormat", "(II[B)V");
+    context->onAudio = env->GetMethodID(callbackClass, "onPlaybackAudio", "([B)V");
+    context->onError = env->GetMethodID(callbackClass, "onPlaybackError", "(Ljava/lang/String;)V");
+    env->DeleteLocalRef(callbackClass);
+
+    return context->onStatus != nullptr &&
+           context->onFormat != nullptr &&
+           context->onAudio != nullptr &&
+           context->onError != nullptr;
+}
+
 } // namespace
 
 extern "C" JNIEXPORT jstring JNICALL
@@ -168,6 +270,42 @@ Java_site_valron_adab_MainActivity_cancelScan(
         JNIEnv* /* env */,
         jobject /* this */) {
     g_cancelScan.store(true);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_site_valron_adab_MainActivity_startRtlsdrPlayback(
+        JNIEnv* env,
+        jobject /* this */,
+        jobject callback,
+        jlong frequencyHz,
+        jint serviceId,
+        jint usbFileDescriptor) {
+    dab_receive_config_t config;
+    JniPlaybackContext context{};
+
+    if (!initPlaybackContext(env, callback, &context)) {
+        return -1;
+    }
+
+    g_cancelPlayback.store(false);
+    dab_receive_default_config(&config);
+    config.driver = "rtlsdr";
+    config.frequency_hz = static_cast<uint64_t>(frequencyHz);
+    config.service_id = static_cast<uint32_t>(serviceId);
+    config.agc_enabled = 1;
+    config.gain_db = 40;
+    config.use_real_device = 1;
+    config.android_usb_fd = usbFileDescriptor;
+    config.cancel = playbackCancelRequested;
+
+    return static_cast<jint>(dab_receive_service(&config, playbackCallback, &context));
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_site_valron_adab_MainActivity_stopPlayback(
+        JNIEnv* /* env */,
+        jobject /* this */) {
+    g_cancelPlayback.store(true);
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
