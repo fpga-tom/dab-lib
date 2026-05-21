@@ -249,7 +249,7 @@ class MainActivity : AppCompatActivity() {
             )
 
             runOnUiThread {
-                usbConnection?.close()
+                connection.close()
                 usbConnection = null
                 scanning.set(false)
                 setScanningUi(false)
@@ -480,8 +480,6 @@ class MainActivity : AppCompatActivity() {
         }
         if (scanning.get()) {
             cancelScan()
-            usbConnection?.close()
-            usbConnection = null
             binding.statusText.text = "Cancelling scan..."
             binding.cancelScanButton.isEnabled = false
         }
