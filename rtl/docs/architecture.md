@@ -277,6 +277,34 @@ OFDM stages can be verified before the full sync loop is complete.
 Applies an NCO-driven complex rotation before FFT. It should support bypass and
 externally supplied phase increment for vector-driven tests.
 
+### `symbol_buffer`
+
+Reads one FFT-sized contiguous symbol window from `sample_history` after sync
+selects a symbol start sample. It does not allocate a second full-symbol RAM;
+the block is a request/stream adapter that preserves symbol metadata for the
+FFT-facing path.
+
+Source:
+
+```text
+rtl/src/ofdm/symbol_buffer.sv
+```
+
+The first implementation requests exactly 2048 samples from history and streams
+them with:
+
+```text
+out_symbol_start_sample
+out_sample_index
+out_sample_offset = 0..2047
+out_symbol_done on sample 2047
+```
+
+Stale or unavailable history, unexpected sample indices, bad first/last markers,
+or truncated windows produce a single `out_error` beat with
+`out_symbol_done = 1`. If the history stream has already started, the block
+drains the remaining response before accepting another symbol request.
+
 ### `fft_2048`
 
 Wraps a 2048-point complex FFT. Keep the wrapper generic so simulation can use a
@@ -560,8 +588,9 @@ from the C receiver.
 13. `iq_ingress`
 14. `sample_history`
 15. `cp_metric_engine`
-16. `cfo_corrector`
-17. `prs_acquire_track`
+16. `symbol_buffer`
+17. `cfo_corrector`
+18. `prs_acquire_track`
 
 This order lets deterministic stages pass golden-vector tests before the harder
 sync loop is introduced.
@@ -603,6 +632,26 @@ Verilator test:
 
 ```text
 rtl/scripts/run_sample_history_verilator.sh
+```
+
+### `symbol_buffer`
+
+Source:
+
+```text
+rtl/src/ofdm/symbol_buffer.sv
+```
+
+The implemented symbol buffer accepts an absolute FFT symbol start sample,
+requests a contiguous window from `sample_history`, and streams raw I/Q samples
+with symbol start, sample index, offset, done, and error metadata. It is intended
+to feed the later CFO-correction/FFT input path without duplicating the history
+RAM.
+
+Verilator test:
+
+```text
+rtl/scripts/run_symbol_buffer_verilator.sh
 ```
 
 ### `tframe_assembler`

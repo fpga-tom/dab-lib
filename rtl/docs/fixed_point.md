@@ -25,6 +25,7 @@ Qm.n = signed fixed point with m integer bits including sign and n fractional bi
 | --- | --- | --- |
 | IQ ingress I/Q | signed 16-bit integer | Pass-through from SDR adapter; sample index increments on accepted beats |
 | Sample history I/Q RAM | signed 16-bit integer | Circular RAM keyed by unsigned 64-bit sample index |
+| Symbol buffer I/Q | signed 16-bit integer | Streams raw sample-history windows by absolute symbol start sample |
 | Power `I*I + Q*Q` | unsigned 34-bit | 16-bit squared terms summed |
 | Fast/slow average power | unsigned 40-bit accumulator | Leave headroom for long windows |
 | Null power ratio | unsigned Q2.22 | Threshold decisions compare by cross-multiply |

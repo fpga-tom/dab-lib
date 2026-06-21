@@ -112,6 +112,12 @@ Run the implemented `sample_history` Verilator test with:
 rtl/scripts/run_sample_history_verilator.sh
 ```
 
+Run the implemented `symbol_buffer` Verilator test with:
+
+```sh
+rtl/scripts/run_symbol_buffer_verilator.sh
+```
+
 Run the implemented `tframe_assembler` Verilator test with:
 
 ```sh
