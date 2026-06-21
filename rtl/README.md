@@ -105,3 +105,9 @@ Run the implemented `tframe_assembler` Verilator test with:
 ```sh
 rtl/scripts/run_tframe_assembler_verilator.sh
 ```
+
+Run the implemented `frequency_deinterleaver` Verilator test with:
+
+```sh
+rtl/scripts/run_frequency_deinterleaver_verilator.sh
+```

@@ -133,6 +133,20 @@ are only valid once a previous data symbol exists.
 Implements the Mode I carrier permutation from `dab_ofdm_build_deinterleave_map`
 in the C code. Output count is 1536 complex data carriers.
 
+Source:
+
+```text
+rtl/src/ofdm/frequency_deinterleaver.sv
+```
+
+The first implementation is a single-symbol buffered permutation stage. It
+loads all 1537 active carriers in active-carrier order, including the DC/null
+carrier, then emits 1536 complex carriers in C-compatible deinterleaved order.
+The DC/null carrier is excluded by the generated map.
+
+The output stream includes both the deinterleaved carrier index and the source
+active-carrier index to simplify golden-vector debugging.
+
 ### `qpsk_softbits`
 
 Converts deinterleaved differential QPSK carriers into signed soft bits:
@@ -211,4 +225,12 @@ Verilator test:
 
 ```text
 rtl/scripts/run_tframe_assembler_verilator.sh
+```
+
+### `frequency_deinterleaver`
+
+Verilator test:
+
+```text
+rtl/scripts/run_frequency_deinterleaver_verilator.sh
 ```
