@@ -130,6 +130,20 @@ Run the integrated pipeline-top smoke test with:
 rtl/scripts/run_dab_pipeline_top_verilator.sh
 ```
 
+Run the file-driven pipeline testbench with the C++ FFT shim and data-symbol
+scheduler with:
+
+```sh
+DAB_TB_IQ_PATH=/tmp/dab_iq_f32.bin \
+DAB_TB_SOFTBITS_PATH=/tmp/dab_softbits_i8.bin \
+rtl/scripts/run_dab_pipeline_file_verilator.sh
+```
+
+The input file is interleaved `float32` IQ (`I0,Q0,I1,Q1,...`) as written by
+`DAB_SYNC_PROBE_DUMP_REF_SAMPLES_PATH`. The output file is raw signed `int8`
+softbits in `tframe_assembler` order: all FIC softbits first, then MSC
+softbits.
+
 Run the implemented `tframe_assembler` Verilator test with:
 
 ```sh

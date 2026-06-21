@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+BUILD_DIR="${ROOT_DIR}/build/rtl/dab_pipeline_file"
+HISTORY_DEPTH="${DAB_TB_HISTORY_DEPTH:-262144}"
+NULL_FAST_WINDOW_SAMPLES="${DAB_TB_NULL_FAST_WINDOW_SAMPLES:-39}"
+NULL_SLOW_WINDOW_SAMPLES="${DAB_TB_NULL_SLOW_WINDOW_SAMPLES:-1999}"
+NULL_MIN_SAMPLES="${DAB_TB_NULL_MIN_SAMPLES:-1800}"
+
+mkdir -p "${BUILD_DIR}"
+
+verilator \
+  -Wall \
+  -CFLAGS "-std=c++17" \
+  -GSAMPLE_HISTORY_DEPTH="${HISTORY_DEPTH}" \
+  -GNULL_FAST_WINDOW_SAMPLES="${NULL_FAST_WINDOW_SAMPLES}" \
+  -GNULL_SLOW_WINDOW_SAMPLES="${NULL_SLOW_WINDOW_SAMPLES}" \
+  -GNULL_MIN_SAMPLES="${NULL_MIN_SAMPLES}" \
+  --cc "${ROOT_DIR}/rtl/src/common/dab_ofdm_pkg.sv" \
+       "${ROOT_DIR}/rtl/src/common/dab_tframe_pkg.sv" \
+       "${ROOT_DIR}/rtl/src/frontend/iq_ingress.sv" \
+       "${ROOT_DIR}/rtl/src/frontend/sample_history.sv" \
+       "${ROOT_DIR}/rtl/src/sync/null_detector.sv" \
+       "${ROOT_DIR}/rtl/src/sync/prs_score_search.sv" \
+       "${ROOT_DIR}/rtl/src/sync/cp_metric_engine.sv" \
+       "${ROOT_DIR}/rtl/src/sync/prs_pilot_refiner.sv" \
+       "${ROOT_DIR}/rtl/src/sync/prs_acquire_track.sv" \
+       "${ROOT_DIR}/rtl/src/ofdm/symbol_buffer.sv" \
+       "${ROOT_DIR}/rtl/src/ofdm/cfo_corrector.sv" \
+       "${ROOT_DIR}/rtl/src/ofdm/fft_wrapper.sv" \
+       "${ROOT_DIR}/rtl/src/ofdm/carrier_mapper.sv" \
+       "${ROOT_DIR}/rtl/src/ofdm/prs_channel_estimator.sv" \
+       "${ROOT_DIR}/rtl/src/ofdm/equalizer.sv" \
+       "${ROOT_DIR}/rtl/src/ofdm/diff_demod.sv" \
+       "${ROOT_DIR}/rtl/src/ofdm/frequency_deinterleaver.sv" \
+       "${ROOT_DIR}/rtl/src/ofdm/qpsk_softbits.sv" \
+       "${ROOT_DIR}/rtl/src/ofdm/tframe_assembler.sv" \
+       "${ROOT_DIR}/rtl/src/top/dab_pipeline_top.sv" \
+  --exe "${ROOT_DIR}/rtl/sim/tb/tb_dab_pipeline_file.cpp" \
+  --top-module dab_pipeline_top \
+  -Mdir "${BUILD_DIR}" \
+  --build
+
+"${BUILD_DIR}/Vdab_pipeline_top"

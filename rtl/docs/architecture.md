@@ -51,6 +51,11 @@ PRS symbols through `prs_acquire_track`. The top includes a softbit-pair adapter
 that stores QPSK `soft_b` values so `tframe_assembler` still receives the
 C-compatible `soft_a[0..1535]` then `soft_b[0..1535]` order.
 
+The top also gates PRS search/scoring until `sample_history` contains the full
+requested search range. This is required for live-style file replay: null
+detection can produce a candidate before the future PRS FFT samples have arrived
+in the history buffer.
+
 ### `iq_ingress`
 
 Accepts signed I/Q samples, assigns a monotonically increasing sample index, and
@@ -678,6 +683,13 @@ Verilator test:
 
 ```text
 rtl/scripts/run_dab_pipeline_top_verilator.sh
+```
+
+File replay Verilator test with a C++ FFT shim and external data-symbol
+scheduler:
+
+```text
+rtl/scripts/run_dab_pipeline_file_verilator.sh
 ```
 
 ### `iq_ingress`

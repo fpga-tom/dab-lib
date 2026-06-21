@@ -148,6 +148,9 @@ module dab_pipeline_top
 
   logic search_valid;
   logic search_ready;
+  logic search_engine_valid;
+  logic search_engine_ready;
+  logic search_history_ready;
   logic [63:0] search_null_start_sample;
   logic [31:0] search_null_length;
   /* verilator lint_off UNUSEDSIGNAL */
@@ -370,6 +373,13 @@ module dab_pipeline_top
   assign sample_fork_valid = ingress_out_valid && sample_fork_ready;
   assign ingress_out_ready = sample_fork_ready;
   assign null_out_ready = track_null_ready;
+
+  assign search_history_ready =
+      history_valid &&
+      search_search_start_sample >= history_oldest_sample_index &&
+      search_required_end_sample <= history_next_sample_index;
+  assign search_engine_valid = search_valid && search_history_ready;
+  assign search_ready = search_engine_ready && search_history_ready;
 
   assign history_read_req_valid =
       read_owner_q == READ_OWNER_NONE && (cp_hist_req_valid || sym_hist_req_valid);
@@ -606,8 +616,8 @@ module dab_pipeline_top
       .clk(clk),
       .rst_n(rst_n),
       .clear(clear),
-      .in_valid(search_valid),
-      .in_ready(search_ready),
+      .in_valid(search_engine_valid),
+      .in_ready(search_engine_ready),
       .in_null_start_sample(search_null_start_sample),
       .in_null_length(search_null_length),
       .in_prs_symbol_start_sample(search_prs_symbol_start_sample),
