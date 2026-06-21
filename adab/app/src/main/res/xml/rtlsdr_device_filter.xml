@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Generic RTL2832U and common RTL-SDR dongles. -->
+    <usb-device vendor-id="3034" product-id="10290" />
+    <usb-device vendor-id="3034" product-id="10291" />
+    <usb-device vendor-id="3034" product-id="10296" />
+    <usb-device vendor-id="3034" product-id="10297" />
+    <usb-device vendor-id="3034" product-id="10298" />
+    <usb-device vendor-id="3034" product-id="10299" />
+    <usb-device vendor-id="3034" product-id="10300" />
+    <usb-device vendor-id="3034" product-id="10301" />
+    <usb-device vendor-id="3034" product-id="10302" />
+    <usb-device vendor-id="3034" product-id="10303" />
+    <usb-device vendor-id="3034" product-id="10304" />
+    <usb-device vendor-id="3034" product-id="10305" />
+    <usb-device vendor-id="3034" product-id="10306" />
+    <usb-device vendor-id="3034" product-id="10307" />
+    <usb-device vendor-id="3034" product-id="10308" />
+    <usb-device vendor-id="3034" product-id="10309" />
+    <usb-device vendor-id="3034" product-id="10310" />
+    <usb-device vendor-id="3034" product-id="10311" />
+    <usb-device vendor-id="3034" product-id="10312" />
+    <usb-device vendor-id="3034" product-id="10313" />
+</resources>
