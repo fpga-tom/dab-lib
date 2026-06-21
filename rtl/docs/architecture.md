@@ -142,10 +142,19 @@ rtl/src/ofdm/frequency_deinterleaver.sv
 The first implementation is a single-symbol buffered permutation stage. It
 loads all 1537 active carriers in active-carrier order, including the DC/null
 carrier, then emits 1536 complex carriers in C-compatible deinterleaved order.
-The DC/null carrier is excluded by the generated map.
+The DC/null carrier is excluded by the generated sequence.
 
-The output stream includes both the deinterleaved carrier index and the source
-active-carrier index to simplify golden-vector debugging.
+The deinterleaver does not store a 1536-entry map ROM. It generates source
+addresses on the fly with the DAB Mode I recurrence:
+
+```text
+p_next = (13 * p + 511) mod 2048
+```
+
+Only candidates in `256..1792` except `1024` are emitted, with source active
+carrier index `p - 256`. The output stream includes both the deinterleaved
+carrier index and the source active-carrier index to simplify golden-vector
+debugging.
 
 ### `qpsk_softbits`
 
