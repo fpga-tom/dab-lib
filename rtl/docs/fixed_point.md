@@ -28,6 +28,9 @@ Qm.n = signed fixed point with m integer bits including sign and n fractional bi
 | Null power ratio | unsigned Q2.22 | Threshold decisions compare by cross-multiply |
 | PRS timing score | unsigned Q2.30 | Search controller compares metric responses |
 | PRS coarse CFO | signed integer Hz initially | Can become fractional at the CP metric boundary |
+| PRS pilot score | unsigned Q2.30 | Differential pilot correlation score from `prs_pilot_refiner` |
+| PRS pilot carrier offset | signed 4-bit integer bins | First search range is `-4..+4` bins |
+| PRS fine timing | signed Q12.12 samples | Small-angle pilot phase estimate; default range is much wider than the expected +/-32 sample correction limit |
 | NCO phase | unsigned 32-bit phase accumulator | Full cycle wraps at 2^32 |
 | NCO sin/cos | Q1.17 or Q1.15 | Choose by DSP multiplier budget |
 | CFO-corrected I/Q | signed 18-bit | Keep 1-2 guard bits after mixer |

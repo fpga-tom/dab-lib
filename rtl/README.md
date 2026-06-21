@@ -160,6 +160,12 @@ Run the implemented `prs_channel_estimator` Verilator test with:
 rtl/scripts/run_prs_channel_estimator_verilator.sh
 ```
 
+Run the implemented `prs_pilot_refiner` Verilator test with:
+
+```sh
+rtl/scripts/run_prs_pilot_refiner_verilator.sh
+```
+
 Run the implemented `qpsk_softbits` Verilator test with:
 
 ```sh

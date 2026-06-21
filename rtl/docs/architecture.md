@@ -13,6 +13,7 @@ SDR I/Q stream
   -> symbol_buffer
   -> fft_2048
   -> active_carrier_mapper
+  -> prs_pilot_refiner
   -> prs_channel_estimator
   -> equalizer
   -> diff_demod
@@ -278,6 +279,58 @@ C table generator, not from a 1536-entry reference ROM. The first coefficient
 calculator uses an exact signed divider for correctness and vector bring-up;
 replace that with a reciprocal/divider pipeline before optimizing for timing.
 
+### `prs_pilot_refiner`
+
+Scores the PRS FFT active-carrier stream against the Mode I PRS pilots after
+the coarse CP-window search has selected an FFT start.
+
+Source:
+
+```text
+rtl/src/sync/prs_pilot_refiner.sv
+```
+
+The block mirrors the differential PRS pilot scoring used by
+`dab_prs_score_reference_bins_diff_f32`. It evaluates carrier-offset hypotheses
+`-4..+4` while streaming the active carriers in C order:
+
+```text
+active[0..767]    -> fft[1280..2047]
+active[768]       -> fft[0] DC/null
+active[769..1536] -> fft[1..768]
+```
+
+For each offset hypothesis it keeps only the previous valid received/reference
+carrier and accumulates adjacent-bin differential correlation:
+
+```text
+sd = rx_previous * conj(rx_current)
+pd = prs_previous * conj(prs_current)
+corr += sd * conj(pd)
+```
+
+The PRS pilot phases are generated from the compact 4x32 phase pattern, so this
+stage does not store a 1536-entry pilot ROM. After `in_symbol_done`, it chooses
+the highest normalized correlation score and emits:
+
+```text
+out_score
+out_carrier_offset_bins
+out_fine_timing_error_samples
+out_used_pairs
+```
+
+`out_fine_timing_error_samples` is signed Q12.12 samples. The first hardware
+conversion uses the small-angle form:
+
+```text
+timing ~= imag(corr) / real(corr) * 2048 / (2*pi)
+```
+
+This matches the intended CP-refined tracking range. A later implementation can
+replace that divider with an atan2/CORDIC path if wider unlocked-range phase
+reporting is needed.
+
 ### `equalizer`
 
 Applies the stored PRS correction coefficients to each data symbol carrier.
@@ -408,11 +461,12 @@ from the C receiver.
 6. `equalizer`
 7. `fft_2048` wrapper
 8. `prs_channel_estimator`
-9. `null_detector`
-10. `prs_acquire`
-11. `prs_score_search`
-12. `cfo_corrector`
-13. `prs_acquire_track`
+9. `prs_pilot_refiner`
+10. `null_detector`
+11. `prs_acquire`
+12. `prs_score_search`
+13. `cfo_corrector`
+14. `prs_acquire_track`
 
 This order lets deterministic stages pass golden-vector tests before the harder
 sync loop is introduced.
@@ -514,6 +568,14 @@ Verilator test:
 
 ```text
 rtl/scripts/run_prs_channel_estimator_verilator.sh
+```
+
+### `prs_pilot_refiner`
+
+Verilator test:
+
+```text
+rtl/scripts/run_prs_pilot_refiner_verilator.sh
 ```
 
 ### `fft_wrapper`
