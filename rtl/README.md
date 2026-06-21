@@ -124,6 +124,12 @@ Run the implemented `cfo_corrector` Verilator test with:
 rtl/scripts/run_cfo_corrector_verilator.sh
 ```
 
+Run the integrated pipeline-top smoke test with:
+
+```sh
+rtl/scripts/run_dab_pipeline_top_verilator.sh
+```
+
 Run the implemented `tframe_assembler` Verilator test with:
 
 ```sh

@@ -25,6 +25,32 @@ SDR I/Q stream
 
 ## Module Responsibilities
 
+### `dab_pipeline_top`
+
+Wires the current RTL receiver blocks into one compileable integration boundary.
+The top owns:
+
+```text
+iq_ingress -> sample_history/null_detector
+sample_history read arbitration for CP metrics and symbol extraction
+PRS acquire/track control
+symbol_buffer -> cfo_corrector -> fft_2048 -> active_carrier_mapper
+PRS pilot refinement and channel coefficient update
+data equalize -> diff_demod -> deinterleave -> softbits -> tframe_assembler
+```
+
+Source:
+
+```text
+rtl/src/top/dab_pipeline_top.sv
+```
+
+The FFT math remains an external core interface. Data-symbol scheduling is also
+external for now through `data_symbol_cmd_*`; the sync path internally schedules
+PRS symbols through `prs_acquire_track`. The top includes a softbit-pair adapter
+that stores QPSK `soft_b` values so `tframe_assembler` still receives the
+C-compatible `soft_a[0..1535]` then `soft_b[0..1535]` order.
+
 ### `iq_ingress`
 
 Accepts signed I/Q samples, assigns a monotonically increasing sample index, and
@@ -633,6 +659,26 @@ This order lets deterministic stages pass golden-vector tests before the harder
 sync loop is introduced.
 
 ## Implemented Blocks
+
+### `dab_pipeline_top`
+
+Source:
+
+```text
+rtl/src/top/dab_pipeline_top.sv
+```
+
+The implemented top is a first integration boundary for Verilator and later FPGA
+top-level work. It uses a single-read history arbiter, keeps the FFT core
+external, accepts external data-symbol start commands, and routes PRS symbols
+through pilot refinement/channel estimation while data symbols continue into
+the transmission-frame assembler.
+
+Verilator test:
+
+```text
+rtl/scripts/run_dab_pipeline_top_verilator.sh
+```
 
 ### `iq_ingress`
 
