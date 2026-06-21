@@ -118,6 +118,12 @@ Run the implemented `symbol_buffer` Verilator test with:
 rtl/scripts/run_symbol_buffer_verilator.sh
 ```
 
+Run the implemented `cfo_corrector` Verilator test with:
+
+```sh
+rtl/scripts/run_cfo_corrector_verilator.sh
+```
+
 Run the implemented `tframe_assembler` Verilator test with:
 
 ```sh

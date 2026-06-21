@@ -36,9 +36,9 @@ Qm.n = signed fixed point with m integer bits including sign and n fractional bi
 | PRS pilot score | unsigned Q2.30 | Differential pilot correlation score from `prs_pilot_refiner` |
 | PRS pilot carrier offset | signed 4-bit integer bins | First search range is `-4..+4` bins |
 | PRS fine timing | signed Q12.12 samples | Small-angle pilot phase estimate; default range is much wider than the expected +/-32 sample correction limit |
-| NCO phase | unsigned 32-bit phase accumulator | Full cycle wraps at 2^32 |
-| NCO sin/cos | Q1.17 or Q1.15 | Choose by DSP multiplier budget |
-| CFO-corrected I/Q | signed 18-bit | Keep 1-2 guard bits after mixer |
+| NCO phase | unsigned 32-bit phase accumulator | Full cycle wraps at 2^32; `cfo_corrector` accepts a two's-complement phase increment |
+| NCO sin/cos | CORDIC internal | First RTL implementation uses a 16-stage pipelined CORDIC instead of a sine/cosine ROM |
+| CFO-corrected I/Q | signed 18-bit | `cfo_corrector` saturates after CORDIC rotation |
 | FFT input | signed 18-bit complex | Wrapper forwards CFO-corrected samples to FFT IP |
 | FFT internal | vendor scale schedule or block floating | Export scale exponent |
 | FFT output | signed 24-bit complex | Initial generic target |

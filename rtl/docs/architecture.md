@@ -9,8 +9,8 @@ SDR I/Q stream
   -> sample_history
   -> null_detector
   -> prs_acquire_track
-  -> cfo_corrector
   -> symbol_buffer
+  -> cfo_corrector
   -> fft_2048
   -> active_carrier_mapper
   -> prs_pilot_refiner
@@ -272,11 +272,6 @@ locked
 The first version may accept timing/CFO from testbench control registers so that
 OFDM stages can be verified before the full sync loop is complete.
 
-### `cfo_corrector`
-
-Applies an NCO-driven complex rotation before FFT. It should support bypass and
-externally supplied phase increment for vector-driven tests.
-
 ### `symbol_buffer`
 
 Reads one FFT-sized contiguous symbol window from `sample_history` after sync
@@ -304,6 +299,27 @@ Stale or unavailable history, unexpected sample indices, bad first/last markers,
 or truncated windows produce a single `out_error` beat with
 `out_symbol_done = 1`. If the history stream has already started, the block
 drains the remaining response before accepting another symbol request.
+
+### `cfo_corrector`
+
+Applies an NCO-driven complex rotation before FFT. It should support bypass and
+externally supplied phase increment for vector-driven tests.
+
+Source:
+
+```text
+rtl/src/ofdm/cfo_corrector.sv
+```
+
+The first implementation is a streaming CORDIC rotator. It consumes raw 16-bit
+symbol samples from `symbol_buffer`, uses a 32-bit phase accumulator with
+externally loaded seed and phase increment, and emits corrected 18-bit I/Q plus
+the original sample index, symbol start, sample offset, done, error, and phase
+metadata.
+
+The `cfg_bypass` path preserves raw I/Q while still exercising the same
+ready/valid and metadata latency. Error beats are passed through with zero I/Q
+and do not advance the NCO phase.
 
 ### `fft_2048`
 
@@ -652,6 +668,25 @@ Verilator test:
 
 ```text
 rtl/scripts/run_symbol_buffer_verilator.sh
+```
+
+### `cfo_corrector`
+
+Source:
+
+```text
+rtl/src/ofdm/cfo_corrector.sv
+```
+
+The implemented corrector applies an NCO/CORDIC complex rotation to each valid
+symbol sample, supports deterministic phase seed/load and per-sample phase
+increment registers, and preserves the symbol metadata needed by the FFT input
+path. Bypass mode forwards I/Q unchanged through the same pipeline latency.
+
+Verilator test:
+
+```text
+rtl/scripts/run_cfo_corrector_verilator.sh
 ```
 
 ### `tframe_assembler`
