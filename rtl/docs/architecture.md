@@ -177,3 +177,38 @@ from the C receiver.
 
 This order lets deterministic stages pass golden-vector tests before the harder
 sync loop is introduced.
+
+## Implemented Blocks
+
+### `tframe_assembler`
+
+Source:
+
+```text
+rtl/src/ofdm/tframe_assembler.sv
+```
+
+The implemented assembler accepts one signed 8-bit softbit per cycle using a
+ready/valid interface. It expects the upstream softbit generator to provide
+exactly 3072 softbits per OFDM data symbol in the C-compatible order:
+
+```text
+soft_a[0..1535], then soft_b[0..1535]
+```
+
+It emits the same softbit value with routing metadata:
+
+```text
+out_region = FIC for symbols 0..2, MSC for symbols 3..74
+out_addr   = byte address inside the selected FIC or MSC frame buffer
+```
+
+The final byte of symbol 74 asserts `out_frame_done`. The downstream integration
+can use this stream directly as a DMA/write-port source for FIC and MSC softbit
+memories.
+
+Verilator test:
+
+```text
+rtl/scripts/run_tframe_assembler_verilator.sh
+```

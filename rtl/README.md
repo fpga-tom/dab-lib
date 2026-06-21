@@ -97,3 +97,11 @@ handoff points and compare RTL output stage by stage:
 
 The first acceptance milestone is bit-compatible signed 8-bit FIC/MSC softbit
 frames for a known capture after timing and CFO are provided or replayed.
+
+## Current Tests
+
+Run the implemented `tframe_assembler` Verilator test with:
+
+```sh
+rtl/scripts/run_tframe_assembler_verilator.sh
+```
