@@ -167,7 +167,7 @@ required_end_sample = search_end_sample + fft_samples
 ```
 
 This block does not score PRS candidates. The `prs_score_search` stage consumes
-the candidate window and selects the best metric result.
+the candidate window and selects the best metric result from `cp_metric_engine`.
 
 ### `prs_score_search`
 
@@ -179,7 +179,7 @@ Source:
 rtl/src/sync/prs_score_search.sv
 ```
 
-The first implementation mirrors the search loop in `dab_prs_score_search_i16`
+The implementation mirrors the search loop in `dab_prs_score_search_i16`
 without embedding the cyclic-prefix correlation datapath. For each candidate it
 issues one metric request per possible FFT start:
 
@@ -187,7 +187,7 @@ issues one metric request per possible FFT start:
 metric_req_fft_start_sample = search_start_sample .. search_end_sample - 1
 ```
 
-The external metric engine returns:
+The `cp_metric_engine` returns:
 
 ```text
 metric_resp_ok
@@ -209,8 +209,51 @@ coarse_freq_error_hz
 ```
 
 The current score format is unsigned Q2.30. Coarse frequency error is currently
-a signed integer Hz field at the controller boundary; that can be widened to a
-fractional format when the CP metric engine is added.
+a signed integer Hz field at the controller boundary.
+
+### `cp_metric_engine`
+
+Computes the cyclic-prefix metric for each PRS FFT-start candidate.
+
+Source:
+
+```text
+rtl/src/sync/cp_metric_engine.sv
+```
+
+For each request from `prs_score_search`, the engine reads one contiguous
+history window:
+
+```text
+read_start  = fft_start_sample - guard_samples
+read_length = fft_samples + guard_samples
+```
+
+It stores the first `guard_samples` prefix samples locally, skips the useful
+symbol body, then correlates those prefix samples against the final
+`guard_samples` useful-symbol tail:
+
+```text
+corr_re += ai * bi + aq * bq
+corr_im += aq * bi - ai * bq
+score = |corr|^2 / (energy_prefix * energy_tail)
+```
+
+The response matches the `prs_score_search` metric response interface:
+
+```text
+metric_resp_ok
+metric_resp_fft_start_sample
+metric_resp_score
+metric_resp_coarse_freq_error_hz
+```
+
+Invalid FFT starts, stale/missing history windows, malformed read streams, and
+zero-energy windows return `metric_resp_ok = 0`. The score calculation is exact
+integer arithmetic in unsigned Q2.30 for the current accumulator widths. The
+coarse CFO field is signed integer Hz using a small-angle phase estimate with a
+`+/-500 Hz` clamp; replace this with an atan2/CORDIC path if wider-range CFO
+accuracy is needed.
 
 ### `prs_acquire_track`
 
@@ -516,8 +559,9 @@ from the C receiver.
 12. `prs_score_search`
 13. `iq_ingress`
 14. `sample_history`
-15. `cfo_corrector`
-16. `prs_acquire_track`
+15. `cp_metric_engine`
+16. `cfo_corrector`
+17. `prs_acquire_track`
 
 This order lets deterministic stages pass golden-vector tests before the harder
 sync loop is introduced.
@@ -624,6 +668,24 @@ Verilator test:
 
 ```text
 rtl/scripts/run_prs_score_search_verilator.sh
+```
+
+### `cp_metric_engine`
+
+Source:
+
+```text
+rtl/src/sync/cp_metric_engine.sv
+```
+
+The implemented engine consumes `prs_score_search` metric requests, reads
+sample windows from `sample_history`, and returns CP correlation score plus
+coarse CFO metadata.
+
+Verilator test:
+
+```text
+rtl/scripts/run_cp_metric_engine_verilator.sh
 ```
 
 ### `carrier_mapper`

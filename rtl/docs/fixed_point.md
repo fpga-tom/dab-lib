@@ -28,8 +28,10 @@ Qm.n = signed fixed point with m integer bits including sign and n fractional bi
 | Power `I*I + Q*Q` | unsigned 34-bit | 16-bit squared terms summed |
 | Fast/slow average power | unsigned 40-bit accumulator | Leave headroom for long windows |
 | Null power ratio | unsigned Q2.22 | Threshold decisions compare by cross-multiply |
-| PRS timing score | unsigned Q2.30 | Search controller compares metric responses |
-| PRS coarse CFO | signed integer Hz initially | Can become fractional at the CP metric boundary |
+| CP metric correlation | signed 64-bit accumulators | Prefix/tail complex correlation over the guard interval |
+| CP metric energy | unsigned 64-bit accumulators | Prefix and useful-tail energy sums |
+| PRS timing score | unsigned Q2.30 | `cp_metric_engine` output; search controller compares metric responses |
+| PRS coarse CFO | signed integer Hz initially | Small-angle CP phase estimate clamped to +/-500 Hz |
 | PRS pilot score | unsigned Q2.30 | Differential pilot correlation score from `prs_pilot_refiner` |
 | PRS pilot carrier offset | signed 4-bit integer bins | First search range is `-4..+4` bins |
 | PRS fine timing | signed Q12.12 samples | Small-angle pilot phase estimate; default range is much wider than the expected +/-32 sample correction limit |

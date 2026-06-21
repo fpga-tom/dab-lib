@@ -142,6 +142,12 @@ Run the implemented `prs_score_search` Verilator test with:
 rtl/scripts/run_prs_score_search_verilator.sh
 ```
 
+Run the implemented `cp_metric_engine` Verilator test with:
+
+```sh
+rtl/scripts/run_cp_metric_engine_verilator.sh
+```
+
 Run the implemented `carrier_mapper` Verilator test with:
 
 ```sh
