@@ -154,6 +154,12 @@ Run the implemented `prs_score_search` Verilator test with:
 rtl/scripts/run_prs_score_search_verilator.sh
 ```
 
+Run the implemented `prs_acquire_track` Verilator test with:
+
+```sh
+rtl/scripts/run_prs_acquire_track_verilator.sh
+```
+
 Run the implemented `cp_metric_engine` Verilator test with:
 
 ```sh

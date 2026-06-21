@@ -269,8 +269,29 @@ fine_timing_error_samples
 locked
 ```
 
-The first version may accept timing/CFO from testbench control registers so that
-OFDM stages can be verified before the full sync loop is complete.
+Source:
+
+```text
+rtl/src/sync/prs_acquire_track.sv
+```
+
+The first implementation is the lock controller around `prs_score_search` and
+`prs_pilot_refiner`. While unlocked, null events produce the same wide acquire
+window as `prs_acquire`. Once locked, either a null trigger or an explicit
+prediction trigger produces a narrow tracking window around the predicted next
+PRS FFT start.
+
+The block accepts the CP score result, emits a PRS symbol request for the
+FFT/pilot-refinement path, then combines CP score/CFO with pilot score, carrier
+offset, and Q12.12 fine timing. Successful pilot refinements update the next
+frame prediction as:
+
+```text
+next_prs_fft_start = current_prs_fft_start + 196608 + round(fine_timing_q12)
+```
+
+Lock is asserted after `LOCK_CONFIRM_COUNT` consecutive successful refinements
+and dropped after `UNLOCK_THRESHOLD` consecutive misses.
 
 ### `symbol_buffer`
 
@@ -752,6 +773,24 @@ Verilator test:
 
 ```text
 rtl/scripts/run_prs_score_search_verilator.sh
+```
+
+### `prs_acquire_track`
+
+Source:
+
+```text
+rtl/src/sync/prs_acquire_track.sv
+```
+
+The implemented track controller generates acquire/tracking search windows,
+requests PRS pilot refinement after a passing CP score, updates lock state, and
+reports coarse CFO plus pilot carrier/fine-timing metadata.
+
+Verilator test:
+
+```text
+rtl/scripts/run_prs_acquire_track_verilator.sh
 ```
 
 ### `cp_metric_engine`
