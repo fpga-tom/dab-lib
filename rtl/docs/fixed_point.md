@@ -34,6 +34,7 @@ Qm.n = signed fixed point with m integer bits including sign and n fractional bi
 | FFT output | signed 24-bit complex | Initial generic target |
 | Active carriers | signed 24-bit complex | Same as FFT output after mapping |
 | Channel correction | signed 24-bit Q2.22 complex | Derived from PRS reference / received carrier |
+| PRS reference carriers | signed 24-bit Q1.22 complex | Ideal Mode I QPSK reference uses `+/-2^22` |
 | Equalized carriers | signed 24-bit complex | Saturate or round after complex multiply |
 | Differential carriers | signed 24-bit complex | `current * conj(previous)`, scaled down |
 | Deinterleaved carriers | signed 24-bit complex | Permuted differential carriers |

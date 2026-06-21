@@ -136,6 +136,12 @@ Run the implemented `equalizer` Verilator test with:
 rtl/scripts/run_equalizer_verilator.sh
 ```
 
+Run the implemented `prs_channel_estimator` Verilator test with:
+
+```sh
+rtl/scripts/run_prs_channel_estimator_verilator.sh
+```
+
 Run the implemented `qpsk_softbits` Verilator test with:
 
 ```sh

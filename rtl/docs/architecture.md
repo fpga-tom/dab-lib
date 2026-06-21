@@ -148,6 +148,36 @@ avoids a full 2048-bin symbol buffer inside the mapper.
 Uses the Mode I PRS reference table to compute per-carrier correction
 coefficients. Store one correction vector per locked frame.
 
+Source:
+
+```text
+rtl/src/ofdm/prs_channel_estimator.sv
+```
+
+The first implementation accepts the active-carrier PRS stream and emits two
+ready/valid streams:
+
+```text
+coeff_index, coeff_i, coeff_q
+ref_active_index, ref_i, ref_q
+```
+
+The coefficient stream is formatted for the equalizer's coefficient write port:
+
+```text
+coeff = reference * conj(received_prs) / |received_prs|^2
+```
+
+The PRS reference stream emits the ideal Mode I QPSK PRS carriers in active
+carrier order. Integration can mux this stream into `diff_demod` to prime the
+previous-symbol state exactly like the C receiver does after estimating the
+channel from PRS.
+
+The PRS reference is generated from the compact 4x32 phase pattern used by the
+C table generator, not from a 1536-entry reference ROM. The first coefficient
+calculator uses an exact signed divider for correctness and vector bring-up;
+replace that with a reciprocal/divider pipeline before optimizing for timing.
+
 ### `equalizer`
 
 Applies the stored PRS correction coefficients to each data symbol carrier.
@@ -277,9 +307,10 @@ from the C receiver.
 5. `diff_demod`
 6. `equalizer`
 7. `fft_2048` wrapper
-8. `cfo_corrector`
-9. `null_detector`
-10. `prs_acquire_track`
+8. `prs_channel_estimator`
+9. `cfo_corrector`
+10. `null_detector`
+11. `prs_acquire_track`
 
 This order lets deterministic stages pass golden-vector tests before the harder
 sync loop is introduced.
@@ -349,6 +380,14 @@ Verilator test:
 
 ```text
 rtl/scripts/run_equalizer_verilator.sh
+```
+
+### `prs_channel_estimator`
+
+Verilator test:
+
+```text
+rtl/scripts/run_prs_channel_estimator_verilator.sh
 ```
 
 ### `fft_wrapper`
