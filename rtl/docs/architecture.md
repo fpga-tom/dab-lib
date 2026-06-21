@@ -89,6 +89,12 @@ externally supplied phase increment for vector-driven tests.
 Wraps a 2048-point complex FFT. Keep the wrapper generic so simulation can use a
 simple behavioral model while FPGA builds can use vendor IP.
 
+Source:
+
+```text
+rtl/src/ofdm/fft_wrapper.sv
+```
+
 Required wrapper metadata:
 
 ```text
@@ -96,6 +102,24 @@ symbol_start_sample
 block_exponent or scale schedule
 overflow flag
 ```
+
+The first implementation is a one-symbol-in-flight shell around an external FFT
+core. It accepts exactly 2048 signed complex time-domain samples, forwards them
+to the core with `core_in_last` asserted on sample 2047, then tags the core's
+natural-order bin stream with:
+
+```text
+out_fft_bin_index = 0..2047
+out_symbol_start_sample = sample index captured from input sample 0
+out_block_exp = core-reported scale metadata
+out_overflow = core-reported overflow metadata
+out_symbol_done = bin 2047
+```
+
+The wrapper intentionally does not implement FFT math. FPGA builds should bind
+the `core_*` ports to the selected FFT IP. Verilator tests use a mock core so
+the wrapper's framing, metadata, and backpressure behavior can be verified
+without choosing vendor IP yet.
 
 ### `active_carrier_mapper`
 
@@ -325,6 +349,14 @@ Verilator test:
 
 ```text
 rtl/scripts/run_equalizer_verilator.sh
+```
+
+### `fft_wrapper`
+
+Verilator test:
+
+```text
+rtl/scripts/run_fft_wrapper_verilator.sh
 ```
 
 ### `qpsk_softbits`

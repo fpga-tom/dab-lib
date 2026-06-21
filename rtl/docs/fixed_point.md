@@ -29,6 +29,7 @@ Qm.n = signed fixed point with m integer bits including sign and n fractional bi
 | NCO phase | unsigned 32-bit phase accumulator | Full cycle wraps at 2^32 |
 | NCO sin/cos | Q1.17 or Q1.15 | Choose by DSP multiplier budget |
 | CFO-corrected I/Q | signed 18-bit | Keep 1-2 guard bits after mixer |
+| FFT input | signed 18-bit complex | Wrapper forwards CFO-corrected samples to FFT IP |
 | FFT internal | vendor scale schedule or block floating | Export scale exponent |
 | FFT output | signed 24-bit complex | Initial generic target |
 | Active carriers | signed 24-bit complex | Same as FFT output after mapping |

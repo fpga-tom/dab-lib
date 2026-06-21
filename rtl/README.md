@@ -118,6 +118,12 @@ Run the implemented `carrier_mapper` Verilator test with:
 rtl/scripts/run_carrier_mapper_verilator.sh
 ```
 
+Run the implemented `fft_wrapper` Verilator test with:
+
+```sh
+rtl/scripts/run_fft_wrapper_verilator.sh
+```
+
 Run the implemented `diff_demod` Verilator test with:
 
 ```sh
