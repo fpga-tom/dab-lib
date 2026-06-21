@@ -108,6 +108,17 @@ active[768..1536] <- fft[0..768]
 
 Carrier 768 is the DC/null carrier and must be forced to zero for data paths.
 
+Source:
+
+```text
+rtl/src/ofdm/carrier_mapper.sv
+```
+
+The first implementation accepts natural-order FFT bins. It stores only the low
+active bin range `0..768`, streams high active bins `1280..2047` directly as
+`active[0..767]`, then emits the stored low range as `active[768..1536]`. This
+avoids a full 2048-bin symbol buffer inside the mapper.
+
 ### `prs_channel_estimator`
 
 Uses the Mode I PRS reference table to compute per-carrier correction
@@ -259,6 +270,14 @@ Verilator test:
 
 ```text
 rtl/scripts/run_frequency_deinterleaver_verilator.sh
+```
+
+### `carrier_mapper`
+
+Verilator test:
+
+```text
+rtl/scripts/run_carrier_mapper_verilator.sh
 ```
 
 ### `qpsk_softbits`

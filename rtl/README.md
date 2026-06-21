@@ -112,6 +112,12 @@ Run the implemented `frequency_deinterleaver` Verilator test with:
 rtl/scripts/run_frequency_deinterleaver_verilator.sh
 ```
 
+Run the implemented `carrier_mapper` Verilator test with:
+
+```sh
+rtl/scripts/run_carrier_mapper_verilator.sh
+```
+
 Run the implemented `qpsk_softbits` Verilator test with:
 
 ```sh
