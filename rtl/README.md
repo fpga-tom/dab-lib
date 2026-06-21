@@ -100,6 +100,12 @@ frames for a known capture after timing and CFO are provided or replayed.
 
 ## Current Tests
 
+Run the implemented `iq_ingress` Verilator test with:
+
+```sh
+rtl/scripts/run_iq_ingress_verilator.sh
+```
+
 Run the implemented `tframe_assembler` Verilator test with:
 
 ```sh

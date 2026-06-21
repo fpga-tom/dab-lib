@@ -23,6 +23,7 @@ Qm.n = signed fixed point with m integer bits including sign and n fractional bi
 
 | Stage | Suggested Format | Notes |
 | --- | --- | --- |
+| IQ ingress I/Q | signed 16-bit integer | Pass-through from SDR adapter; sample index increments on accepted beats |
 | Power `I*I + Q*Q` | unsigned 34-bit | 16-bit squared terms summed |
 | Fast/slow average power | unsigned 40-bit accumulator | Leave headroom for long windows |
 | Null power ratio | unsigned Q2.22 | Threshold decisions compare by cross-multiply |

@@ -38,6 +38,28 @@ q: signed 16-bit
 sample_index: unsigned 64-bit
 ```
 
+Source:
+
+```text
+rtl/src/frontend/iq_ingress.sv
+```
+
+The first implementation is a ready/valid tagging stage. It accepts one complex
+sample per beat, passes the signed I/Q values through unchanged, and emits the
+current 64-bit sample index with the same beat. The internal index increments
+only when both input and output handshake.
+
+Control can seed the absolute index with:
+
+```text
+set_sample_index_valid
+set_sample_index_value
+```
+
+While the set-index control is asserted, the sample stream is stalled and no
+output beat is emitted. `clear` resets the index to zero and suppresses
+handshakes for that cycle.
+
 ### `dc_remove_gain`
 
 Optional stage for slow DC estimate subtraction and coarse gain normalization.
@@ -465,13 +487,33 @@ from the C receiver.
 10. `null_detector`
 11. `prs_acquire`
 12. `prs_score_search`
-13. `cfo_corrector`
-14. `prs_acquire_track`
+13. `iq_ingress`
+14. `cfo_corrector`
+15. `prs_acquire_track`
 
 This order lets deterministic stages pass golden-vector tests before the harder
 sync loop is introduced.
 
 ## Implemented Blocks
+
+### `iq_ingress`
+
+Source:
+
+```text
+rtl/src/frontend/iq_ingress.sv
+```
+
+The implemented ingress block provides the front-end stream metadata boundary.
+It accepts signed 16-bit I/Q by default, forwards the samples unchanged, and
+attaches a monotonically increasing 64-bit sample index. The counter can be
+seeded with a control beat before starting or resuming a capture stream.
+
+Verilator test:
+
+```text
+rtl/scripts/run_iq_ingress_verilator.sh
+```
 
 ### `tframe_assembler`
 
