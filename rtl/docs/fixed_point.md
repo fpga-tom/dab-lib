@@ -25,7 +25,7 @@ Qm.n = signed fixed point with m integer bits including sign and n fractional bi
 | --- | --- | --- |
 | Power `I*I + Q*Q` | unsigned 34-bit | 16-bit squared terms summed |
 | Fast/slow average power | unsigned 40-bit accumulator | Leave headroom for long windows |
-| Null power ratio | Q2.22 or compare by cross-multiply | Prefer cross-multiply for thresholds |
+| Null power ratio | unsigned Q2.22 | Threshold decisions compare by cross-multiply |
 | NCO phase | unsigned 32-bit phase accumulator | Full cycle wraps at 2^32 |
 | NCO sin/cos | Q1.17 or Q1.15 | Choose by DSP multiplier budget |
 | CFO-corrected I/Q | signed 18-bit | Keep 1-2 guard bits after mixer |

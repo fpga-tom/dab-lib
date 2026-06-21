@@ -112,6 +112,12 @@ Run the implemented `frequency_deinterleaver` Verilator test with:
 rtl/scripts/run_frequency_deinterleaver_verilator.sh
 ```
 
+Run the implemented `null_detector` Verilator test with:
+
+```sh
+rtl/scripts/run_null_detector_verilator.sh
+```
+
 Run the implemented `carrier_mapper` Verilator test with:
 
 ```sh

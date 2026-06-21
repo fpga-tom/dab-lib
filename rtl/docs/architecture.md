@@ -56,11 +56,37 @@ events:
 ```text
 sample_index
 length
+avg_power
 min_ratio
 ```
 
 Match the C detector behavior first: fast/slow power windows, sample decimation,
 enter threshold, exit threshold, and min/max null length.
+
+Source:
+
+```text
+rtl/src/sync/null_detector.sv
+```
+
+The first implementation accepts one signed I/Q sample per cycle with an
+explicit 64-bit sample index. It keeps separate fast and slow moving sums over
+parameterized ring buffers, compares the normalized fast/slow power ratio by
+cross-multiplication, and emits a ready/valid null event when a low-power run
+exits and passes the configured checks:
+
+```text
+min_null_samples
+max_null_samples
+startup_ignore_samples
+expected_interval_samples +/- interval_tolerance_samples
+max_merge_gap_samples
+```
+
+The detector reports `avg_power` as an integer average over the accepted run and
+`min_ratio` as unsigned Q2.22. Detection decisions do not use division. The
+current RTL processes every sample; `sample_decimation` from the C detector is
+left for the later ingress/control wrapper.
 
 ### `prs_acquire_track`
 
@@ -308,8 +334,8 @@ from the C receiver.
 6. `equalizer`
 7. `fft_2048` wrapper
 8. `prs_channel_estimator`
-9. `cfo_corrector`
-10. `null_detector`
+9. `null_detector`
+10. `cfo_corrector`
 11. `prs_acquire_track`
 
 This order lets deterministic stages pass golden-vector tests before the harder
@@ -356,6 +382,14 @@ Verilator test:
 
 ```text
 rtl/scripts/run_frequency_deinterleaver_verilator.sh
+```
+
+### `null_detector`
+
+Verilator test:
+
+```text
+rtl/scripts/run_null_detector_verilator.sh
 ```
 
 ### `carrier_mapper`
