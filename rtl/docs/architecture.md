@@ -116,9 +116,51 @@ search_end_sample = search_start_sample + timing_search_length
 required_end_sample = search_end_sample + fft_samples
 ```
 
-This block does not score PRS candidates. A later `prs_score` or
-`prs_acquire_track` stage should consume the candidate window, run PRS FFT/score
-search, and report lock telemetry.
+This block does not score PRS candidates. The `prs_score_search` stage consumes
+the candidate window and selects the best metric result.
+
+### `prs_score_search`
+
+Runs the timing-search control loop for a PRS candidate.
+
+Source:
+
+```text
+rtl/src/sync/prs_score_search.sv
+```
+
+The first implementation mirrors the search loop in `dab_prs_score_search_i16`
+without embedding the cyclic-prefix correlation datapath. For each candidate it
+issues one metric request per possible FFT start:
+
+```text
+metric_req_fft_start_sample = search_start_sample .. search_end_sample - 1
+```
+
+The external metric engine returns:
+
+```text
+metric_resp_ok
+metric_resp_fft_start_sample
+metric_resp_score
+metric_resp_coarse_freq_error_hz
+```
+
+`prs_score_search` counts all responses, ignores invalid metric responses,
+keeps the highest score, and emits a C-style result:
+
+```text
+found
+prs_peak_sample
+prs_symbol_start_sample = prs_fft_start_sample - guard_samples
+prs_fft_start_sample
+prs_score
+coarse_freq_error_hz
+```
+
+The current score format is unsigned Q2.30. Coarse frequency error is currently
+a signed integer Hz field at the controller boundary; that can be widened to a
+fractional format when the CP metric engine is added.
 
 ### `prs_acquire_track`
 
@@ -368,8 +410,9 @@ from the C receiver.
 8. `prs_channel_estimator`
 9. `null_detector`
 10. `prs_acquire`
-11. `cfo_corrector`
-12. `prs_acquire_track`
+11. `prs_score_search`
+12. `cfo_corrector`
+13. `prs_acquire_track`
 
 This order lets deterministic stages pass golden-vector tests before the harder
 sync loop is introduced.
@@ -431,6 +474,14 @@ Verilator test:
 
 ```text
 rtl/scripts/run_prs_acquire_verilator.sh
+```
+
+### `prs_score_search`
+
+Verilator test:
+
+```text
+rtl/scripts/run_prs_score_search_verilator.sh
 ```
 
 ### `carrier_mapper`

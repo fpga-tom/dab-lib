@@ -124,6 +124,12 @@ Run the implemented `prs_acquire` Verilator test with:
 rtl/scripts/run_prs_acquire_verilator.sh
 ```
 
+Run the implemented `prs_score_search` Verilator test with:
+
+```sh
+rtl/scripts/run_prs_score_search_verilator.sh
+```
+
 Run the implemented `carrier_mapper` Verilator test with:
 
 ```sh
