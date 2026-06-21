@@ -128,6 +128,25 @@ coefficients. Store one correction vector per locked frame.
 
 Applies the stored PRS correction coefficients to each data symbol carrier.
 
+Source:
+
+```text
+rtl/src/ofdm/equalizer.sv
+```
+
+The first implementation accepts active carriers in active-carrier order and
+applies a complex coefficient from an internal channel table:
+
+```text
+out_i = carrier_i * coeff_i - carrier_q * coeff_q
+out_q = carrier_i * coeff_q + carrier_q * coeff_i
+```
+
+Coefficients use the fixed-point format from `dab_ofdm_pkg`. The PRS channel
+estimator will populate this table through the coefficient write port in a later
+step. Carrier 768 is forced to zero to match the C receiver's DC/null carrier
+handling.
+
 ### `diff_demod`
 
 Stores the previous active-carrier vector and computes differential QPSK:
@@ -298,6 +317,14 @@ Verilator test:
 
 ```text
 rtl/scripts/run_diff_demod_verilator.sh
+```
+
+### `equalizer`
+
+Verilator test:
+
+```text
+rtl/scripts/run_equalizer_verilator.sh
 ```
 
 ### `qpsk_softbits`

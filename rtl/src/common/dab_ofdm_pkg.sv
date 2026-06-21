@@ -6,6 +6,8 @@ package dab_ofdm_pkg;
   localparam int DAB_OFDM_DATA_CARRIERS = 1536;
   localparam int DAB_OFDM_ACTIVE_CARRIER_HALF = 768;
   localparam int DAB_OFDM_CARRIER_WIDTH = 24;
+  localparam int DAB_OFDM_COEFF_WIDTH = 24;
+  localparam int DAB_OFDM_COEFF_FRAC_BITS = 22;
   localparam int DAB_OFDM_SOFTBIT_WIDTH = 8;
   localparam int DAB_OFDM_FFT_INDEX_WIDTH = 11;
   localparam int DAB_OFDM_ACTIVE_INDEX_WIDTH = 11;

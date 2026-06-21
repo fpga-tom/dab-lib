@@ -32,7 +32,7 @@ Qm.n = signed fixed point with m integer bits including sign and n fractional bi
 | FFT internal | vendor scale schedule or block floating | Export scale exponent |
 | FFT output | signed 24-bit complex | Initial generic target |
 | Active carriers | signed 24-bit complex | Same as FFT output after mapping |
-| Channel correction | Q2.22 complex | Derived from PRS reference / received carrier |
+| Channel correction | signed 24-bit Q2.22 complex | Derived from PRS reference / received carrier |
 | Equalized carriers | signed 24-bit complex | Saturate or round after complex multiply |
 | Differential carriers | signed 24-bit complex | `current * conj(previous)`, scaled down |
 | Deinterleaved carriers | signed 24-bit complex | Permuted differential carriers |
