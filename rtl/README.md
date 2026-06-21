@@ -111,3 +111,9 @@ Run the implemented `frequency_deinterleaver` Verilator test with:
 ```sh
 rtl/scripts/run_frequency_deinterleaver_verilator.sh
 ```
+
+Run the implemented `qpsk_softbits` Verilator test with:
+
+```sh
+rtl/scripts/run_qpsk_softbits_verilator.sh
+```

@@ -158,6 +158,23 @@ soft_b[0..1535]
 
 Initial target format is signed 8-bit to match the C `int8_t` softbit buffers.
 
+Source:
+
+```text
+rtl/src/ofdm/qpsk_softbits.sv
+```
+
+The first implementation is a one-carrier-in, one-softbit-pair-out streaming
+stage. It computes an integer magnitude and applies the same negative normalized
+decision convention as the C receiver:
+
+```text
+soft = trunc(component * -127.5 / magnitude)
+```
+
+The output preserves carrier index, symbol start metadata, and the symbol-done
+marker from the input stream.
+
 ### `tframe_assembler`
 
 Packs 75 demodulated symbols per transmission frame:
@@ -233,4 +250,12 @@ Verilator test:
 
 ```text
 rtl/scripts/run_frequency_deinterleaver_verilator.sh
+```
+
+### `qpsk_softbits`
+
+Verilator test:
+
+```text
+rtl/scripts/run_qpsk_softbits_verilator.sh
 ```
