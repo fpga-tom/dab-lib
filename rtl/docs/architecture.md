@@ -139,6 +139,18 @@ diff = current * conj(previous)
 The first data symbol after PRS establishes the previous-symbol state. Softbits
 are only valid once a previous data symbol exists.
 
+Source:
+
+```text
+rtl/src/ofdm/diff_demod.sv
+```
+
+The first implementation accepts active carriers in active-carrier order. It
+stores one previous active-carrier vector, emits no output while priming that
+state, then outputs scaled fixed-point differential carriers for each following
+symbol. Carrier 768 is forced to zero to match the C receiver's DC/null carrier
+handling.
+
 ### `frequency_deinterleaver`
 
 Implements the Mode I carrier permutation from `dab_ofdm_build_deinterleave_map`
@@ -278,6 +290,14 @@ Verilator test:
 
 ```text
 rtl/scripts/run_carrier_mapper_verilator.sh
+```
+
+### `diff_demod`
+
+Verilator test:
+
+```text
+rtl/scripts/run_diff_demod_verilator.sh
 ```
 
 ### `qpsk_softbits`
