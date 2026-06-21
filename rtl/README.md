@@ -106,6 +106,12 @@ Run the implemented `iq_ingress` Verilator test with:
 rtl/scripts/run_iq_ingress_verilator.sh
 ```
 
+Run the implemented `sample_history` Verilator test with:
+
+```sh
+rtl/scripts/run_sample_history_verilator.sh
+```
+
 Run the implemented `tframe_assembler` Verilator test with:
 
 ```sh

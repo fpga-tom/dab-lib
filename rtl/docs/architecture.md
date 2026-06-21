@@ -71,6 +71,33 @@ Stores enough samples to cover PRS search and all 75 data symbols after a locked
 PRS. The C tool defaults to a 262144-sample history, which is slightly more than
 one 196608-sample Mode I transmission frame.
 
+Source:
+
+```text
+rtl/src/frontend/sample_history.sv
+```
+
+The first implementation is a power-of-two circular sample RAM with one write
+stream and one contiguous read-window stream. It stores signed I/Q samples keyed
+by their absolute 64-bit sample index:
+
+```text
+write: in_i, in_q, in_sample_index
+read request: read_req_start_sample, read_req_length
+read output: rd_out_i, rd_out_q, rd_out_sample_index, rd_out_first, rd_out_last
+```
+
+The block tracks the contiguous valid range:
+
+```text
+oldest_sample_index <= readable sample < next_sample_index
+stored_samples <= DEPTH_SAMPLES
+```
+
+If input sample indices are not contiguous, the valid range is restarted at the
+new sample index. A read request outside the valid range, or with zero length,
+returns one `rd_out_error` beat with `rd_out_first` and `rd_out_last` asserted.
+
 ### `null_detector`
 
 Computes short and long average sample power and emits candidate null-symbol
@@ -488,8 +515,9 @@ from the C receiver.
 11. `prs_acquire`
 12. `prs_score_search`
 13. `iq_ingress`
-14. `cfo_corrector`
-15. `prs_acquire_track`
+14. `sample_history`
+15. `cfo_corrector`
+16. `prs_acquire_track`
 
 This order lets deterministic stages pass golden-vector tests before the harder
 sync loop is introduced.
@@ -513,6 +541,24 @@ Verilator test:
 
 ```text
 rtl/scripts/run_iq_ingress_verilator.sh
+```
+
+### `sample_history`
+
+Source:
+
+```text
+rtl/src/frontend/sample_history.sv
+```
+
+The implemented history block stores the ingress stream in a circular RAM and
+serves contiguous sample windows by absolute sample index. It is intended to
+feed later CP metric and FFT symbol-buffer readers.
+
+Verilator test:
+
+```text
+rtl/scripts/run_sample_history_verilator.sh
 ```
 
 ### `tframe_assembler`
