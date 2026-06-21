@@ -408,6 +408,12 @@ if(DAB_BUILD_TOOLS)
 
     target_link_libraries(dab_fic_block_dump_analyze PRIVATE dab)
 
+    add_executable(dab_fic_softbits_decode
+        tools/dab_fic_softbits_decode.c
+    )
+
+    target_link_libraries(dab_fic_softbits_decode PRIVATE dab)
+
     add_executable(dab_fic_input_compare
         tools/dab_fic_input_compare.c
     )

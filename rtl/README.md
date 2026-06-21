@@ -144,6 +144,12 @@ The input file is interleaved `float32` IQ (`I0,Q0,I1,Q1,...`) as written by
 softbits in `tframe_assembler` order: all FIC softbits first, then MSC
 softbits.
 
+Decode and print the FIC prefix from a raw softbit frame with:
+
+```sh
+./build-release/dab_fic_softbits_decode /tmp/dab_softbits_i8.bin
+```
+
 Run the implemented `tframe_assembler` Verilator test with:
 
 ```sh
