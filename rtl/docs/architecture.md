@@ -88,6 +88,38 @@ The detector reports `avg_power` as an integer average over the accepted run and
 current RTL processes every sample; `sample_decimation` from the C detector is
 left for the later ingress/control wrapper.
 
+### `prs_acquire`
+
+Converts accepted null-symbol events into PRS timing candidates.
+
+Source:
+
+```text
+rtl/src/sync/prs_acquire.sv
+```
+
+The first implementation mirrors `dab_prs_candidate_from_null` from the C
+receiver:
+
+```text
+prs_symbol_start_sample = null_start_sample + null_length
+prs_fft_start_sample = prs_symbol_start_sample + guard_samples
+timing_search_start_offset = acquire_window_samples / 2
+timing_search_length = acquire_window_samples
+```
+
+It also emits the derived timing search bounds:
+
+```text
+search_start_sample = prs_fft_start_sample - timing_search_start_offset
+search_end_sample = search_start_sample + timing_search_length
+required_end_sample = search_end_sample + fft_samples
+```
+
+This block does not score PRS candidates. A later `prs_score` or
+`prs_acquire_track` stage should consume the candidate window, run PRS FFT/score
+search, and report lock telemetry.
+
 ### `prs_acquire_track`
 
 Turns null candidates or predicted frame positions into PRS search windows.
@@ -335,8 +367,9 @@ from the C receiver.
 7. `fft_2048` wrapper
 8. `prs_channel_estimator`
 9. `null_detector`
-10. `cfo_corrector`
-11. `prs_acquire_track`
+10. `prs_acquire`
+11. `cfo_corrector`
+12. `prs_acquire_track`
 
 This order lets deterministic stages pass golden-vector tests before the harder
 sync loop is introduced.
@@ -390,6 +423,14 @@ Verilator test:
 
 ```text
 rtl/scripts/run_null_detector_verilator.sh
+```
+
+### `prs_acquire`
+
+Verilator test:
+
+```text
+rtl/scripts/run_prs_acquire_verilator.sh
 ```
 
 ### `carrier_mapper`
