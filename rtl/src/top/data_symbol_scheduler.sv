@@ -22,7 +22,9 @@ module data_symbol_scheduler
     input  logic cmd_ready,
     output logic [63:0] cmd_fft_start_sample,
 
+    /* verilator lint_off UNUSEDSIGNAL */
     input  logic frame_done
+    /* verilator lint_on UNUSEDSIGNAL */
 );
   localparam int SYMBOL_SAMPLES = GUARD_SAMPLES + FFT_SAMPLES;
   localparam logic [DAB_TFRAME_SYMBOL_INDEX_WIDTH-1:0] LAST_SYMBOL_INDEX =
@@ -30,8 +32,7 @@ module data_symbol_scheduler
 
   typedef enum logic [1:0] {
     STATE_IDLE = 2'd0,
-    STATE_SCHEDULE = 2'd1,
-    STATE_WAIT_FRAME_DONE = 2'd2
+    STATE_SCHEDULE = 2'd1
   } state_t;
 
   state_t state_q;
@@ -129,7 +130,7 @@ module data_symbol_scheduler
             start_pending_or_idle();
           end else if (cmd_fire) begin
             if (next_symbol_q == LAST_SYMBOL_INDEX) begin
-              state_q <= STATE_WAIT_FRAME_DONE;
+              start_pending_or_idle();
             end else begin
               next_symbol_q <= next_symbol_q + 1'b1;
               next_fft_start_sample_q <= next_fft_start_sample_q + 64'(SYMBOL_SAMPLES);
@@ -138,9 +139,7 @@ module data_symbol_scheduler
         end
 
         default: begin
-          if (frame_done) begin
-            start_pending_or_idle();
-          end
+          start_pending_or_idle();
         end
       endcase
     end

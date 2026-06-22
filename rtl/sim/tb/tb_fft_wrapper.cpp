@@ -233,6 +233,99 @@ void run_symbol(Vfft_wrapper &top, uint64_t symbol_start_sample, uint32_t seed) 
     }
 }
 
+void run_overlapped_symbols(Vfft_wrapper &top) {
+    const uint64_t symbol_start[2] = {303030ull, 305582ull};
+    const uint32_t seed[2] = {41u, 73u};
+    std::deque<CoreOutput> pending_outputs;
+    uint32_t sent = 0;
+    uint32_t core_received = 0;
+    uint32_t received = 0;
+    uint32_t cycles = 0;
+    bool queued_first = false;
+    bool queued_second = false;
+    bool saw_overlap = false;
+
+    while (received < kFftBins * 2u) {
+        const uint32_t input_symbol = sent / kFftBins;
+        const uint32_t input_offset = sent % kFftBins;
+        const bool have_input = sent < kFftBins * 2u;
+
+        top.core_in_ready = 1;
+        top.out_ready = 1;
+        top.in_valid = have_input ? 1 : 0;
+        top.in_i = have_input ? pack_width(input_i(input_offset, seed[input_symbol]), 18) : 0;
+        top.in_q = have_input ? pack_width(input_q(input_offset, seed[input_symbol]), 18) : 0;
+        top.in_symbol_start_sample = have_input ? symbol_start[input_symbol] : 0;
+
+        if (core_received == kFftBins && !queued_first) {
+            enqueue_fft_symbol(pending_outputs, seed[0]);
+            queued_first = true;
+        }
+        if (core_received == kFftBins * 2u && !queued_second) {
+            enqueue_fft_symbol(pending_outputs, seed[1]);
+            queued_second = true;
+        }
+
+        drive_core_output(top, pending_outputs, cycles);
+        top.eval();
+
+        const bool input_fire = top.in_valid && top.in_ready;
+        const bool core_input_fire = top.core_in_valid && top.core_in_ready;
+        const bool output_fire = top.out_valid && top.out_ready;
+        const bool core_output_fire = top.core_out_valid && top.core_out_ready;
+
+        if (core_input_fire) {
+            const uint32_t expected_symbol = core_received / kFftBins;
+            const uint32_t expected_offset = core_received % kFftBins;
+            if (sign_extend(top.core_in_i, 18) != input_i(expected_offset, seed[expected_symbol])) {
+                fail_at("overlap_core_in_i",
+                        core_received,
+                        input_i(expected_offset, seed[expected_symbol]),
+                        sign_extend(top.core_in_i, 18));
+            }
+            if (top.core_in_last != (expected_offset == kFftBins - 1u ? 1u : 0u)) {
+                fail_at("overlap_core_in_last",
+                        core_received,
+                        expected_offset == kFftBins - 1u ? 1u : 0u,
+                        top.core_in_last);
+            }
+            if (expected_symbol == 1u && received > 0u && received < kFftBins) {
+                saw_overlap = true;
+            }
+            ++core_received;
+        }
+
+        if (output_fire) {
+            const uint32_t output_symbol = received / kFftBins;
+            const uint32_t output_bin = received % kFftBins;
+            check_output(top, output_bin, symbol_start[output_symbol], seed[output_symbol]);
+            ++received;
+        }
+
+        tick(top);
+
+        if (input_fire) {
+            ++sent;
+        }
+        if (core_output_fire) {
+            pending_outputs.pop_front();
+        }
+
+        ++cycles;
+        if (cycles > kFftBins * 5u) {
+            std::cerr << "Overlap timeout sent=" << sent
+                      << " core_received=" << core_received
+                      << " received=" << received << "\n";
+            std::exit(1);
+        }
+    }
+
+    if (!saw_overlap) {
+        std::cerr << "FFT wrapper did not overlap second input with first output\n";
+        std::exit(1);
+    }
+}
+
 void run_clear_test(Vfft_wrapper &top) {
     top.core_in_ready = 1;
     top.out_ready = 1;
@@ -271,6 +364,7 @@ int main(int argc, char **argv) {
 
     reset(top);
     run_symbol(top, 101010ull, 5);
+    run_overlapped_symbols(top);
     run_clear_test(top);
     run_symbol(top, 202020ull, 29);
 

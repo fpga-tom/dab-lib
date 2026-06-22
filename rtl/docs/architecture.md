@@ -50,12 +50,21 @@ rtl/src/top/dab_pipeline_top.sv
 The FFT math remains an external core interface. By default, data-symbol
 scheduling is internal: `data_symbol_scheduler` observes accepted sync events
 and requests each of the 75 data symbols only when that symbol's 2048-sample
-FFT window is present in `sample_history`. The legacy external
+FFT window is present in `sample_history`. It can move directly from one frame
+to the next after the current frame's symbol commands have been accepted; it
+does not wait for `tframe_assembler` to emit the final softbit. The legacy external
 `data_symbol_cmd_*` path remains available by setting
 `ENABLE_INTERNAL_DATA_SCHEDULER=0`. The sync path internally schedules PRS
 symbols through `prs_acquire_track`. The top includes a softbit-pair adapter
 that stores QPSK `soft_b` values so `tframe_assembler` still receives the
 C-compatible `soft_a[0..1535]` then `soft_b[0..1535]` order.
+
+The Verilator file replay defaults to four fabric cycles per accepted SDR
+sample when the internal scheduler and streaming CP search are enabled. This
+models the FPGA clock running faster than the 2.048 Msps sample strobe. A
+single-cycle sample strobe is intentionally not enough for the current
+one-softbit-per-cycle output interface because each 2552-sample DAB data symbol
+produces 3072 softbits.
 
 By default, PRS CP scoring is independent of `sample_history`:
 `cp_stream_metric` computes a rolling cyclic-prefix score as samples arrive, and
@@ -109,8 +118,8 @@ Stores enough samples for in-flight PRS/data symbol extraction. CP search no
 longer requires future IQ samples to be retained in this buffer when
 `ENABLE_STREAMING_CP_SEARCH=1`. Data symbols are also not held until a full
 transmission frame is available. The C file replay now defaults to a
-32768-sample history and one accepted SDR sample per simulated clock when the
-streaming CP scorer is enabled.
+32768-sample history. With the default file replay pacing, this is enough to
+retain the symbol windows needed by the internally scheduled data path.
 
 Source:
 
@@ -453,9 +462,12 @@ block_exponent or scale schedule
 overflow flag
 ```
 
-The first implementation is a one-symbol-in-flight shell around an external FFT
-core. It accepts exactly 2048 signed complex time-domain samples, forwards them
-to the core with `core_in_last` asserted on sample 2047, then tags the core's
+The wrapper is a streaming shell around an external FFT core. Input and output
+sides can run at the same time, so the wrapper can feed the next 2048-sample
+symbol while bins for an earlier symbol are still leaving the core. A small
+metadata FIFO preserves the symbol start sample for in-flight FFT frames. The
+input side forwards signed complex time-domain samples to the core with
+`core_in_last` asserted on sample 2047, then the output side tags the core's
 natural-order bin stream with:
 
 ```text

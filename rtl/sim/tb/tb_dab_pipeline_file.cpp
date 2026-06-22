@@ -11,6 +11,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "Vdab_pipeline_top.h"
@@ -158,7 +159,7 @@ Config load_config() {
                  !cfg.internal_data_scheduler && cfg.target_tframes <= 1u);
     cfg.sample_period_cycles = static_cast<uint32_t>(
         env_u64("DAB_TB_SAMPLE_PERIOD_CYCLES",
-                cfg.internal_data_scheduler && !cfg.streaming_cp_search ? 16u : 1u));
+                cfg.internal_data_scheduler ? (cfg.streaming_cp_search ? 4u : 16u) : 1u));
     if (cfg.sample_period_cycles == 0u) {
         cfg.sample_period_cycles = 1u;
     }
@@ -273,22 +274,22 @@ public:
     }
 
     bool can_accept() const {
-        return output_pos_ >= output_.size() && input_.size() < kFftSamples;
+        return input_.size() < kFftSamples && output_frames_.size() < kMaxQueuedOutputFrames;
     }
 
     bool has_output() const {
-        return output_pos_ < output_.size();
+        return !output_frames_.empty();
     }
 
     FftBin current_output() const {
-        return output_[output_pos_];
+        return output_frames_.front()[output_pos_];
     }
 
     void pop_output() {
-        if (output_pos_ < output_.size()) {
+        if (!output_frames_.empty()) {
             ++output_pos_;
-            if (output_pos_ == output_.size()) {
-                output_.clear();
+            if (output_pos_ == output_frames_.front().size()) {
+                output_frames_.pop_front();
                 output_pos_ = 0;
             }
         }
@@ -328,6 +329,8 @@ public:
     }
 
 private:
+    static constexpr size_t kMaxQueuedOutputFrames = 16;
+
     static uint32_t reverse_bits(uint32_t value, uint32_t bits) {
         uint32_t reversed = 0;
         for (uint32_t bit = 0; bit < bits; ++bit) {
@@ -396,19 +399,20 @@ private:
                              (rms > 0.0 ? target_rms_ / rms : 0.0);
         last_scale_ = scale;
 
-        output_.resize(kFftSamples);
-        output_pos_ = 0;
+        std::vector<FftBin> output;
+        output.resize(kFftSamples);
         for (uint32_t n = 0; n < kFftSamples; ++n) {
             const int64_t re = static_cast<int64_t>(std::llround(bins[n].real() * scale));
             const int64_t im = static_cast<int64_t>(std::llround(bins[n].imag() * scale));
-            output_[n].i = clamp_signed_width(re, kCarrierWidth, &saturation_count_);
-            output_[n].q = clamp_signed_width(im, kCarrierWidth, &saturation_count_);
+            output[n].i = clamp_signed_width(re, kCarrierWidth, &saturation_count_);
+            output[n].q = clamp_signed_width(im, kCarrierWidth, &saturation_count_);
         }
+        output_frames_.push_back(std::move(output));
         ++fft_count_;
     }
 
     std::vector<std::complex<double>> input_;
-    std::vector<FftBin> output_;
+    std::deque<std::vector<FftBin>> output_frames_;
     size_t output_pos_ = 0;
     double target_rms_ = static_cast<double>(1u << 22u);
     bool fixed_gain_ = false;
