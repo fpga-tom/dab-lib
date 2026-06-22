@@ -36,8 +36,6 @@ module diff_demod
   logic stage_seed_only_q;
   logic signed [CARRIER_WIDTH-1:0] stage_i_q;
   logic signed [CARRIER_WIDTH-1:0] stage_q_q;
-  logic signed [CARRIER_WIDTH-1:0] stage_prev_i_q;
-  logic signed [CARRIER_WIDTH-1:0] stage_prev_q_q;
   logic [DAB_OFDM_ACTIVE_INDEX_WIDTH-1:0] stage_active_index_q;
   logic [63:0] stage_symbol_start_sample_q;
   logic stage_symbol_done_q;
@@ -48,6 +46,8 @@ module diff_demod
   logic signed [CARRIER_WIDTH-1:0] prev_i_mem [0:DAB_OFDM_ACTIVE_CARRIERS-1];
   logic signed [CARRIER_WIDTH-1:0] prev_q_mem [0:DAB_OFDM_ACTIVE_CARRIERS-1];
 
+  logic signed [CARRIER_WIDTH-1:0] prev_i_rd_q;
+  logic signed [CARRIER_WIDTH-1:0] prev_q_rd_q;
   logic signed [CARRIER_WIDTH-1:0] diff_i;
   logic signed [CARRIER_WIDTH-1:0] diff_q;
 
@@ -58,13 +58,13 @@ module diff_demod
 
   assign diff_i = diff_component_i(stage_i_q,
                                    stage_q_q,
-                                   stage_prev_i_q,
-                                   stage_prev_q_q,
+                                   prev_i_rd_q,
+                                   prev_q_rd_q,
                                    stage_active_index_q);
   assign diff_q = diff_component_q(stage_i_q,
                                    stage_q_q,
-                                   stage_prev_i_q,
-                                   stage_prev_q_q,
+                                   prev_i_rd_q,
+                                   prev_q_rd_q,
                                    stage_active_index_q);
 
   function automatic logic signed [63:0] sign_extend_carrier(
@@ -153,6 +153,15 @@ module diff_demod
     end
   endfunction
 
+  always_ff @(posedge clk) begin
+    if (input_fire) begin
+      prev_i_rd_q <= prev_i_mem[in_active_index];
+      prev_q_rd_q <= prev_q_mem[in_active_index];
+      prev_i_mem[in_active_index] <= in_i;
+      prev_q_mem[in_active_index] <= in_q;
+    end
+  end
+
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       have_prev_q <= 1'b0;
@@ -161,8 +170,6 @@ module diff_demod
       stage_seed_only_q <= 1'b0;
       stage_i_q <= '0;
       stage_q_q <= '0;
-      stage_prev_i_q <= '0;
-      stage_prev_q_q <= '0;
       stage_active_index_q <= '0;
       stage_symbol_start_sample_q <= '0;
       stage_symbol_done_q <= 1'b0;
@@ -179,8 +186,6 @@ module diff_demod
       stage_seed_only_q <= 1'b0;
       stage_i_q <= '0;
       stage_q_q <= '0;
-      stage_prev_i_q <= '0;
-      stage_prev_q_q <= '0;
       stage_active_index_q <= '0;
       stage_symbol_start_sample_q <= '0;
       stage_symbol_done_q <= 1'b0;
@@ -214,14 +219,9 @@ module diff_demod
         stage_seed_only_q <= in_seed_only;
         stage_i_q <= in_i;
         stage_q_q <= in_q;
-        stage_prev_i_q <= prev_i_mem[in_active_index];
-        stage_prev_q_q <= prev_q_mem[in_active_index];
         stage_active_index_q <= in_active_index;
         stage_symbol_start_sample_q <= in_symbol_start_sample;
         stage_symbol_done_q <= in_symbol_done;
-
-        prev_i_mem[in_active_index] <= in_i;
-        prev_q_mem[in_active_index] <= in_q;
 
         if (in_symbol_done) begin
           have_prev_q <= 1'b1;

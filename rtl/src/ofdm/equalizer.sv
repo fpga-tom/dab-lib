@@ -38,8 +38,6 @@ module equalizer
   logic stage_valid_q;
   logic signed [CARRIER_WIDTH-1:0] stage_i_q;
   logic signed [CARRIER_WIDTH-1:0] stage_q_q;
-  logic signed [COEFF_WIDTH-1:0] stage_channel_i_q;
-  logic signed [COEFF_WIDTH-1:0] stage_channel_q_q;
   logic [DAB_OFDM_ACTIVE_INDEX_WIDTH-1:0] stage_active_index_q;
   logic [63:0] stage_symbol_start_sample_q;
   logic stage_symbol_done_q;
@@ -50,6 +48,8 @@ module equalizer
   logic signed [COEFF_WIDTH-1:0] channel_i_mem [0:DAB_OFDM_ACTIVE_CARRIERS-1];
   logic signed [COEFF_WIDTH-1:0] channel_q_mem [0:DAB_OFDM_ACTIVE_CARRIERS-1];
 
+  logic signed [COEFF_WIDTH-1:0] channel_i_rd_q;
+  logic signed [COEFF_WIDTH-1:0] channel_q_rd_q;
   logic signed [CARRIER_WIDTH-1:0] eq_i;
   logic signed [CARRIER_WIDTH-1:0] eq_q;
 
@@ -60,13 +60,13 @@ module equalizer
 
   assign eq_i = equalized_i(stage_i_q,
                             stage_q_q,
-                            stage_channel_i_q,
-                            stage_channel_q_q,
+                            channel_i_rd_q,
+                            channel_q_rd_q,
                             stage_active_index_q);
   assign eq_q = equalized_q(stage_i_q,
                             stage_q_q,
-                            stage_channel_i_q,
-                            stage_channel_q_q,
+                            channel_i_rd_q,
+                            channel_q_rd_q,
                             stage_active_index_q);
 
   function automatic logic signed [63:0] sign_extend_carrier(
@@ -163,13 +163,23 @@ module equalizer
     end
   endfunction
 
+  always_ff @(posedge clk) begin
+    if (coeff_we) begin
+      channel_i_mem[coeff_index] <= coeff_i;
+      channel_q_mem[coeff_index] <= coeff_q;
+    end
+
+    if (input_fire) begin
+      channel_i_rd_q <= channel_i_mem[in_active_index];
+      channel_q_rd_q <= channel_q_mem[in_active_index];
+    end
+  end
+
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       stage_valid_q <= 1'b0;
       stage_i_q <= '0;
       stage_q_q <= '0;
-      stage_channel_i_q <= '0;
-      stage_channel_q_q <= '0;
       stage_active_index_q <= '0;
       stage_symbol_start_sample_q <= '0;
       stage_symbol_done_q <= 1'b0;
@@ -183,8 +193,6 @@ module equalizer
       stage_valid_q <= 1'b0;
       stage_i_q <= '0;
       stage_q_q <= '0;
-      stage_channel_i_q <= '0;
-      stage_channel_q_q <= '0;
       stage_active_index_q <= '0;
       stage_symbol_start_sample_q <= '0;
       stage_symbol_done_q <= 1'b0;
@@ -195,11 +203,6 @@ module equalizer
       out_symbol_start_sample <= '0;
       out_symbol_done <= 1'b0;
     end else begin
-      if (coeff_we) begin
-        channel_i_mem[coeff_index] <= coeff_i;
-        channel_q_mem[coeff_index] <= coeff_q;
-      end
-
       if (output_can_advance) begin
         out_valid <= 1'b0;
         out_symbol_done <= 1'b0;
@@ -219,8 +222,6 @@ module equalizer
         stage_valid_q <= 1'b1;
         stage_i_q <= in_i;
         stage_q_q <= in_q;
-        stage_channel_i_q <= channel_i_mem[in_active_index];
-        stage_channel_q_q <= channel_q_mem[in_active_index];
         stage_active_index_q <= in_active_index;
         stage_symbol_start_sample_q <= in_symbol_start_sample;
         stage_symbol_done_q <= in_symbol_done;

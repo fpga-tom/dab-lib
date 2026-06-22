@@ -76,6 +76,7 @@ module cp_metric_engine #(
   logic read_fire;
   logic resp_fire;
   logic invalid_fft_start;
+  logic valid_history_read_fire;
   logic read_prefix_sample;
   logic read_tail_sample;
   logic read_prefix_for_next_tail;
@@ -106,6 +107,7 @@ module cp_metric_engine #(
   assign hist_rd_out_ready = !clear && state_q == STATE_READ;
   assign read_fire = hist_rd_out_valid && hist_rd_out_ready;
   assign resp_fire = metric_resp_valid && metric_resp_ready;
+  assign valid_history_read_fire = read_fire && !hist_rd_out_error && !history_beat_malformed;
 
   assign read_prefix_sample = read_count_q < READ_COUNT_WIDTH'(GUARD_SAMPLES);
   assign read_tail_sample = read_count_q >= READ_COUNT_WIDTH'(FFT_SAMPLES);
@@ -395,6 +397,18 @@ module cp_metric_engine #(
     end
   endfunction
 
+  always_ff @(posedge clk) begin
+    if (valid_history_read_fire && read_prefix_for_next_tail) begin
+      prefix_i_q <= prefix_i_mem[prefix_read_addr];
+      prefix_q_q <= prefix_q_mem[prefix_read_addr];
+    end
+
+    if (valid_history_read_fire && read_prefix_sample) begin
+      prefix_i_mem[prefix_addr] <= hist_rd_out_i;
+      prefix_q_mem[prefix_addr] <= hist_rd_out_q;
+    end
+  end
+
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       state_q <= STATE_IDLE;
@@ -403,8 +417,6 @@ module cp_metric_engine #(
       req_last_q <= 1'b0;
       read_error_q <= 1'b0;
       read_count_q <= '0;
-      prefix_i_q <= '0;
-      prefix_q_q <= '0;
       corr_re_q <= '0;
       corr_im_q <= '0;
       energy_a_q <= '0;
@@ -417,8 +429,6 @@ module cp_metric_engine #(
       req_last_q <= 1'b0;
       read_error_q <= 1'b0;
       read_count_q <= '0;
-      prefix_i_q <= '0;
-      prefix_q_q <= '0;
       corr_re_q <= '0;
       corr_im_q <= '0;
       energy_a_q <= '0;
@@ -464,14 +474,7 @@ module cp_metric_engine #(
             if (hist_rd_out_error || history_beat_malformed) begin
               read_error_q <= 1'b1;
             end else begin
-              if (read_prefix_for_next_tail) begin
-                prefix_i_q <= prefix_i_mem[prefix_read_addr];
-                prefix_q_q <= prefix_q_mem[prefix_read_addr];
-              end
-
               if (read_prefix_sample) begin
-                prefix_i_mem[prefix_addr] <= hist_rd_out_i;
-                prefix_q_mem[prefix_addr] <= hist_rd_out_q;
                 energy_a_q <= energy_a_q + sample_energy_a;
               end
 

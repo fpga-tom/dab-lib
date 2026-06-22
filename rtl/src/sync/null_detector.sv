@@ -65,12 +65,14 @@ module null_detector #(
 
   logic stage_valid_q;
   logic [POWER_WIDTH-1:0] stage_power_q;
-  logic [POWER_WIDTH-1:0] stage_fast_removed_q;
-  logic [POWER_WIDTH-1:0] stage_slow_removed_q;
+  logic stage_fast_remove_valid_q;
+  logic stage_slow_remove_valid_q;
   logic [FAST_COUNT_WIDTH-1:0] stage_fast_count_q;
   logic [SLOW_COUNT_WIDTH-1:0] stage_slow_count_q;
   logic [63:0] stage_sample_index_q;
 
+  logic [POWER_WIDTH-1:0] fast_history_rd_q;
+  logic [POWER_WIDTH-1:0] slow_history_rd_q;
   logic input_fire;
   logic output_can_advance;
   logic process_stage;
@@ -103,8 +105,8 @@ module null_detector #(
   assign process_stage = stage_valid_q && output_can_advance;
 
   assign power = sample_power(in_i, in_q);
-  assign fast_removed = stage_fast_removed_q;
-  assign slow_removed = stage_slow_removed_q;
+  assign fast_removed = stage_fast_remove_valid_q ? fast_history_rd_q : '0;
+  assign slow_removed = stage_slow_remove_valid_q ? slow_history_rd_q : '0;
 
   assign accept_fast_count_next = fast_count_q == FAST_COUNT_WIDTH'(FAST_WINDOW_SAMPLES) ?
       fast_count_q : fast_count_q + 1'b1;
@@ -334,6 +336,15 @@ module null_detector #(
     end
   endtask
 
+  always_ff @(posedge clk) begin
+    if (input_fire) begin
+      fast_history_rd_q <= fast_history[fast_pos_q];
+      slow_history_rd_q <= slow_history[slow_pos_q];
+      fast_history[fast_pos_q] <= power;
+      slow_history[slow_pos_q] <= power;
+    end
+  end
+
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       fast_pos_q <= '0;
@@ -352,8 +363,8 @@ module null_detector #(
       has_last_null_q <= 1'b0;
       stage_valid_q <= 1'b0;
       stage_power_q <= '0;
-      stage_fast_removed_q <= '0;
-      stage_slow_removed_q <= '0;
+      stage_fast_remove_valid_q <= 1'b0;
+      stage_slow_remove_valid_q <= 1'b0;
       stage_fast_count_q <= '0;
       stage_slow_count_q <= '0;
       stage_sample_index_q <= '0;
@@ -379,8 +390,8 @@ module null_detector #(
       has_last_null_q <= 1'b0;
       stage_valid_q <= 1'b0;
       stage_power_q <= '0;
-      stage_fast_removed_q <= '0;
-      stage_slow_removed_q <= '0;
+      stage_fast_remove_valid_q <= 1'b0;
+      stage_slow_remove_valid_q <= 1'b0;
       stage_fast_count_q <= '0;
       stage_slow_count_q <= '0;
       stage_sample_index_q <= '0;
@@ -446,16 +457,12 @@ module null_detector #(
       if (input_fire) begin
         stage_valid_q <= 1'b1;
         stage_power_q <= power;
-        stage_fast_removed_q <= fast_count_q == FAST_COUNT_WIDTH'(FAST_WINDOW_SAMPLES) ?
-            fast_history[fast_pos_q] : '0;
-        stage_slow_removed_q <= slow_count_q == SLOW_COUNT_WIDTH'(SLOW_WINDOW_SAMPLES) ?
-            slow_history[slow_pos_q] : '0;
+        stage_fast_remove_valid_q <= fast_count_q == FAST_COUNT_WIDTH'(FAST_WINDOW_SAMPLES);
+        stage_slow_remove_valid_q <= slow_count_q == SLOW_COUNT_WIDTH'(SLOW_WINDOW_SAMPLES);
         stage_fast_count_q <= accept_fast_count_next;
         stage_slow_count_q <= accept_slow_count_next;
         stage_sample_index_q <= in_sample_index;
 
-        fast_history[fast_pos_q] <= power;
-        slow_history[slow_pos_q] <= power;
         fast_count_q <= accept_fast_count_next;
         slow_count_q <= accept_slow_count_next;
 
