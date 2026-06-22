@@ -63,10 +63,22 @@ module null_detector #(
   logic [63:0] last_null_sample_index_q;
   logic has_last_null_q;
 
+  logic stage_valid_q;
+  logic [POWER_WIDTH-1:0] stage_power_q;
+  logic [POWER_WIDTH-1:0] stage_fast_removed_q;
+  logic [POWER_WIDTH-1:0] stage_slow_removed_q;
+  logic [FAST_COUNT_WIDTH-1:0] stage_fast_count_q;
+  logic [SLOW_COUNT_WIDTH-1:0] stage_slow_count_q;
+  logic [63:0] stage_sample_index_q;
+
   logic input_fire;
+  logic output_can_advance;
+  logic process_stage;
   logic [POWER_WIDTH-1:0] power;
   logic [POWER_WIDTH-1:0] fast_removed;
   logic [POWER_WIDTH-1:0] slow_removed;
+  logic [FAST_COUNT_WIDTH-1:0] accept_fast_count_next;
+  logic [SLOW_COUNT_WIDTH-1:0] accept_slow_count_next;
   logic [FAST_COUNT_WIDTH-1:0] fast_count_next;
   logic [SLOW_COUNT_WIDTH-1:0] slow_count_next;
   logic [POWER_SUM_WIDTH-1:0] fast_sum_next;
@@ -85,22 +97,24 @@ module null_detector #(
   logic gap_run_too_long;
   logic finalize_matches;
 
-  assign in_ready = !clear && !out_valid;
+  assign output_can_advance = !out_valid || out_ready;
+  assign in_ready = !clear && (!stage_valid_q || output_can_advance);
   assign input_fire = in_valid && in_ready;
+  assign process_stage = stage_valid_q && output_can_advance;
 
   assign power = sample_power(in_i, in_q);
-  assign fast_removed = fast_count_q == FAST_COUNT_WIDTH'(FAST_WINDOW_SAMPLES) ?
-      fast_history[fast_pos_q] : '0;
-  assign slow_removed = slow_count_q == SLOW_COUNT_WIDTH'(SLOW_WINDOW_SAMPLES) ?
-      slow_history[slow_pos_q] : '0;
+  assign fast_removed = stage_fast_removed_q;
+  assign slow_removed = stage_slow_removed_q;
 
-  assign fast_count_next = fast_count_q == FAST_COUNT_WIDTH'(FAST_WINDOW_SAMPLES) ?
+  assign accept_fast_count_next = fast_count_q == FAST_COUNT_WIDTH'(FAST_WINDOW_SAMPLES) ?
       fast_count_q : fast_count_q + 1'b1;
-  assign slow_count_next = slow_count_q == SLOW_COUNT_WIDTH'(SLOW_WINDOW_SAMPLES) ?
+  assign accept_slow_count_next = slow_count_q == SLOW_COUNT_WIDTH'(SLOW_WINDOW_SAMPLES) ?
       slow_count_q : slow_count_q + 1'b1;
+  assign fast_count_next = stage_fast_count_q;
+  assign slow_count_next = stage_slow_count_q;
 
-  assign fast_sum_next = fast_sum_q + POWER_SUM_WIDTH'(power) - POWER_SUM_WIDTH'(fast_removed);
-  assign slow_sum_next = slow_sum_q + POWER_SUM_WIDTH'(power) - POWER_SUM_WIDTH'(slow_removed);
+  assign fast_sum_next = fast_sum_q + POWER_SUM_WIDTH'(stage_power_q) - POWER_SUM_WIDTH'(fast_removed);
+  assign slow_sum_next = slow_sum_q + POWER_SUM_WIDTH'(stage_power_q) - POWER_SUM_WIDTH'(slow_removed);
   assign ratio_next = ratio_q(fast_sum_next, fast_count_next, slow_sum_next, slow_count_next);
   assign enter_ratio = ratio_less_than_threshold(fast_sum_next,
                                                  fast_count_next,
@@ -118,9 +132,9 @@ module null_detector #(
   assign run_length_plus_sample = run_length_q + 32'd1;
   assign merged_run_length = run_length_q + pending_gap_length_q + 32'd1;
   assign pending_gap_length_next = pending_gap_length_q + 32'd1;
-  assign run_power_sum_plus_sample = run_power_sum_q + 64'(power);
-  assign merged_run_power_sum = run_power_sum_q + pending_gap_power_sum_q + 64'(power);
-  assign pending_gap_power_sum_next = pending_gap_power_sum_q + 64'(power);
+  assign run_power_sum_plus_sample = run_power_sum_q + 64'(stage_power_q);
+  assign merged_run_power_sum = run_power_sum_q + pending_gap_power_sum_q + 64'(stage_power_q);
+  assign pending_gap_power_sum_next = pending_gap_power_sum_q + 64'(stage_power_q);
   assign low_run_too_long = (MAX_NULL_SAMPLES != 0) &&
       (merged_run_length > 32'(MAX_NULL_SAMPLES + MAX_MERGE_GAP_SAMPLES));
   assign gap_run_too_long = (MAX_NULL_SAMPLES != 0) &&
@@ -299,6 +313,13 @@ module null_detector #(
       pending_gap_power_sum_q <= '0;
       last_null_sample_index_q <= '0;
       has_last_null_q <= 1'b0;
+      stage_valid_q <= 1'b0;
+      stage_power_q <= '0;
+      stage_fast_removed_q <= '0;
+      stage_slow_removed_q <= '0;
+      stage_fast_count_q <= '0;
+      stage_slow_count_q <= '0;
+      stage_sample_index_q <= '0;
       out_valid <= 1'b0;
       out_sample_index <= '0;
       out_length <= '0;
@@ -319,6 +340,13 @@ module null_detector #(
       pending_gap_power_sum_q <= '0;
       last_null_sample_index_q <= '0;
       has_last_null_q <= 1'b0;
+      stage_valid_q <= 1'b0;
+      stage_power_q <= '0;
+      stage_fast_removed_q <= '0;
+      stage_slow_removed_q <= '0;
+      stage_fast_count_q <= '0;
+      stage_slow_count_q <= '0;
+      stage_sample_index_q <= '0;
       out_valid <= 1'b0;
       out_sample_index <= '0;
       out_length <= '0;
@@ -329,30 +357,15 @@ module null_detector #(
         out_valid <= 1'b0;
       end
 
-      if (input_fire) begin
-        fast_history[fast_pos_q] <= power;
-        slow_history[slow_pos_q] <= power;
+      if (process_stage) begin
         fast_sum_q <= fast_sum_next;
         slow_sum_q <= slow_sum_next;
-        fast_count_q <= fast_count_next;
-        slow_count_q <= slow_count_next;
-
-        if (fast_pos_q == FAST_POS_WIDTH'(FAST_WINDOW_SAMPLES - 1)) begin
-          fast_pos_q <= '0;
-        end else begin
-          fast_pos_q <= fast_pos_q + 1'b1;
-        end
-
-        if (slow_pos_q == SLOW_POS_WIDTH'(SLOW_WINDOW_SAMPLES - 1)) begin
-          slow_pos_q <= '0;
-        end else begin
-          slow_pos_q <= slow_pos_q + 1'b1;
-        end
+        stage_valid_q <= 1'b0;
 
         if (run_length_q == 32'd0) begin
           if (enter_ratio) begin
-            run_start_index_q <= in_sample_index;
-            run_power_sum_q <= 64'(power);
+            run_start_index_q <= stage_sample_index_q;
+            run_power_sum_q <= 64'(stage_power_q);
             run_min_ratio_q <= ratio_next;
             run_length_q <= 32'd1;
             pending_gap_length_q <= '0;
@@ -390,6 +403,35 @@ module null_detector #(
             pending_gap_length_q <= pending_gap_length_next;
             pending_gap_power_sum_q <= pending_gap_power_sum_next;
           end
+        end
+      end
+
+      if (input_fire) begin
+        stage_valid_q <= 1'b1;
+        stage_power_q <= power;
+        stage_fast_removed_q <= fast_count_q == FAST_COUNT_WIDTH'(FAST_WINDOW_SAMPLES) ?
+            fast_history[fast_pos_q] : '0;
+        stage_slow_removed_q <= slow_count_q == SLOW_COUNT_WIDTH'(SLOW_WINDOW_SAMPLES) ?
+            slow_history[slow_pos_q] : '0;
+        stage_fast_count_q <= accept_fast_count_next;
+        stage_slow_count_q <= accept_slow_count_next;
+        stage_sample_index_q <= in_sample_index;
+
+        fast_history[fast_pos_q] <= power;
+        slow_history[slow_pos_q] <= power;
+        fast_count_q <= accept_fast_count_next;
+        slow_count_q <= accept_slow_count_next;
+
+        if (fast_pos_q == FAST_POS_WIDTH'(FAST_WINDOW_SAMPLES - 1)) begin
+          fast_pos_q <= '0;
+        end else begin
+          fast_pos_q <= fast_pos_q + 1'b1;
+        end
+
+        if (slow_pos_q == SLOW_POS_WIDTH'(SLOW_WINDOW_SAMPLES - 1)) begin
+          slow_pos_q <= '0;
+        end else begin
+          slow_pos_q <= slow_pos_q + 1'b1;
         end
       end
     end

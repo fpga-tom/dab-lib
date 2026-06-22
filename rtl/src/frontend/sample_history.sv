@@ -48,12 +48,19 @@ module sample_history #(
   logic [63:0] read_sample_index_q;
   logic [31:0] read_remaining_q;
   logic read_first_q;
+  logic read_pending_q;
+  logic [ADDR_WIDTH-1:0] read_pending_addr_q;
+  logic [63:0] read_pending_sample_index_q;
+  logic read_pending_first_q;
+  logic read_pending_last_q;
+  logic read_pending_error_q;
 
   logic input_fire;
   logic request_fire;
   logic request_available;
   logic request_overflows;
-  logic can_load_read;
+  logic output_can_advance;
+  logic can_issue_stream_read;
   logic read_last_next;
   logic write_is_contiguous;
   logic write_makes_full;
@@ -63,7 +70,7 @@ module sample_history #(
   logic [64:0] request_end_sample;
 
   assign in_ready = !clear;
-  assign read_req_ready = !clear && !reading_q && !rd_out_valid;
+  assign read_req_ready = !clear && !reading_q && !rd_out_valid && !read_pending_q;
   assign input_fire = in_valid && in_ready;
   assign request_fire = read_req_valid && read_req_ready;
 
@@ -75,7 +82,8 @@ module sample_history #(
       read_req_start_sample >= oldest_sample_index_q &&
       request_end_sample <= {1'b0, next_sample_index_q};
 
-  assign can_load_read = reading_q && (!rd_out_valid || rd_out_ready);
+  assign output_can_advance = !rd_out_valid || rd_out_ready;
+  assign can_issue_stream_read = reading_q && output_can_advance;
   assign read_last_next = read_remaining_q == 32'd1;
   assign write_is_contiguous = range_valid_q && in_sample_index == next_sample_index_q;
   assign write_makes_full = stored_samples_q >= 32'(DEPTH_SAMPLES);
@@ -107,6 +115,12 @@ module sample_history #(
       read_sample_index_q <= '0;
       read_remaining_q <= '0;
       read_first_q <= 1'b0;
+      read_pending_q <= 1'b0;
+      read_pending_addr_q <= '0;
+      read_pending_sample_index_q <= '0;
+      read_pending_first_q <= 1'b0;
+      read_pending_last_q <= 1'b0;
+      read_pending_error_q <= 1'b0;
       rd_out_valid <= 1'b0;
       rd_out_i <= '0;
       rd_out_q <= '0;
@@ -123,6 +137,12 @@ module sample_history #(
       read_sample_index_q <= '0;
       read_remaining_q <= '0;
       read_first_q <= 1'b0;
+      read_pending_q <= 1'b0;
+      read_pending_addr_q <= '0;
+      read_pending_sample_index_q <= '0;
+      read_pending_first_q <= 1'b0;
+      read_pending_last_q <= 1'b0;
+      read_pending_error_q <= 1'b0;
       rd_out_valid <= 1'b0;
       rd_out_i <= '0;
       rd_out_q <= '0;
@@ -158,40 +178,51 @@ module sample_history #(
         rd_out_error <= 1'b0;
       end
 
-      if (request_fire) begin
+      if (output_can_advance && read_pending_q) begin
         rd_out_valid <= 1'b1;
-        rd_out_sample_index <= read_req_start_sample;
-        rd_out_first <= 1'b1;
+        rd_out_i <= read_pending_error_q ? '0 : i_mem[read_pending_addr_q];
+        rd_out_q <= read_pending_error_q ? '0 : q_mem[read_pending_addr_q];
+        rd_out_sample_index <= read_pending_sample_index_q;
+        rd_out_first <= read_pending_first_q;
+        rd_out_last <= read_pending_last_q;
+        rd_out_error <= read_pending_error_q;
+        read_pending_q <= 1'b0;
+        read_pending_first_q <= 1'b0;
+        read_pending_last_q <= 1'b0;
+        read_pending_error_q <= 1'b0;
+      end
+
+      if (request_fire) begin
+        read_pending_q <= 1'b1;
+        read_pending_sample_index_q <= read_req_start_sample;
+        read_pending_first_q <= 1'b1;
 
         if (request_available) begin
-          rd_out_i <= i_mem[request_addr];
-          rd_out_q <= q_mem[request_addr];
-          rd_out_last <= read_req_length == 32'd1;
-          rd_out_error <= 1'b0;
+          read_pending_addr_q <= request_addr;
+          read_pending_last_q <= read_req_length == 32'd1;
+          read_pending_error_q <= 1'b0;
 
           reading_q <= read_req_length != 32'd1;
           read_sample_index_q <= read_req_start_sample + 1'b1;
           read_remaining_q <= read_req_length - 1'b1;
           read_first_q <= 1'b0;
         end else begin
-          rd_out_i <= '0;
-          rd_out_q <= '0;
-          rd_out_last <= 1'b1;
-          rd_out_error <= 1'b1;
+          read_pending_addr_q <= '0;
+          read_pending_last_q <= 1'b1;
+          read_pending_error_q <= 1'b1;
 
           reading_q <= 1'b0;
           read_sample_index_q <= '0;
           read_remaining_q <= '0;
           read_first_q <= 1'b0;
         end
-      end else if (can_load_read) begin
-        rd_out_valid <= 1'b1;
-        rd_out_i <= i_mem[read_addr];
-        rd_out_q <= q_mem[read_addr];
-        rd_out_sample_index <= read_sample_index_q;
-        rd_out_first <= read_first_q;
-        rd_out_last <= read_last_next;
-        rd_out_error <= 1'b0;
+      end else if (can_issue_stream_read) begin
+        read_pending_q <= 1'b1;
+        read_pending_addr_q <= read_addr;
+        read_pending_sample_index_q <= read_sample_index_q;
+        read_pending_first_q <= read_first_q;
+        read_pending_last_q <= read_last_next;
+        read_pending_error_q <= 1'b0;
 
         read_sample_index_q <= read_sample_index_q + 1'b1;
         read_remaining_q <= read_remaining_q - 1'b1;

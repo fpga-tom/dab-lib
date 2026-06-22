@@ -35,25 +35,39 @@ module equalizer
   localparam logic [DAB_OFDM_ACTIVE_INDEX_WIDTH-1:0] NULL_ACTIVE_INDEX =
       DAB_OFDM_ACTIVE_INDEX_WIDTH'(DAB_OFDM_ACTIVE_CARRIER_HALF);
 
+  logic stage_valid_q;
+  logic signed [CARRIER_WIDTH-1:0] stage_i_q;
+  logic signed [CARRIER_WIDTH-1:0] stage_q_q;
+  logic signed [COEFF_WIDTH-1:0] stage_channel_i_q;
+  logic signed [COEFF_WIDTH-1:0] stage_channel_q_q;
+  logic [DAB_OFDM_ACTIVE_INDEX_WIDTH-1:0] stage_active_index_q;
+  logic [63:0] stage_symbol_start_sample_q;
+  logic stage_symbol_done_q;
   logic input_fire;
-  logic pending_output;
+  logic output_can_advance;
+  logic stage_can_accept;
 
   logic signed [COEFF_WIDTH-1:0] channel_i_mem [0:DAB_OFDM_ACTIVE_CARRIERS-1];
   logic signed [COEFF_WIDTH-1:0] channel_q_mem [0:DAB_OFDM_ACTIVE_CARRIERS-1];
 
-  logic signed [COEFF_WIDTH-1:0] channel_i;
-  logic signed [COEFF_WIDTH-1:0] channel_q;
   logic signed [CARRIER_WIDTH-1:0] eq_i;
   logic signed [CARRIER_WIDTH-1:0] eq_q;
 
-  assign pending_output = out_valid && !out_ready;
-  assign in_ready = !pending_output;
+  assign output_can_advance = !out_valid || out_ready;
+  assign stage_can_accept = !stage_valid_q || output_can_advance;
+  assign in_ready = !clear && stage_can_accept;
   assign input_fire = in_valid && in_ready;
 
-  assign channel_i = channel_i_mem[in_active_index];
-  assign channel_q = channel_q_mem[in_active_index];
-  assign eq_i = equalized_i(in_i, in_q, channel_i, channel_q, in_active_index);
-  assign eq_q = equalized_q(in_i, in_q, channel_i, channel_q, in_active_index);
+  assign eq_i = equalized_i(stage_i_q,
+                            stage_q_q,
+                            stage_channel_i_q,
+                            stage_channel_q_q,
+                            stage_active_index_q);
+  assign eq_q = equalized_q(stage_i_q,
+                            stage_q_q,
+                            stage_channel_i_q,
+                            stage_channel_q_q,
+                            stage_active_index_q);
 
   function automatic logic signed [63:0] sign_extend_carrier(
       input logic signed [CARRIER_WIDTH-1:0] value
@@ -151,6 +165,14 @@ module equalizer
 
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
+      stage_valid_q <= 1'b0;
+      stage_i_q <= '0;
+      stage_q_q <= '0;
+      stage_channel_i_q <= '0;
+      stage_channel_q_q <= '0;
+      stage_active_index_q <= '0;
+      stage_symbol_start_sample_q <= '0;
+      stage_symbol_done_q <= 1'b0;
       out_valid <= 1'b0;
       out_i <= '0;
       out_q <= '0;
@@ -158,6 +180,14 @@ module equalizer
       out_symbol_start_sample <= '0;
       out_symbol_done <= 1'b0;
     end else if (clear) begin
+      stage_valid_q <= 1'b0;
+      stage_i_q <= '0;
+      stage_q_q <= '0;
+      stage_channel_i_q <= '0;
+      stage_channel_q_q <= '0;
+      stage_active_index_q <= '0;
+      stage_symbol_start_sample_q <= '0;
+      stage_symbol_done_q <= 1'b0;
       out_valid <= 1'b0;
       out_i <= '0;
       out_q <= '0;
@@ -170,16 +200,30 @@ module equalizer
         channel_q_mem[coeff_index] <= coeff_q;
       end
 
-      if (input_fire) begin
-        out_valid <= 1'b1;
-        out_i <= eq_i;
-        out_q <= eq_q;
-        out_active_index <= in_active_index;
-        out_symbol_start_sample <= in_symbol_start_sample;
-        out_symbol_done <= in_symbol_done;
-      end else if (out_ready) begin
+      if (output_can_advance) begin
         out_valid <= 1'b0;
         out_symbol_done <= 1'b0;
+
+        if (stage_valid_q) begin
+          out_valid <= 1'b1;
+          out_i <= eq_i;
+          out_q <= eq_q;
+          out_active_index <= stage_active_index_q;
+          out_symbol_start_sample <= stage_symbol_start_sample_q;
+          out_symbol_done <= stage_symbol_done_q;
+          stage_valid_q <= 1'b0;
+        end
+      end
+
+      if (input_fire) begin
+        stage_valid_q <= 1'b1;
+        stage_i_q <= in_i;
+        stage_q_q <= in_q;
+        stage_channel_i_q <= channel_i_mem[in_active_index];
+        stage_channel_q_q <= channel_q_mem[in_active_index];
+        stage_active_index_q <= in_active_index;
+        stage_symbol_start_sample_q <= in_symbol_start_sample;
+        stage_symbol_done_q <= in_symbol_done;
       end
     end
   end

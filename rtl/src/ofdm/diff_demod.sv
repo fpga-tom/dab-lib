@@ -31,26 +31,41 @@ module diff_demod
       DAB_OFDM_ACTIVE_INDEX_WIDTH'(DAB_OFDM_ACTIVE_CARRIER_HALF);
 
   logic have_prev_q;
+  logic stage_valid_q;
+  logic stage_have_prev_q;
+  logic stage_seed_only_q;
+  logic signed [CARRIER_WIDTH-1:0] stage_i_q;
+  logic signed [CARRIER_WIDTH-1:0] stage_q_q;
+  logic signed [CARRIER_WIDTH-1:0] stage_prev_i_q;
+  logic signed [CARRIER_WIDTH-1:0] stage_prev_q_q;
+  logic [DAB_OFDM_ACTIVE_INDEX_WIDTH-1:0] stage_active_index_q;
+  logic [63:0] stage_symbol_start_sample_q;
+  logic stage_symbol_done_q;
   logic input_fire;
-  logic pending_output;
+  logic output_can_advance;
+  logic stage_can_accept;
 
   logic signed [CARRIER_WIDTH-1:0] prev_i_mem [0:DAB_OFDM_ACTIVE_CARRIERS-1];
   logic signed [CARRIER_WIDTH-1:0] prev_q_mem [0:DAB_OFDM_ACTIVE_CARRIERS-1];
 
-  logic signed [CARRIER_WIDTH-1:0] prev_i;
-  logic signed [CARRIER_WIDTH-1:0] prev_q;
   logic signed [CARRIER_WIDTH-1:0] diff_i;
   logic signed [CARRIER_WIDTH-1:0] diff_q;
 
-  assign pending_output = out_valid && !out_ready;
-  assign in_ready = !pending_output;
+  assign output_can_advance = !out_valid || out_ready;
+  assign stage_can_accept = !stage_valid_q || output_can_advance;
+  assign in_ready = !clear && stage_can_accept;
   assign input_fire = in_valid && in_ready;
 
-  assign prev_i = prev_i_mem[in_active_index];
-  assign prev_q = prev_q_mem[in_active_index];
-
-  assign diff_i = diff_component_i(in_i, in_q, prev_i, prev_q, in_active_index);
-  assign diff_q = diff_component_q(in_i, in_q, prev_i, prev_q, in_active_index);
+  assign diff_i = diff_component_i(stage_i_q,
+                                   stage_q_q,
+                                   stage_prev_i_q,
+                                   stage_prev_q_q,
+                                   stage_active_index_q);
+  assign diff_q = diff_component_q(stage_i_q,
+                                   stage_q_q,
+                                   stage_prev_i_q,
+                                   stage_prev_q_q,
+                                   stage_active_index_q);
 
   function automatic logic signed [63:0] sign_extend_carrier(
       input logic signed [CARRIER_WIDTH-1:0] value
@@ -141,6 +156,16 @@ module diff_demod
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       have_prev_q <= 1'b0;
+      stage_valid_q <= 1'b0;
+      stage_have_prev_q <= 1'b0;
+      stage_seed_only_q <= 1'b0;
+      stage_i_q <= '0;
+      stage_q_q <= '0;
+      stage_prev_i_q <= '0;
+      stage_prev_q_q <= '0;
+      stage_active_index_q <= '0;
+      stage_symbol_start_sample_q <= '0;
+      stage_symbol_done_q <= 1'b0;
       out_valid <= 1'b0;
       out_i <= '0;
       out_q <= '0;
@@ -149,6 +174,16 @@ module diff_demod
       out_symbol_done <= 1'b0;
     end else if (clear) begin
       have_prev_q <= 1'b0;
+      stage_valid_q <= 1'b0;
+      stage_have_prev_q <= 1'b0;
+      stage_seed_only_q <= 1'b0;
+      stage_i_q <= '0;
+      stage_q_q <= '0;
+      stage_prev_i_q <= '0;
+      stage_prev_q_q <= '0;
+      stage_active_index_q <= '0;
+      stage_symbol_start_sample_q <= '0;
+      stage_symbol_done_q <= 1'b0;
       out_valid <= 1'b0;
       out_i <= '0;
       out_q <= '0;
@@ -156,18 +191,34 @@ module diff_demod
       out_symbol_start_sample <= '0;
       out_symbol_done <= 1'b0;
     end else begin
-      if (input_fire) begin
-        if (have_prev_q && !in_seed_only) begin
-          out_valid <= 1'b1;
-          out_i <= diff_i;
-          out_q <= diff_q;
-          out_active_index <= in_active_index;
-          out_symbol_start_sample <= in_symbol_start_sample;
-          out_symbol_done <= in_symbol_done;
-        end else begin
-          out_valid <= 1'b0;
-          out_symbol_done <= 1'b0;
+      if (output_can_advance) begin
+        out_valid <= 1'b0;
+        out_symbol_done <= 1'b0;
+
+        if (stage_valid_q) begin
+          if (stage_have_prev_q && !stage_seed_only_q) begin
+            out_valid <= 1'b1;
+            out_i <= diff_i;
+            out_q <= diff_q;
+            out_active_index <= stage_active_index_q;
+            out_symbol_start_sample <= stage_symbol_start_sample_q;
+            out_symbol_done <= stage_symbol_done_q;
+          end
+          stage_valid_q <= 1'b0;
         end
+      end
+
+      if (input_fire) begin
+        stage_valid_q <= 1'b1;
+        stage_have_prev_q <= have_prev_q;
+        stage_seed_only_q <= in_seed_only;
+        stage_i_q <= in_i;
+        stage_q_q <= in_q;
+        stage_prev_i_q <= prev_i_mem[in_active_index];
+        stage_prev_q_q <= prev_q_mem[in_active_index];
+        stage_active_index_q <= in_active_index;
+        stage_symbol_start_sample_q <= in_symbol_start_sample;
+        stage_symbol_done_q <= in_symbol_done;
 
         prev_i_mem[in_active_index] <= in_i;
         prev_q_mem[in_active_index] <= in_q;
@@ -175,9 +226,6 @@ module diff_demod
         if (in_symbol_done) begin
           have_prev_q <= 1'b1;
         end
-      end else if (out_ready) begin
-        out_valid <= 1'b0;
-        out_symbol_done <= 1'b0;
       end
     end
   end

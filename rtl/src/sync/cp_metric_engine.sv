@@ -78,13 +78,14 @@ module cp_metric_engine #(
   logic invalid_fft_start;
   logic read_prefix_sample;
   logic read_tail_sample;
+  logic read_prefix_for_next_tail;
   logic [GUARD_ADDR_WIDTH-1:0] prefix_addr;
-  logic [GUARD_ADDR_WIDTH-1:0] tail_addr;
+  logic [GUARD_ADDR_WIDTH-1:0] prefix_read_addr;
   /* verilator lint_off UNUSEDSIGNAL */
-  logic [READ_COUNT_WIDTH-1:0] tail_offset;
+  logic [READ_COUNT_WIDTH-1:0] prefix_read_offset;
   /* verilator lint_on UNUSEDSIGNAL */
-  logic signed [SAMPLE_WIDTH-1:0] prefix_i;
-  logic signed [SAMPLE_WIDTH-1:0] prefix_q;
+  logic signed [SAMPLE_WIDTH-1:0] prefix_i_q;
+  logic signed [SAMPLE_WIDTH-1:0] prefix_q_q;
   logic signed [63:0] sample_corr_re;
   logic signed [63:0] sample_corr_im;
   logic [63:0] sample_energy_a;
@@ -108,14 +109,15 @@ module cp_metric_engine #(
 
   assign read_prefix_sample = read_count_q < READ_COUNT_WIDTH'(GUARD_SAMPLES);
   assign read_tail_sample = read_count_q >= READ_COUNT_WIDTH'(FFT_SAMPLES);
+  assign read_prefix_for_next_tail =
+      read_count_q >= READ_COUNT_WIDTH'(FFT_SAMPLES - 1) &&
+      read_count_q < READ_COUNT_WIDTH'(WINDOW_SAMPLES - 1);
   assign prefix_addr = read_count_q[GUARD_ADDR_WIDTH-1:0];
-  assign tail_offset = read_count_q - READ_COUNT_WIDTH'(FFT_SAMPLES);
-  assign tail_addr = tail_offset[GUARD_ADDR_WIDTH-1:0];
-  assign prefix_i = prefix_i_mem[tail_addr];
-  assign prefix_q = prefix_q_mem[tail_addr];
+  assign prefix_read_offset = read_count_q - READ_COUNT_WIDTH'(FFT_SAMPLES - 1);
+  assign prefix_read_addr = prefix_read_offset[GUARD_ADDR_WIDTH-1:0];
 
-  assign sample_corr_re = corr_re_sample(prefix_i, prefix_q, hist_rd_out_i, hist_rd_out_q);
-  assign sample_corr_im = corr_im_sample(prefix_i, prefix_q, hist_rd_out_i, hist_rd_out_q);
+  assign sample_corr_re = corr_re_sample(prefix_i_q, prefix_q_q, hist_rd_out_i, hist_rd_out_q);
+  assign sample_corr_im = corr_im_sample(prefix_i_q, prefix_q_q, hist_rd_out_i, hist_rd_out_q);
   assign sample_energy_a = sample_power(hist_rd_out_i, hist_rd_out_q);
   assign sample_energy_b = sample_power(hist_rd_out_i, hist_rd_out_q);
   assign response_ok = !read_error_q && energy_a_q != 64'd0 && energy_b_q != 64'd0;
@@ -301,6 +303,8 @@ module cp_metric_engine #(
       req_last_q <= 1'b0;
       read_error_q <= 1'b0;
       read_count_q <= '0;
+      prefix_i_q <= '0;
+      prefix_q_q <= '0;
       corr_re_q <= '0;
       corr_im_q <= '0;
       energy_a_q <= '0;
@@ -313,6 +317,8 @@ module cp_metric_engine #(
       req_last_q <= 1'b0;
       read_error_q <= 1'b0;
       read_count_q <= '0;
+      prefix_i_q <= '0;
+      prefix_q_q <= '0;
       corr_re_q <= '0;
       corr_im_q <= '0;
       energy_a_q <= '0;
@@ -358,6 +364,11 @@ module cp_metric_engine #(
             if (hist_rd_out_error || history_beat_malformed) begin
               read_error_q <= 1'b1;
             end else begin
+              if (read_prefix_for_next_tail) begin
+                prefix_i_q <= prefix_i_mem[prefix_read_addr];
+                prefix_q_q <= prefix_q_mem[prefix_read_addr];
+              end
+
               if (read_prefix_sample) begin
                 prefix_i_mem[prefix_addr] <= hist_rd_out_i;
                 prefix_q_mem[prefix_addr] <= hist_rd_out_q;

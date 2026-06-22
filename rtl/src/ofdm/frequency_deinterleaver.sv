@@ -39,13 +39,17 @@ module frequency_deinterleaver
   logic [DAB_OFDM_DATA_INDEX_WIDTH-1:0] emit_index_q;
   logic [63:0] symbol_start_sample_q;
   logic [10:0] lcg_p_q;
+  logic emit_read_valid_q;
+  logic [DAB_OFDM_ACTIVE_INDEX_WIDTH-1:0] emit_read_source_index_q;
+  logic [DAB_OFDM_DATA_INDEX_WIDTH-1:0] emit_read_carrier_index_q;
+  logic emit_read_symbol_done_q;
 
   logic signed [CARRIER_WIDTH-1:0] carrier_i_mem [0:DAB_OFDM_ACTIVE_CARRIERS-1];
   logic signed [CARRIER_WIDTH-1:0] carrier_q_mem [0:DAB_OFDM_ACTIVE_CARRIERS-1];
 
   logic input_fire;
   logic generator_step;
-  logic pending_output;
+  logic output_can_advance;
   logic candidate_accepted;
   logic [DAB_OFDM_ACTIVE_INDEX_WIDTH-1:0] mapped_source_index;
 
@@ -57,10 +61,12 @@ module frequency_deinterleaver
     end
   endfunction
 
-  assign pending_output = out_valid && !out_ready;
-  assign in_ready = (state_q == STATE_LOAD) && !pending_output;
+  assign output_can_advance = !out_valid || out_ready;
+  assign in_ready = (state_q == STATE_LOAD) && output_can_advance && !emit_read_valid_q;
   assign input_fire = in_valid && in_ready;
-  assign generator_step = (state_q == STATE_EMIT) && !pending_output;
+  assign generator_step = (state_q == STATE_EMIT) &&
+                          output_can_advance &&
+                          !(emit_read_valid_q && emit_read_symbol_done_q);
   assign candidate_accepted = (lcg_p_q >= 11'd256) &&
                               (lcg_p_q <= 11'd1792) &&
                               (lcg_p_q != 11'd1024);
@@ -73,6 +79,10 @@ module frequency_deinterleaver
       emit_index_q <= '0;
       symbol_start_sample_q <= '0;
       lcg_p_q <= '0;
+      emit_read_valid_q <= 1'b0;
+      emit_read_source_index_q <= '0;
+      emit_read_carrier_index_q <= '0;
+      emit_read_symbol_done_q <= 1'b0;
       out_valid <= 1'b0;
       out_i <= '0;
       out_q <= '0;
@@ -86,6 +96,10 @@ module frequency_deinterleaver
       emit_index_q <= '0;
       symbol_start_sample_q <= '0;
       lcg_p_q <= '0;
+      emit_read_valid_q <= 1'b0;
+      emit_read_source_index_q <= '0;
+      emit_read_carrier_index_q <= '0;
+      emit_read_symbol_done_q <= 1'b0;
       out_valid <= 1'b0;
       out_i <= '0;
       out_q <= '0;
@@ -94,6 +108,28 @@ module frequency_deinterleaver
       out_symbol_start_sample <= '0;
       out_symbol_done <= 1'b0;
     end else begin
+      if (output_can_advance) begin
+        out_valid <= 1'b0;
+        out_symbol_done <= 1'b0;
+
+        if (emit_read_valid_q) begin
+          out_valid <= 1'b1;
+          out_i <= carrier_i_mem[emit_read_source_index_q];
+          out_q <= carrier_q_mem[emit_read_source_index_q];
+          out_carrier_index <= emit_read_carrier_index_q;
+          out_source_index <= emit_read_source_index_q;
+          out_symbol_start_sample <= symbol_start_sample_q;
+          out_symbol_done <= emit_read_symbol_done_q;
+          emit_read_valid_q <= 1'b0;
+
+          if (emit_read_symbol_done_q) begin
+            state_q <= STATE_LOAD;
+            emit_index_q <= '0;
+            lcg_p_q <= '0;
+          end
+        end
+      end
+
       if (input_fire) begin
         carrier_i_mem[load_index_q] <= in_i;
         carrier_q_mem[load_index_q] <= in_q;
@@ -115,28 +151,15 @@ module frequency_deinterleaver
         lcg_p_q <= lcg_next(lcg_p_q);
 
         if (candidate_accepted) begin
-          out_valid <= 1'b1;
-          out_i <= carrier_i_mem[mapped_source_index];
-          out_q <= carrier_q_mem[mapped_source_index];
-          out_carrier_index <= emit_index_q;
-          out_source_index <= mapped_source_index;
-          out_symbol_start_sample <= symbol_start_sample_q;
-          out_symbol_done <= emit_index_q == LAST_DATA_INDEX;
+          emit_read_valid_q <= 1'b1;
+          emit_read_source_index_q <= mapped_source_index;
+          emit_read_carrier_index_q <= emit_index_q;
+          emit_read_symbol_done_q <= emit_index_q == LAST_DATA_INDEX;
 
-          if (emit_index_q == LAST_DATA_INDEX) begin
-            state_q <= STATE_LOAD;
-            emit_index_q <= '0;
-            lcg_p_q <= '0;
-          end else begin
+          if (emit_index_q != LAST_DATA_INDEX) begin
             emit_index_q <= emit_index_q + 1'b1;
           end
-        end else begin
-          out_valid <= 1'b0;
-          out_symbol_done <= 1'b0;
         end
-      end else if (out_ready) begin
-        out_valid <= 1'b0;
-        out_symbol_done <= 1'b0;
       end
     end
   end
