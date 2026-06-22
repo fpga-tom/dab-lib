@@ -23,11 +23,11 @@ typedef struct {
     uint32_t union_valid_fibs;
 } fic_layout_score_t;
 
-static int read_fic_prefix(const char *path, int8_t *fic_softbits, long *file_size_out) {
-    FILE *fp;
+static int open_softbits_file(const char *path, FILE **fp_out, long *file_size_out) {
+    FILE *fp = 0;
     long file_size;
 
-    if (path == 0 || fic_softbits == 0) {
+    if (path == 0 || fp_out == 0 || file_size_out == 0) {
         return -1;
     }
 
@@ -44,19 +44,62 @@ static int read_fic_prefix(const char *path, int8_t *fic_softbits, long *file_si
         fclose(fp);
         return -1;
     }
-    if (fseek(fp, 0L, SEEK_SET) != 0) {
-        fclose(fp);
+    *fp_out = fp;
+    *file_size_out = file_size;
+    return 0;
+}
+
+static int read_fic_at(FILE *fp, long offset, int8_t *fic_softbits) {
+    if (fp == 0 || offset < 0 || fic_softbits == 0) {
+        return -1;
+    }
+    if (fseek(fp, offset, SEEK_SET) != 0) {
         return -1;
     }
     if (fread(fic_softbits, 1u, DAB_TFRAME_FIC_SOFTBITS, fp) != DAB_TFRAME_FIC_SOFTBITS) {
-        fclose(fp);
         return -1;
     }
-    fclose(fp);
+    return 0;
+}
 
-    if (file_size_out != 0) {
-        *file_size_out = file_size;
+static int softbits_file_layout(long file_size,
+                                uint32_t *full_tframe_count_out,
+                                uint32_t *partial_fic_count_out,
+                                long *trailing_bytes_out,
+                                uint32_t *fic_count_out) {
+    const long tframe_bytes = (long)DAB_TFRAME_TOTAL_SOFTBITS;
+    const long fic_bytes = (long)DAB_TFRAME_FIC_SOFTBITS;
+    long full_tframes;
+    long partial_fics;
+    long remaining;
+
+    if (file_size < fic_bytes ||
+        full_tframe_count_out == 0 ||
+        partial_fic_count_out == 0 ||
+        trailing_bytes_out == 0 ||
+        fic_count_out == 0) {
+        return -1;
     }
+
+    if (file_size >= tframe_bytes) {
+        full_tframes = file_size / tframe_bytes;
+        remaining = file_size % tframe_bytes;
+        partial_fics = remaining / fic_bytes;
+        remaining %= fic_bytes;
+    } else {
+        full_tframes = 0;
+        partial_fics = file_size / fic_bytes;
+        remaining = file_size % fic_bytes;
+    }
+
+    if (full_tframes + partial_fics <= 0) {
+        return -1;
+    }
+
+    *full_tframe_count_out = (uint32_t)full_tframes;
+    *partial_fic_count_out = (uint32_t)partial_fics;
+    *trailing_bytes_out = remaining;
+    *fic_count_out = (uint32_t)(full_tframes + partial_fics);
     return 0;
 }
 
@@ -171,6 +214,32 @@ static int score_layout(const int8_t *src, fic_layout_t layout, fic_layout_score
     return 0;
 }
 
+static int select_best_layout(const int8_t *src,
+                              fic_layout_score_t scores[FIC_LAYOUT_COUNT],
+                              fic_layout_score_t **best_out) {
+    uint32_t layout;
+    fic_layout_score_t *best = 0;
+
+    if (src == 0 || scores == 0 || best_out == 0) {
+        return -1;
+    }
+
+    for (layout = 0u; layout < FIC_LAYOUT_COUNT; ++layout) {
+        if (score_layout(src, (fic_layout_t)layout, &scores[layout]) != 0) {
+            return -1;
+        }
+        if (best == 0 ||
+            scores[layout].union_valid_fibs > best->union_valid_fibs ||
+            (scores[layout].union_valid_fibs == best->union_valid_fibs &&
+             scores[layout].normal.total_valid_fibs > best->normal.total_valid_fibs)) {
+            best = &scores[layout];
+        }
+    }
+
+    *best_out = best;
+    return 0;
+}
+
 static void print_report_line(const char *name, const dab_fic_debug_report_t *report) {
     uint32_t block_index;
 
@@ -189,6 +258,26 @@ static void print_report_line(const char *name, const dab_fic_debug_report_t *re
                block->pack_variant);
     }
     printf("\n");
+}
+
+static void print_layout_reports(const fic_layout_score_t scores[FIC_LAYOUT_COUNT]) {
+    uint32_t layout;
+
+    if (scores == 0) {
+        return;
+    }
+
+    for (layout = 0u; layout < FIC_LAYOUT_COUNT; ++layout) {
+        char name[64];
+
+        printf("layout=%s union_parseable_fibs=%u\n",
+               layout_name(scores[layout].layout),
+               scores[layout].union_valid_fibs);
+        snprintf(name, sizeof(name), "  %s", layout_name(scores[layout].layout));
+        print_report_line(name, &scores[layout].normal);
+        snprintf(name, sizeof(name), "  %s_inverted", layout_name(scores[layout].layout));
+        print_report_line(name, &scores[layout].inverted);
+    }
 }
 
 static uint32_t fic_repo_valid_subchannel_count(const dab_fic_database_t *db) {
@@ -361,83 +450,137 @@ static int process_variant(dab_fic_state_t *state,
 }
 
 int main(int argc, char **argv) {
+    FILE *fp = 0;
     int8_t raw_fic[DAB_TFRAME_FIC_SOFTBITS];
     fic_layout_score_t scores[FIC_LAYOUT_COUNT];
     fic_layout_score_t *best = 0;
     dab_fic_state_t state;
     long file_size = 0;
-    uint32_t layout;
-    uint64_t frame_start_sample = 0u;
+    long trailing_bytes = 0;
+    uint32_t full_tframe_count = 0u;
+    uint32_t partial_fic_count = 0u;
+    uint32_t fic_count = 0u;
+    uint32_t frame_index;
+    uint32_t decoded_frames = 0u;
+    uint32_t skipped_frames = 0u;
+    uint64_t first_frame_start_sample = 0u;
+    int verbose_layouts = 0;
 
     if (argc != 2 && argc != 3) {
-        fprintf(stderr, "usage: %s /path/to/raw_softbits_i8.bin [frame_start_sample]\n", argv[0]);
+        fprintf(stderr, "usage: %s /path/to/raw_softbits_i8.bin [first_frame_start_sample]\n", argv[0]);
         return EXIT_FAILURE;
     }
 
     if (argc == 3) {
         char *end = 0;
-        frame_start_sample = strtoull(argv[2], &end, 10);
+        first_frame_start_sample = strtoull(argv[2], &end, 10);
         if (end == argv[2] || *end != '\0') {
-            fprintf(stderr, "invalid frame_start_sample: %s\n", argv[2]);
+            fprintf(stderr, "invalid first_frame_start_sample: %s\n", argv[2]);
             return EXIT_FAILURE;
         }
     }
 
-    if (read_fic_prefix(argv[1], raw_fic, &file_size) != 0) {
+    if (open_softbits_file(argv[1], &fp, &file_size) != 0) {
         fprintf(stderr,
                 "failed to read at least %u FIC softbits from %s\n",
                 (unsigned int)DAB_TFRAME_FIC_SOFTBITS,
                 argv[1]);
         return EXIT_FAILURE;
     }
-
-    for (layout = 0u; layout < FIC_LAYOUT_COUNT; ++layout) {
-        if (score_layout(raw_fic, (fic_layout_t)layout, &scores[layout]) != 0) {
-            fprintf(stderr, "failed to analyze layout %s\n", layout_name((fic_layout_t)layout));
-            return EXIT_FAILURE;
-        }
-        if (best == 0 ||
-            scores[layout].union_valid_fibs > best->union_valid_fibs ||
-            (scores[layout].union_valid_fibs == best->union_valid_fibs &&
-             scores[layout].normal.total_valid_fibs > best->normal.total_valid_fibs)) {
-            best = &scores[layout];
-        }
-    }
-
-    printf("input=%s bytes=%ld fic_softbits=%u\n",
-           argv[1],
-           file_size,
-           (unsigned int)DAB_TFRAME_FIC_SOFTBITS);
-    for (layout = 0u; layout < FIC_LAYOUT_COUNT; ++layout) {
-        char name[64];
-
-        printf("layout=%s union_parseable_fibs=%u\n",
-               layout_name(scores[layout].layout),
-               scores[layout].union_valid_fibs);
-        snprintf(name, sizeof(name), "  %s", layout_name(scores[layout].layout));
-        print_report_line(name, &scores[layout].normal);
-        snprintf(name, sizeof(name), "  %s_inverted", layout_name(scores[layout].layout));
-        print_report_line(name, &scores[layout].inverted);
-    }
-
-    if (best == 0 || best->union_valid_fibs == 0u) {
-        fprintf(stderr, "no parseable FIC FIBs found\n");
+    if (softbits_file_layout(file_size,
+                             &full_tframe_count,
+                             &partial_fic_count,
+                             &trailing_bytes,
+                             &fic_count) != 0) {
+        fprintf(stderr, "failed to classify softbit file layout\n");
+        fclose(fp);
         return EXIT_FAILURE;
     }
 
     if (dab_fic_init(&state) != 0) {
         fprintf(stderr, "fic init failed\n");
-        return EXIT_FAILURE;
-    }
-    if (process_variant(&state, frame_start_sample, raw_fic, best->layout, 0, &best->normal) != 0 ||
-        process_variant(&state, frame_start_sample, raw_fic, best->layout, 1, &best->inverted) != 0) {
-        fprintf(stderr, "fic decode failed\n");
+        fclose(fp);
         return EXIT_FAILURE;
     }
 
-    printf("selected_layout=%s union_parseable_fibs=%u total_valid_fibs_parsed=%u\n",
-           layout_name(best->layout),
-           best->union_valid_fibs,
+    verbose_layouts = fic_count == 1u || getenv("DAB_FIC_SOFTBITS_VERBOSE_LAYOUTS") != 0;
+
+    printf("input=%s bytes=%ld mode=%s fic_frames=%u full_tframes=%u partial_fics=%u trailing_bytes=%ld fic_softbits=%u tframe_softbits=%u\n",
+           argv[1],
+           file_size,
+           full_tframe_count != 0u ? "tframe" : "fic_prefix",
+           fic_count,
+           full_tframe_count,
+           partial_fic_count,
+           trailing_bytes,
+           (unsigned int)DAB_TFRAME_FIC_SOFTBITS,
+           (unsigned int)DAB_TFRAME_TOTAL_SOFTBITS);
+
+    for (frame_index = 0u; frame_index < fic_count; ++frame_index) {
+        const int is_full_tframe = frame_index < full_tframe_count;
+        const long offset = is_full_tframe != 0 ?
+                            (long)frame_index * (long)DAB_TFRAME_TOTAL_SOFTBITS :
+                            ((long)full_tframe_count * (long)DAB_TFRAME_TOTAL_SOFTBITS) +
+                            ((long)(frame_index - full_tframe_count) *
+                             (long)DAB_TFRAME_FIC_SOFTBITS);
+        const uint64_t frame_start_sample = first_frame_start_sample + frame_index;
+        const uint32_t total_before = state.total_valid_fibs;
+
+        if (read_fic_at(fp, offset, raw_fic) != 0) {
+            fprintf(stderr, "failed to read FIC prefix for frame=%u offset=%ld\n", frame_index, offset);
+            fclose(fp);
+            return EXIT_FAILURE;
+        }
+        if (select_best_layout(raw_fic, scores, &best) != 0) {
+            fprintf(stderr, "failed to analyze FIC layouts for frame=%u offset=%ld\n", frame_index, offset);
+            fclose(fp);
+            return EXIT_FAILURE;
+        }
+
+        if (verbose_layouts != 0) {
+            if (fic_count != 1u) {
+                printf("frame=%u offset=%ld layout_report_start\n", frame_index, offset);
+            }
+            print_layout_reports(scores);
+        }
+
+        if (best == 0 || best->union_valid_fibs == 0u) {
+            skipped_frames++;
+            printf("frame=%u offset=%ld source=%s no_parseable_fibs\n",
+                   frame_index,
+                   offset,
+                   is_full_tframe != 0 ? "tframe" : "partial_fic");
+            continue;
+        }
+
+        if (process_variant(&state, frame_start_sample, raw_fic, best->layout, 0, &best->normal) != 0 ||
+            process_variant(&state, frame_start_sample, raw_fic, best->layout, 1, &best->inverted) != 0) {
+            fprintf(stderr, "fic decode failed for frame=%u offset=%ld\n", frame_index, offset);
+            fclose(fp);
+            return EXIT_FAILURE;
+        }
+
+        decoded_frames++;
+        printf("frame=%u offset=%ld source=%s selected_layout=%s union_parseable_fibs=%u valid_fibs_parsed=%u total_valid_fibs=%u\n",
+               frame_index,
+               offset,
+               is_full_tframe != 0 ? "tframe" : "partial_fic",
+               layout_name(best->layout),
+               best->union_valid_fibs,
+               state.total_valid_fibs - total_before,
+               state.total_valid_fibs);
+    }
+
+    fclose(fp);
+
+    if (decoded_frames == 0u) {
+        fprintf(stderr, "no parseable FIC FIBs found\n");
+        return EXIT_FAILURE;
+    }
+
+    printf("fic_decode decoded_frames=%u skipped_frames=%u total_valid_fibs_parsed=%u\n",
+           decoded_frames,
+           skipped_frames,
            state.total_valid_fibs);
     print_fic_repo_summary(&state.repo);
 

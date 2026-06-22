@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -44,6 +45,7 @@ struct Config {
     uint64_t max_cycles = 200000000ull;
     uint64_t sample_limit = 0;
     uint64_t log_every_cycles = 0;
+    uint32_t target_tframes = 1;
     bool require_frame = true;
     bool stop_feed_after_frame_ready = true;
     double min_cp_score = 0.40;
@@ -139,9 +141,13 @@ Config load_config() {
     cfg.max_cycles = env_u64("DAB_TB_MAX_CYCLES", cfg.max_cycles);
     cfg.sample_limit = env_u64("DAB_TB_SAMPLE_LIMIT", cfg.sample_limit);
     cfg.log_every_cycles = env_u64("DAB_TB_LOG_EVERY_CYCLES", cfg.log_every_cycles);
+    cfg.target_tframes = static_cast<uint32_t>(env_u64("DAB_TB_TFRAMES", cfg.target_tframes));
+    if (cfg.target_tframes == 0u) {
+        cfg.target_tframes = 1u;
+    }
     cfg.require_frame = env_bool("DAB_TB_REQUIRE_FRAME", cfg.require_frame);
     cfg.stop_feed_after_frame_ready =
-        env_bool("DAB_TB_STOP_FEED_AFTER_FRAME_READY", cfg.stop_feed_after_frame_ready);
+        env_bool("DAB_TB_STOP_FEED_AFTER_FRAME_READY", cfg.target_tframes <= 1u);
     cfg.min_cp_score = env_f64("DAB_TB_MIN_CP_SCORE", cfg.min_cp_score);
     cfg.min_pilot_score = env_f64("DAB_TB_MIN_PILOT_SCORE", cfg.min_pilot_score);
     cfg.fft_target_rms = env_f64("DAB_TB_FFT_TARGET_RMS", cfg.fft_target_rms);
@@ -402,27 +408,36 @@ private:
 class DataScheduler {
 public:
     bool observe_sync(const CycleFires &fires) {
-        if (!fires.sync || !fires.sync_found || have_frame_) {
+        if (!fires.sync || !fires.sync_found || has_frame(fires.sync_prs_fft_start)) {
             return false;
         }
 
-        have_frame_ = true;
-        prs_fft_start_ = fires.sync_prs_fft_start;
-        frame_required_end_sample_ =
-            prs_fft_start_ + (uint64_t{kTotalSymbols} * kSymbolSamples) + kFftSamples;
+        Frame frame;
+
+        frame.prs_fft_start = fires.sync_prs_fft_start;
+        frame.required_end_sample =
+            frame.prs_fft_start + (uint64_t{kTotalSymbols} * kSymbolSamples) + kFftSamples;
+        pending_.push_back(frame);
+        ++observed_frames_;
         return true;
     }
 
     bool can_arm(const Vdab_pipeline_top &top) const {
-        if (!have_frame_ || armed_ || completed_commands_) {
+        if (pending_.empty() || armed_ || waiting_for_frame_done_) {
             return false;
         }
+        const Frame &frame = pending_.front();
         return top.history_valid &&
-               top.history_oldest_sample_index <= prs_fft_start_ &&
-               top.history_next_sample_index >= frame_required_end_sample_;
+               top.history_oldest_sample_index <= frame.prs_fft_start &&
+               top.history_next_sample_index >= frame.required_end_sample;
     }
 
     void arm() {
+        if (pending_.empty()) {
+            return;
+        }
+        current_ = pending_.front();
+        pending_.pop_front();
         armed_ = true;
         next_symbol_ = 0;
     }
@@ -432,7 +447,7 @@ public:
     }
 
     uint64_t command_fft_start() const {
-        return prs_fft_start_ + (uint64_t{next_symbol_ + 1u} * kSymbolSamples);
+        return current_.prs_fft_start + (uint64_t{next_symbol_ + 1u} * kSymbolSamples);
     }
 
     void command_accepted() {
@@ -440,20 +455,22 @@ public:
             ++next_symbol_;
         }
         if (next_symbol_ == kTotalSymbols) {
-            completed_commands_ = true;
+            armed_ = false;
+            waiting_for_frame_done_ = true;
+            ++scheduled_frames_;
         }
     }
 
-    bool have_frame() const {
-        return have_frame_;
+    void frame_done() {
+        waiting_for_frame_done_ = false;
     }
 
     bool armed() const {
         return armed_;
     }
 
-    bool completed_commands() const {
-        return completed_commands_;
+    bool waiting_for_frame_done() const {
+        return waiting_for_frame_done_;
     }
 
     uint32_t next_symbol() const {
@@ -461,20 +478,52 @@ public:
     }
 
     uint64_t prs_fft_start() const {
-        return prs_fft_start_;
+        return current_.prs_fft_start;
     }
 
     uint64_t frame_required_end_sample() const {
-        return frame_required_end_sample_;
+        return current_.required_end_sample;
+    }
+
+    uint64_t observed_frames() const {
+        return observed_frames_;
+    }
+
+    uint64_t scheduled_frames() const {
+        return scheduled_frames_;
+    }
+
+    size_t pending_count() const {
+        return pending_.size();
     }
 
 private:
-    bool have_frame_ = false;
+    struct Frame {
+        uint64_t prs_fft_start = 0;
+        uint64_t required_end_sample = 0;
+    };
+
+    bool has_frame(uint64_t prs_fft_start) const {
+        size_t i;
+
+        if ((armed_ || waiting_for_frame_done_) && current_.prs_fft_start == prs_fft_start) {
+            return true;
+        }
+        for (i = 0; i < pending_.size(); ++i) {
+            if (pending_[i].prs_fft_start == prs_fft_start) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    std::deque<Frame> pending_;
+    Frame current_;
     bool armed_ = false;
-    bool completed_commands_ = false;
+    bool waiting_for_frame_done_ = false;
     uint32_t next_symbol_ = 0;
-    uint64_t prs_fft_start_ = 0;
-    uint64_t frame_required_end_sample_ = 0;
+    uint64_t observed_frames_ = 0;
+    uint64_t scheduled_frames_ = 0;
 };
 
 void drive_quiescent(Vdab_pipeline_top &top, const Config &cfg) {
@@ -617,12 +666,14 @@ int main(int argc, char **argv) {
         uint64_t sync_events = 0;
         uint64_t found_sync_events = 0;
         bool feed_enabled = true;
-        bool frame_done = false;
-        uint64_t frame_start_sample = 0;
+        bool feed_paused_for_frame = false;
+        uint32_t frames_done = 0;
+        uint64_t last_frame_start_sample = 0;
 
         std::cout << "dab_pipeline_file start iq_path=" << cfg.iq_path
                   << " samples=" << samples.size()
                   << " softbits_path=" << cfg.softbits_path
+                  << " target_tframes=" << cfg.target_tframes
                   << " require_frame=" << (cfg.require_frame ? 1 : 0)
                   << " fft_scale=" << (cfg.fft_fixed_gain ? "fixed" : "rms")
                   << "\n";
@@ -632,6 +683,9 @@ int main(int argc, char **argv) {
                 scheduler.arm();
                 if (cfg.stop_feed_after_frame_ready) {
                     feed_enabled = false;
+                } else if (cfg.target_tframes > 1u) {
+                    feed_enabled = false;
+                    feed_paused_for_frame = true;
                 }
                 std::cout << "scheduler armed prs_fft_start=" << scheduler.prs_fft_start()
                           << " frame_required_end=" << scheduler.frame_required_end_sample()
@@ -681,12 +735,20 @@ int main(int argc, char **argv) {
                 ++softbit_count;
             }
             if (fires.frame_done) {
-                frame_done = true;
-                frame_start_sample = fires.frame_start_sample;
-                std::cout << "frame done frame_start_sample=" << frame_start_sample
+                ++frames_done;
+                scheduler.frame_done();
+                last_frame_start_sample = fires.frame_start_sample;
+                std::cout << "frame done index=" << frames_done
+                          << " frame_start_sample=" << last_frame_start_sample
                           << " softbits=" << softbit_count
                           << " cycle=" << cycle << "\n";
-                break;
+                if (frames_done >= cfg.target_tframes) {
+                    break;
+                }
+                if (feed_paused_for_frame && sample_pos < samples.size()) {
+                    feed_enabled = true;
+                    feed_paused_for_frame = false;
+                }
             }
 
             if (sample_pos >= samples.size()) {
@@ -700,7 +762,10 @@ int main(int argc, char **argv) {
                           << " sync_events=" << sync_events
                           << " found=" << found_sync_events
                           << " scheduler_armed=" << (scheduler.armed() ? 1 : 0)
+                          << " scheduler_waiting=" << (scheduler.waiting_for_frame_done() ? 1 : 0)
+                          << " scheduler_pending=" << scheduler.pending_count()
                           << " data_next=" << scheduler.next_symbol()
+                          << " frames_done=" << frames_done
                           << " softbits=" << softbit_count
                           << " ffts=" << fft.fft_count()
                           << "\n";
@@ -715,7 +780,11 @@ int main(int argc, char **argv) {
         std::cout << "dab_pipeline_file done samples_in=" << sample_pos
                   << " sync_events=" << sync_events
                   << " found_sync_events=" << found_sync_events
-                  << " data_symbols_sent=" << scheduler.next_symbol()
+                  << " sync_frames_observed=" << scheduler.observed_frames()
+                  << " data_frames_scheduled=" << scheduler.scheduled_frames()
+                  << " last_data_symbol_next=" << scheduler.next_symbol()
+                  << " frames_done=" << frames_done
+                  << " last_frame_start_sample=" << last_frame_start_sample
                   << " softbits=" << softbit_count
                   << " ffts=" << fft.fft_count()
                   << " fft_last_scale=" << fft.last_scale()
@@ -723,17 +792,19 @@ int main(int argc, char **argv) {
                   << " fft_saturations=" << fft.saturation_count()
                   << "\n";
 
-        if (frame_done) {
-            if (softbit_count != kFrameSoftbits) {
+        if (frames_done >= cfg.target_tframes) {
+            const uint64_t expected_softbits = uint64_t{cfg.target_tframes} * kFrameSoftbits;
+            if (softbit_count != expected_softbits) {
                 std::cerr << "frame completed with unexpected softbit count expected="
-                          << kFrameSoftbits << " actual=" << softbit_count << "\n";
+                          << expected_softbits << " actual=" << softbit_count << "\n";
                 return 1;
             }
             return 0;
         }
 
         if (cfg.require_frame) {
-            std::cerr << "no complete frame produced before timeout or EOF\n";
+            std::cerr << "only produced " << frames_done << " complete frame(s), target="
+                      << cfg.target_tframes << ", before timeout or EOF\n";
             return 1;
         }
         return 0;

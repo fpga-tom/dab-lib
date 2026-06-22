@@ -1,6 +1,33 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+usage() {
+  printf 'Usage: %s [tframes]\n' "${0##*/}"
+  printf '\n'
+  printf 'Build and run the file-driven DAB pipeline Verilator testbench.\n'
+  printf '  tframes  Optional positive integer number of transmission frames to decode.\n'
+  printf '\n'
+  printf 'Without an argument, the testbench uses DAB_TB_TFRAMES or defaults to 1.\n'
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+if (( $# > 1 )); then
+  usage >&2
+  exit 2
+fi
+
+if (( $# == 1 )); then
+  if [[ ! "$1" =~ ^[1-9][0-9]*$ ]]; then
+    printf 'error: tframes must be a positive integer\n' >&2
+    exit 2
+  fi
+  export DAB_TB_TFRAMES="$1"
+fi
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILD_DIR="${ROOT_DIR}/build/rtl/dab_pipeline_file"
 HISTORY_DEPTH="${DAB_TB_HISTORY_DEPTH:-262144}"

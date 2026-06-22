@@ -139,16 +139,30 @@ DAB_TB_SOFTBITS_PATH=/tmp/dab_softbits_i8.bin \
 rtl/scripts/run_dab_pipeline_file_verilator.sh
 ```
 
+Pass an optional positive integer to decode multiple complete transmission
+frames from the same IQ capture:
+
+```sh
+DAB_TB_IQ_PATH=/tmp/dab_iq_f32.bin \
+DAB_TB_SOFTBITS_PATH=/tmp/dab_softbits_i8.bin \
+rtl/scripts/run_dab_pipeline_file_verilator.sh 2
+```
+
 The input file is interleaved `float32` IQ (`I0,Q0,I1,Q1,...`) as written by
 `DAB_SYNC_PROBE_DUMP_REF_SAMPLES_PATH`. The output file is raw signed `int8`
 softbits in `tframe_assembler` order: all FIC softbits first, then MSC
-softbits.
+softbits. When multiple frames are requested, the output appends complete
+`230400`-softbit frames back-to-back.
 
-Decode and print the FIC prefix from a raw softbit frame with:
+Decode and print all FIC prefixes from a raw softbit file with:
 
 ```sh
 ./build-release/dab_fic_softbits_decode /tmp/dab_softbits_i8.bin
 ```
+
+The decoder walks each complete `230400`-softbit tframe and also decodes a
+trailing partial frame when at least one full `9216`-softbit FIC prefix is
+present.
 
 Run the implemented `tframe_assembler` Verilator test with:
 
