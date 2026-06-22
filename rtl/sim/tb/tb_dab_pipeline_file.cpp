@@ -49,6 +49,7 @@ struct Config {
     bool require_frame = true;
     bool stop_feed_after_frame_ready = true;
     bool internal_data_scheduler = true;
+    bool streaming_cp_search = true;
     uint32_t sample_period_cycles = 1;
     double min_cp_score = 0.40;
     double min_pilot_score = 0.50;
@@ -150,11 +151,14 @@ Config load_config() {
     cfg.require_frame = env_bool("DAB_TB_REQUIRE_FRAME", cfg.require_frame);
     cfg.internal_data_scheduler =
         env_bool("DAB_TB_INTERNAL_DATA_SCHEDULER", cfg.internal_data_scheduler);
+    cfg.streaming_cp_search =
+        env_bool("DAB_TB_ENABLE_STREAMING_CP_SEARCH", cfg.streaming_cp_search);
     cfg.stop_feed_after_frame_ready =
         env_bool("DAB_TB_STOP_FEED_AFTER_FRAME_READY",
                  !cfg.internal_data_scheduler && cfg.target_tframes <= 1u);
     cfg.sample_period_cycles = static_cast<uint32_t>(
-        env_u64("DAB_TB_SAMPLE_PERIOD_CYCLES", cfg.internal_data_scheduler ? 16u : 1u));
+        env_u64("DAB_TB_SAMPLE_PERIOD_CYCLES",
+                cfg.internal_data_scheduler && !cfg.streaming_cp_search ? 16u : 1u));
     if (cfg.sample_period_cycles == 0u) {
         cfg.sample_period_cycles = 1u;
     }
@@ -688,6 +692,7 @@ int main(int argc, char **argv) {
                   << " require_frame=" << (cfg.require_frame ? 1 : 0)
                   << " data_scheduler="
                   << (cfg.internal_data_scheduler ? "internal" : "external")
+                  << " cp_search=" << (cfg.streaming_cp_search ? "stream" : "history")
                   << " sample_period_cycles=" << cfg.sample_period_cycles
                   << " fft_scale=" << (cfg.fft_fixed_gain ? "fixed" : "rms")
                   << "\n";

@@ -9,6 +9,7 @@ SDR I/Q stream
   -> sample_history
   -> null_detector
   -> prs_acquire_track
+  -> cp_stream_metric / prs_stream_search
   -> symbol_buffer
   -> cfo_corrector
   -> fft_2048
@@ -32,7 +33,8 @@ The top owns:
 
 ```text
 iq_ingress -> sample_history/null_detector
-sample_history read arbitration for CP metrics and symbol extraction
+sample_history read arbitration for symbol extraction
+streaming CP metric/search for PRS coarse timing
 PRS acquire/track control
 symbol_buffer -> cfo_corrector -> fft_2048 -> active_carrier_mapper
 PRS pilot refinement and channel coefficient update
@@ -55,10 +57,11 @@ symbols through `prs_acquire_track`. The top includes a softbit-pair adapter
 that stores QPSK `soft_b` values so `tframe_assembler` still receives the
 C-compatible `soft_a[0..1535]` then `soft_b[0..1535]` order.
 
-The top also gates PRS search/scoring until `sample_history` contains the full
-requested search range. This is required for live-style file replay: null
-detection can produce a candidate before the future PRS FFT samples have arrived
-in the history buffer.
+By default, PRS CP scoring is independent of `sample_history`:
+`cp_stream_metric` computes a rolling cyclic-prefix score as samples arrive, and
+`prs_stream_search` selects the best live metric inside each acquire/tracking
+window. The older history-backed `prs_score_search` plus `cp_metric_engine` path
+is still available by setting `ENABLE_STREAMING_CP_SEARCH=0`.
 
 ### `iq_ingress`
 
@@ -102,12 +105,12 @@ This should be bypassable while matching C golden vectors.
 
 ### `sample_history`
 
-Stores enough samples to cover PRS search/scoring latency and in-flight symbol
-extraction. Data symbols are no longer held until a full transmission frame is
-available. The C file replay defaults to a 131072-sample history, half of the
-previous 262144-sample frame-buffer setting. In that bench, the default
-16-cycle sample period models an FPGA fabric clock that is faster than the SDR
-sample strobe.
+Stores enough samples for in-flight PRS/data symbol extraction. CP search no
+longer requires future IQ samples to be retained in this buffer when
+`ENABLE_STREAMING_CP_SEARCH=1`. Data symbols are also not held until a full
+transmission frame is available. The C file replay now defaults to a
+32768-sample history and one accepted SDR sample per simulated clock when the
+streaming CP scorer is enabled.
 
 Source:
 
@@ -204,10 +207,59 @@ search_end_sample = search_start_sample + timing_search_length
 required_end_sample = search_end_sample + fft_samples
 ```
 
-This block does not score PRS candidates. The `prs_score_search` stage consumes
-the candidate window and selects the best metric result from `cp_metric_engine`.
+This block does not score PRS candidates. In the default pipeline,
+`prs_stream_search` consumes the candidate window and selects the best live
+metric result from `cp_stream_metric`. The older `prs_score_search` stage can
+still be used with `cp_metric_engine` by disabling streaming CP search.
+
+### `cp_stream_metric`
+
+Continuously computes the cyclic-prefix metric as IQ samples arrive.
+
+Source:
+
+```text
+rtl/src/sync/cp_stream_metric.sv
+```
+
+The block delays the live sample stream by `fft_samples`, forms the per-sample
+prefix/tail product, and keeps rolling `guard_samples` sums:
+
+```text
+corr_re += ai * bi + aq * bq
+corr_im += aq * bi - ai * bq
+score = |corr|^2 / (energy_prefix * energy_tail)
+```
+
+Once warmed up, it emits one metric per accepted sample:
+
+```text
+out_fft_start_sample = tail_sample_index - fft_samples + 1
+out_score
+out_coarse_freq_error_hz
+```
+
+This replaces the previous request/read/correlate loop for the default sync
+path and reduces the CP search memory requirement to a delay line plus a
+`guard_samples` rolling-product buffer.
+
+### `prs_stream_search`
+
+Selects the best streaming CP metric inside a PRS search window.
+
+Source:
+
+```text
+rtl/src/sync/prs_stream_search.sv
+```
+
+It accepts the same search metadata emitted by `prs_acquire_track` and returns
+the same score packet shape as `prs_score_search`, so the downstream
+acquire/track and PRS pilot-refinement path is unchanged.
 
 ### `prs_score_search`
+
+Legacy history-backed timing-search control loop for a PRS candidate.
 
 Runs the timing-search control loop for a PRS candidate.
 
@@ -250,6 +302,8 @@ The current score format is unsigned Q2.30. Coarse frequency error is currently
 a signed integer Hz field at the controller boundary.
 
 ### `cp_metric_engine`
+
+Legacy history-backed cyclic-prefix metric engine.
 
 Computes the cyclic-prefix metric for each PRS FFT-start candidate.
 
@@ -663,9 +717,11 @@ from the C receiver.
 13. `iq_ingress`
 14. `sample_history`
 15. `cp_metric_engine`
-16. `symbol_buffer`
-17. `cfo_corrector`
-18. `prs_acquire_track`
+16. `cp_stream_metric`
+17. `prs_stream_search`
+18. `symbol_buffer`
+19. `cfo_corrector`
+20. `prs_acquire_track`
 
 This order lets deterministic stages pass golden-vector tests before the harder
 sync loop is introduced.
@@ -835,11 +891,33 @@ rtl/scripts/run_prs_acquire_verilator.sh
 
 ### `prs_score_search`
 
+Legacy path used when `ENABLE_STREAMING_CP_SEARCH=0`.
+
 Verilator test:
 
 ```text
 rtl/scripts/run_prs_score_search_verilator.sh
 ```
+
+### `cp_stream_metric`
+
+Source:
+
+```text
+rtl/src/sync/cp_stream_metric.sv
+```
+
+Continuously scores cyclic-prefix correlation from the live sample stream.
+
+### `prs_stream_search`
+
+Source:
+
+```text
+rtl/src/sync/prs_stream_search.sv
+```
+
+Selects the best continuous CP metric inside each acquire/tracking window.
 
 ### `prs_acquire_track`
 
@@ -867,7 +945,8 @@ Source:
 rtl/src/sync/cp_metric_engine.sv
 ```
 
-The implemented engine consumes `prs_score_search` metric requests, reads
+Legacy path used when `ENABLE_STREAMING_CP_SEARCH=0`. The implemented engine
+consumes `prs_score_search` metric requests, reads
 sample windows from `sample_history`, and returns CP correlation score plus
 coarse CFO metadata.
 

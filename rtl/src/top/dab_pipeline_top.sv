@@ -4,8 +4,9 @@ module dab_pipeline_top
   import dab_ofdm_pkg::*, dab_tframe_pkg::*;
 #(
     parameter int SAMPLE_WIDTH = 16,
-    parameter int SAMPLE_HISTORY_DEPTH = 131072,
+    parameter int SAMPLE_HISTORY_DEPTH = 32768,
     parameter int ENABLE_INTERNAL_DATA_SCHEDULER = 1,
+    parameter int ENABLE_STREAMING_CP_SEARCH = 1,
     parameter int NULL_FAST_WINDOW_SAMPLES = 39,
     parameter int NULL_SLOW_WINDOW_SAMPLES = 1999,
     parameter int NULL_MIN_SAMPLES = 128,
@@ -105,6 +106,7 @@ module dab_pipeline_top
   localparam int DATA_INDEX_WIDTH = DAB_OFDM_DATA_INDEX_WIDTH;
   localparam logic [DATA_INDEX_WIDTH-1:0] LAST_DATA_INDEX =
       DATA_INDEX_WIDTH'(DAB_OFDM_DATA_CARRIERS - 1);
+  localparam bit STREAMING_CP_SEARCH = ENABLE_STREAMING_CP_SEARCH != 0;
 
   read_owner_t read_owner_q;
   soft_state_t soft_state_q;
@@ -150,6 +152,8 @@ module dab_pipeline_top
   logic search_ready;
   logic search_engine_valid;
   logic search_engine_ready;
+  logic stream_search_valid;
+  logic stream_search_ready;
   logic search_history_ready;
   logic [63:0] search_null_start_sample;
   logic [31:0] search_null_length;
@@ -181,6 +185,48 @@ module dab_pipeline_top
   logic [63:0] score_prs_fft_start_sample;
   logic [SCORE_WIDTH-1:0] score_prs_score;
   logic signed [CFO_WIDTH-1:0] score_coarse_freq_error_hz;
+
+  logic hist_score_valid;
+  logic hist_score_ready;
+  logic hist_score_found;
+  logic [63:0] hist_score_null_start_sample;
+  logic [31:0] hist_score_null_length;
+  logic [63:0] hist_score_candidate_prs_symbol_start_sample;
+  logic [63:0] hist_score_candidate_prs_fft_start_sample;
+  logic [31:0] hist_score_timing_search_start_offset;
+  logic [31:0] hist_score_timing_search_length;
+  logic [63:0] hist_score_search_start_sample;
+  logic [63:0] hist_score_search_end_sample;
+  logic [63:0] hist_score_required_end_sample;
+  logic [63:0] hist_score_prs_peak_sample;
+  logic [63:0] hist_score_prs_symbol_start_sample;
+  logic [63:0] hist_score_prs_fft_start_sample;
+  logic [SCORE_WIDTH-1:0] hist_score_prs_score;
+  logic signed [CFO_WIDTH-1:0] hist_score_coarse_freq_error_hz;
+
+  logic stream_score_valid;
+  logic stream_score_ready;
+  logic stream_score_found;
+  logic [63:0] stream_score_null_start_sample;
+  logic [31:0] stream_score_null_length;
+  logic [63:0] stream_score_candidate_prs_symbol_start_sample;
+  logic [63:0] stream_score_candidate_prs_fft_start_sample;
+  logic [31:0] stream_score_timing_search_start_offset;
+  logic [31:0] stream_score_timing_search_length;
+  logic [63:0] stream_score_search_start_sample;
+  logic [63:0] stream_score_search_end_sample;
+  logic [63:0] stream_score_required_end_sample;
+  logic [63:0] stream_score_prs_peak_sample;
+  logic [63:0] stream_score_prs_symbol_start_sample;
+  logic [63:0] stream_score_prs_fft_start_sample;
+  logic [SCORE_WIDTH-1:0] stream_score_prs_score;
+  logic signed [CFO_WIDTH-1:0] stream_score_coarse_freq_error_hz;
+
+  logic stream_metric_valid;
+  logic stream_metric_ok;
+  logic [63:0] stream_metric_fft_start_sample;
+  logic [SCORE_WIDTH-1:0] stream_metric_score;
+  logic signed [CFO_WIDTH-1:0] stream_metric_coarse_freq_error_hz;
 
   logic metric_req_valid;
   logic metric_req_ready;
@@ -387,8 +433,48 @@ module dab_pipeline_top
       history_valid &&
       search_search_start_sample >= history_oldest_sample_index &&
       search_required_end_sample <= history_next_sample_index;
-  assign search_engine_valid = search_valid && search_history_ready;
-  assign search_ready = search_engine_ready && search_history_ready;
+  assign search_engine_valid = search_valid && !STREAMING_CP_SEARCH && search_history_ready;
+  assign stream_search_valid = search_valid && STREAMING_CP_SEARCH;
+  assign search_ready =
+      STREAMING_CP_SEARCH ? stream_search_ready : (search_engine_ready && search_history_ready);
+
+  assign score_valid = STREAMING_CP_SEARCH ? stream_score_valid : hist_score_valid;
+  assign hist_score_ready = !STREAMING_CP_SEARCH && score_ready;
+  assign stream_score_ready = STREAMING_CP_SEARCH && score_ready;
+  assign score_found = STREAMING_CP_SEARCH ? stream_score_found : hist_score_found;
+  assign score_null_start_sample =
+      STREAMING_CP_SEARCH ? stream_score_null_start_sample : hist_score_null_start_sample;
+  assign score_null_length =
+      STREAMING_CP_SEARCH ? stream_score_null_length : hist_score_null_length;
+  assign score_candidate_prs_symbol_start_sample =
+      STREAMING_CP_SEARCH ? stream_score_candidate_prs_symbol_start_sample :
+                            hist_score_candidate_prs_symbol_start_sample;
+  assign score_candidate_prs_fft_start_sample =
+      STREAMING_CP_SEARCH ? stream_score_candidate_prs_fft_start_sample :
+                            hist_score_candidate_prs_fft_start_sample;
+  assign score_timing_search_start_offset =
+      STREAMING_CP_SEARCH ? stream_score_timing_search_start_offset :
+                            hist_score_timing_search_start_offset;
+  assign score_timing_search_length =
+      STREAMING_CP_SEARCH ? stream_score_timing_search_length : hist_score_timing_search_length;
+  assign score_search_start_sample =
+      STREAMING_CP_SEARCH ? stream_score_search_start_sample : hist_score_search_start_sample;
+  assign score_search_end_sample =
+      STREAMING_CP_SEARCH ? stream_score_search_end_sample : hist_score_search_end_sample;
+  assign score_required_end_sample =
+      STREAMING_CP_SEARCH ? stream_score_required_end_sample : hist_score_required_end_sample;
+  assign score_prs_peak_sample =
+      STREAMING_CP_SEARCH ? stream_score_prs_peak_sample : hist_score_prs_peak_sample;
+  assign score_prs_symbol_start_sample =
+      STREAMING_CP_SEARCH ? stream_score_prs_symbol_start_sample :
+                            hist_score_prs_symbol_start_sample;
+  assign score_prs_fft_start_sample =
+      STREAMING_CP_SEARCH ? stream_score_prs_fft_start_sample : hist_score_prs_fft_start_sample;
+  assign score_prs_score =
+      STREAMING_CP_SEARCH ? stream_score_prs_score : hist_score_prs_score;
+  assign score_coarse_freq_error_hz =
+      STREAMING_CP_SEARCH ? stream_score_coarse_freq_error_hz :
+                            hist_score_coarse_freq_error_hz;
 
   assign history_read_req_valid =
       read_owner_q == READ_OWNER_NONE && (cp_hist_req_valid || sym_hist_req_valid);
@@ -571,6 +657,27 @@ module dab_pipeline_top
       .out_min_ratio(null_out_min_ratio)
   );
 
+  cp_stream_metric #(
+      .SAMPLE_WIDTH(SAMPLE_WIDTH),
+      .SCORE_WIDTH(SCORE_WIDTH),
+      .CFO_WIDTH(CFO_WIDTH),
+      .GUARD_SAMPLES(GUARD_SAMPLES),
+      .FFT_SAMPLES(FFT_SAMPLES)
+  ) u_cp_stream_metric (
+      .clk(clk),
+      .rst_n(rst_n),
+      .clear(clear || !STREAMING_CP_SEARCH),
+      .in_valid(sample_fork_valid),
+      .in_i(ingress_out_i),
+      .in_q(ingress_out_q),
+      .in_sample_index(ingress_out_sample_index),
+      .out_valid(stream_metric_valid),
+      .out_ok(stream_metric_ok),
+      .out_fft_start_sample(stream_metric_fft_start_sample),
+      .out_score(stream_metric_score),
+      .out_coarse_freq_error_hz(stream_metric_coarse_freq_error_hz)
+  );
+
   prs_acquire_track #(
       .SCORE_WIDTH(SCORE_WIDTH),
       .CFO_WIDTH(CFO_WIDTH),
@@ -660,7 +767,7 @@ module dab_pipeline_top
   ) u_prs_score_search (
       .clk(clk),
       .rst_n(rst_n),
-      .clear(clear),
+      .clear(clear || STREAMING_CP_SEARCH),
       .in_valid(search_engine_valid),
       .in_ready(search_engine_ready),
       .in_null_start_sample(search_null_start_sample),
@@ -683,23 +790,66 @@ module dab_pipeline_top
       .metric_resp_fft_start_sample(metric_resp_fft_start_sample),
       .metric_resp_score(metric_resp_score),
       .metric_resp_coarse_freq_error_hz(metric_resp_coarse_freq_error_hz),
-      .out_valid(score_valid),
-      .out_ready(score_ready),
-      .out_found(score_found),
-      .out_null_start_sample(score_null_start_sample),
-      .out_null_length(score_null_length),
-      .out_candidate_prs_symbol_start_sample(score_candidate_prs_symbol_start_sample),
-      .out_candidate_prs_fft_start_sample(score_candidate_prs_fft_start_sample),
-      .out_timing_search_start_offset(score_timing_search_start_offset),
-      .out_timing_search_length(score_timing_search_length),
-      .out_search_start_sample(score_search_start_sample),
-      .out_search_end_sample(score_search_end_sample),
-      .out_required_end_sample(score_required_end_sample),
-      .out_prs_peak_sample(score_prs_peak_sample),
-      .out_prs_symbol_start_sample(score_prs_symbol_start_sample),
-      .out_prs_fft_start_sample(score_prs_fft_start_sample),
-      .out_prs_score(score_prs_score),
-      .out_coarse_freq_error_hz(score_coarse_freq_error_hz)
+      .out_valid(hist_score_valid),
+      .out_ready(hist_score_ready),
+      .out_found(hist_score_found),
+      .out_null_start_sample(hist_score_null_start_sample),
+      .out_null_length(hist_score_null_length),
+      .out_candidate_prs_symbol_start_sample(hist_score_candidate_prs_symbol_start_sample),
+      .out_candidate_prs_fft_start_sample(hist_score_candidate_prs_fft_start_sample),
+      .out_timing_search_start_offset(hist_score_timing_search_start_offset),
+      .out_timing_search_length(hist_score_timing_search_length),
+      .out_search_start_sample(hist_score_search_start_sample),
+      .out_search_end_sample(hist_score_search_end_sample),
+      .out_required_end_sample(hist_score_required_end_sample),
+      .out_prs_peak_sample(hist_score_prs_peak_sample),
+      .out_prs_symbol_start_sample(hist_score_prs_symbol_start_sample),
+      .out_prs_fft_start_sample(hist_score_prs_fft_start_sample),
+      .out_prs_score(hist_score_prs_score),
+      .out_coarse_freq_error_hz(hist_score_coarse_freq_error_hz)
+  );
+
+  prs_stream_search #(
+      .SCORE_WIDTH(SCORE_WIDTH),
+      .CFO_WIDTH(CFO_WIDTH),
+      .GUARD_SAMPLES(GUARD_SAMPLES)
+  ) u_prs_stream_search (
+      .clk(clk),
+      .rst_n(rst_n),
+      .clear(clear || !STREAMING_CP_SEARCH),
+      .in_valid(stream_search_valid),
+      .in_ready(stream_search_ready),
+      .in_null_start_sample(search_null_start_sample),
+      .in_null_length(search_null_length),
+      .in_prs_symbol_start_sample(search_prs_symbol_start_sample),
+      .in_prs_fft_start_sample(search_prs_fft_start_sample),
+      .in_timing_search_start_offset(search_timing_search_start_offset),
+      .in_timing_search_length(search_timing_search_length),
+      .in_search_start_sample(search_search_start_sample),
+      .in_search_end_sample(search_search_end_sample),
+      .in_required_end_sample(search_required_end_sample),
+      .metric_in_valid(stream_metric_valid),
+      .metric_in_ok(stream_metric_ok),
+      .metric_in_fft_start_sample(stream_metric_fft_start_sample),
+      .metric_in_score(stream_metric_score),
+      .metric_in_coarse_freq_error_hz(stream_metric_coarse_freq_error_hz),
+      .out_valid(stream_score_valid),
+      .out_ready(stream_score_ready),
+      .out_found(stream_score_found),
+      .out_null_start_sample(stream_score_null_start_sample),
+      .out_null_length(stream_score_null_length),
+      .out_candidate_prs_symbol_start_sample(stream_score_candidate_prs_symbol_start_sample),
+      .out_candidate_prs_fft_start_sample(stream_score_candidate_prs_fft_start_sample),
+      .out_timing_search_start_offset(stream_score_timing_search_start_offset),
+      .out_timing_search_length(stream_score_timing_search_length),
+      .out_search_start_sample(stream_score_search_start_sample),
+      .out_search_end_sample(stream_score_search_end_sample),
+      .out_required_end_sample(stream_score_required_end_sample),
+      .out_prs_peak_sample(stream_score_prs_peak_sample),
+      .out_prs_symbol_start_sample(stream_score_prs_symbol_start_sample),
+      .out_prs_fft_start_sample(stream_score_prs_fft_start_sample),
+      .out_prs_score(stream_score_prs_score),
+      .out_coarse_freq_error_hz(stream_score_coarse_freq_error_hz)
   );
 
   cp_metric_engine #(
@@ -711,7 +861,7 @@ module dab_pipeline_top
   ) u_cp_metric_engine (
       .clk(clk),
       .rst_n(rst_n),
-      .clear(clear),
+      .clear(clear || STREAMING_CP_SEARCH),
       .metric_req_valid(metric_req_valid),
       .metric_req_ready(metric_req_ready),
       .metric_req_fft_start_sample(metric_req_fft_start_sample),

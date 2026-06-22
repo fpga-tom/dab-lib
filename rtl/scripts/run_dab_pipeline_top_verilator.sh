@@ -9,6 +9,7 @@ mkdir -p "${BUILD_DIR}"
 verilator \
   -Wall \
   -GSAMPLE_HISTORY_DEPTH=4096 \
+  -GENABLE_STREAMING_CP_SEARCH=1 \
   -GNULL_FAST_WINDOW_SAMPLES=4 \
   -GNULL_SLOW_WINDOW_SAMPLES=16 \
   -GNULL_MIN_SAMPLES=4 \
@@ -17,6 +18,8 @@ verilator \
        "${ROOT_DIR}/rtl/src/frontend/iq_ingress.sv" \
        "${ROOT_DIR}/rtl/src/frontend/sample_history.sv" \
        "${ROOT_DIR}/rtl/src/sync/null_detector.sv" \
+       "${ROOT_DIR}/rtl/src/sync/cp_stream_metric.sv" \
+       "${ROOT_DIR}/rtl/src/sync/prs_stream_search.sv" \
        "${ROOT_DIR}/rtl/src/sync/prs_score_search.sv" \
        "${ROOT_DIR}/rtl/src/sync/cp_metric_engine.sv" \
        "${ROOT_DIR}/rtl/src/sync/prs_pilot_refiner.sv" \

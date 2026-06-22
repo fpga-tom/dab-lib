@@ -30,8 +30,9 @@ fi
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILD_DIR="${ROOT_DIR}/build/rtl/dab_pipeline_file"
-HISTORY_DEPTH="${DAB_TB_HISTORY_DEPTH:-131072}"
+HISTORY_DEPTH="${DAB_TB_HISTORY_DEPTH:-32768}"
 INTERNAL_DATA_SCHEDULER="${DAB_TB_INTERNAL_DATA_SCHEDULER:-1}"
+STREAMING_CP_SEARCH="${DAB_TB_ENABLE_STREAMING_CP_SEARCH:-1}"
 NULL_FAST_WINDOW_SAMPLES="${DAB_TB_NULL_FAST_WINDOW_SAMPLES:-39}"
 NULL_SLOW_WINDOW_SAMPLES="${DAB_TB_NULL_SLOW_WINDOW_SAMPLES:-1999}"
 NULL_MIN_SAMPLES="${DAB_TB_NULL_MIN_SAMPLES:-1800}"
@@ -43,6 +44,7 @@ verilator \
   -CFLAGS "-std=c++17" \
   -GSAMPLE_HISTORY_DEPTH="${HISTORY_DEPTH}" \
   -GENABLE_INTERNAL_DATA_SCHEDULER="${INTERNAL_DATA_SCHEDULER}" \
+  -GENABLE_STREAMING_CP_SEARCH="${STREAMING_CP_SEARCH}" \
   -GNULL_FAST_WINDOW_SAMPLES="${NULL_FAST_WINDOW_SAMPLES}" \
   -GNULL_SLOW_WINDOW_SAMPLES="${NULL_SLOW_WINDOW_SAMPLES}" \
   -GNULL_MIN_SAMPLES="${NULL_MIN_SAMPLES}" \
@@ -51,6 +53,8 @@ verilator \
        "${ROOT_DIR}/rtl/src/frontend/iq_ingress.sv" \
        "${ROOT_DIR}/rtl/src/frontend/sample_history.sv" \
        "${ROOT_DIR}/rtl/src/sync/null_detector.sv" \
+       "${ROOT_DIR}/rtl/src/sync/cp_stream_metric.sv" \
+       "${ROOT_DIR}/rtl/src/sync/prs_stream_search.sv" \
        "${ROOT_DIR}/rtl/src/sync/prs_score_search.sv" \
        "${ROOT_DIR}/rtl/src/sync/cp_metric_engine.sv" \
        "${ROOT_DIR}/rtl/src/sync/prs_pilot_refiner.sv" \
