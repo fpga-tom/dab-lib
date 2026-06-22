@@ -210,7 +210,7 @@ void drive_symbol(Vprs_pilot_refiner &top,
         }
 
         tick(top);
-        if (++cycles > kActiveCarriers * 4u) {
+        if (++cycles > kActiveCarriers * 16u) {
             fail("Timed out while driving PRS pilot symbol");
         }
     }

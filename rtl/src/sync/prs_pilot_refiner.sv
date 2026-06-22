@@ -39,11 +39,14 @@ module prs_pilot_refiner
   localparam int SCORE_NUM_WIDTH = (2 * CORR_ACC_WIDTH) + SCORE_FRAC_BITS + 4;
   localparam int SCORE_DEN_WIDTH = ENERGY_ACC_WIDTH + 16;
   localparam int TIMING_CALC_WIDTH = CORR_ACC_WIDTH + TIMING_WIDTH + 24;
+  localparam int OFFSET_INDEX_WIDTH = OFFSET_COUNT <= 1 ? 1 : $clog2(OFFSET_COUNT);
 
-  typedef enum logic [1:0] {
-    STATE_ACCUM = 2'd0,
-    STATE_FINALIZE = 2'd1,
-    STATE_OUTPUT = 2'd2
+  typedef enum logic [2:0] {
+    STATE_ACCUM = 3'd0,
+    STATE_PROCESS = 3'd1,
+    STATE_SCORE = 3'd2,
+    STATE_FINALIZE = 3'd3,
+    STATE_OUTPUT = 3'd4
   } state_t;
 
   localparam logic [DAB_OFDM_ACTIVE_INDEX_WIDTH-1:0] NULL_ACTIVE_INDEX =
@@ -73,17 +76,23 @@ module prs_pilot_refiner
   logic [11:0] used_pairs_q [0:OFFSET_COUNT-1];
 
   logic input_fire;
-  logic best_found_comb;
-  logic [SCORE_WIDTH-1:0] best_score_comb;
-  logic signed [3:0] best_offset_comb;
-  logic signed [CORR_ACC_WIDTH-1:0] best_corr_re_comb;
-  logic signed [CORR_ACC_WIDTH-1:0] best_corr_im_comb;
-  logic [11:0] best_used_pairs_comb;
+  logic [OFFSET_INDEX_WIDTH-1:0] process_offset_index_q;
+  logic [OFFSET_INDEX_WIDTH-1:0] score_index_q;
+  logic signed [CARRIER_WIDTH-1:0] sample_i_q;
+  logic signed [CARRIER_WIDTH-1:0] sample_q_q;
+  logic [FFT_BIN_WIDTH-1:0] sample_fft_bin_q;
+  logic sample_symbol_done_q;
+  logic best_found_q;
+  logic [SCORE_WIDTH-1:0] best_score_q;
+  logic signed [3:0] best_offset_q;
+  logic signed [CORR_ACC_WIDTH-1:0] best_corr_re_q;
+  logic signed [CORR_ACC_WIDTH-1:0] best_corr_im_q;
+  logic [11:0] best_used_pairs_q;
   logic signed [TIMING_WIDTH-1:0] best_timing_comb;
 
   assign in_ready = !clear && state_q == STATE_ACCUM;
   assign input_fire = in_valid && in_ready;
-  assign best_timing_comb = fine_timing_from_corr(best_corr_re_comb, best_corr_im_comb);
+  assign best_timing_comb = fine_timing_from_corr(best_corr_re_q, best_corr_im_q);
 
   function automatic logic [1:0] phase_from_row(
       input logic [1:0] row,
@@ -437,37 +446,23 @@ module prs_pilot_refiner
     end
   endfunction
 
-  always_comb begin
-    best_found_comb = 1'b0;
-    best_score_comb = '0;
-    best_offset_comb = '0;
-    best_corr_re_comb = '0;
-    best_corr_im_comb = '0;
-    best_used_pairs_comb = '0;
-
-    for (int unsigned i = 0; i < OFFSET_COUNT; i++) begin
-      logic [SCORE_WIDTH-1:0] candidate_score;
-
-      candidate_score = score_from_acc(corr_re_q[i],
-                                       corr_im_q[i],
-                                       signal_energy_q[i],
-                                       used_pairs_q[i]);
-      if (used_pairs_q[i] != 12'd0 && (!best_found_comb || candidate_score > best_score_comb)) begin
-        best_found_comb = 1'b1;
-        best_score_comb = candidate_score;
-        best_offset_comb = offset_from_index(i);
-        best_corr_re_comb = corr_re_q[i];
-        best_corr_im_comb = corr_im_q[i];
-        best_used_pairs_comb = used_pairs_q[i];
-      end
-    end
-  end
-
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       state_q <= STATE_ACCUM;
       symbol_active_q <= 1'b0;
       symbol_start_sample_q <= '0;
+      process_offset_index_q <= '0;
+      score_index_q <= '0;
+      sample_i_q <= '0;
+      sample_q_q <= '0;
+      sample_fft_bin_q <= '0;
+      sample_symbol_done_q <= 1'b0;
+      best_found_q <= 1'b0;
+      best_score_q <= '0;
+      best_offset_q <= '0;
+      best_corr_re_q <= '0;
+      best_corr_im_q <= '0;
+      best_used_pairs_q <= '0;
       out_valid <= 1'b0;
       out_found <= 1'b0;
       out_symbol_start_sample <= '0;
@@ -491,6 +486,18 @@ module prs_pilot_refiner
       state_q <= STATE_ACCUM;
       symbol_active_q <= 1'b0;
       symbol_start_sample_q <= '0;
+      process_offset_index_q <= '0;
+      score_index_q <= '0;
+      sample_i_q <= '0;
+      sample_q_q <= '0;
+      sample_fft_bin_q <= '0;
+      sample_symbol_done_q <= 1'b0;
+      best_found_q <= 1'b0;
+      best_score_q <= '0;
+      best_offset_q <= '0;
+      best_corr_re_q <= '0;
+      best_corr_im_q <= '0;
+      best_used_pairs_q <= '0;
       out_valid <= 1'b0;
       out_found <= 1'b0;
       out_symbol_start_sample <= '0;
@@ -514,86 +521,142 @@ module prs_pilot_refiner
       case (state_q)
         STATE_ACCUM: begin
           if (input_fire) begin
-            logic [FFT_BIN_WIDTH-1:0] current_fft_bin;
+            sample_i_q <= in_i;
+            sample_q_q <= in_q;
+            sample_fft_bin_q <= fft_bin_from_active(in_active_index);
+            sample_symbol_done_q <= in_symbol_done;
+            process_offset_index_q <= '0;
 
-            current_fft_bin = fft_bin_from_active(in_active_index);
             if (!symbol_active_q) begin
               symbol_active_q <= 1'b1;
               symbol_start_sample_q <= in_symbol_start_sample;
             end
 
-            for (int unsigned i = 0; i < OFFSET_COUNT; i++) begin
-              int signed template_bin_int;
+            state_q <= STATE_PROCESS;
+          end
+        end
 
-              template_bin_int = int'(current_fft_bin) - int'(offset_from_index(i));
-              if (template_bin_valid(template_bin_int)) begin
-                logic [FFT_BIN_WIDTH-1:0] current_template_bin;
-                logic [DAB_OFDM_ACTIVE_INDEX_WIDTH-1:0] current_template_active;
-                logic [1:0] current_phase;
+        STATE_PROCESS: begin
+          int unsigned offset_index;
+          int signed template_bin_int;
 
-                current_template_bin = FFT_BIN_WIDTH'(template_bin_int);
-                current_template_active = active_from_template_bin(current_template_bin);
-                current_phase = prs_phase_from_active(current_template_active);
+          offset_index = int'(process_offset_index_q);
+          template_bin_int = int'(sample_fft_bin_q) - int'(offset_from_index(offset_index));
+          if (template_bin_valid(template_bin_int)) begin
+            logic [FFT_BIN_WIDTH-1:0] current_template_bin;
+            logic [DAB_OFDM_ACTIVE_INDEX_WIDTH-1:0] current_template_active;
+            logic [1:0] current_phase;
 
-                if (prev_valid_q[i] &&
-                    consecutive_template_bins(prev_template_bin_q[i], current_template_bin)) begin
-                  logic signed [DIFF_WIDTH-1:0] sd_re;
-                  logic signed [DIFF_WIDTH-1:0] sd_im;
-                  logic signed [DIFF_WIDTH-1:0] aligned_re;
-                  logic signed [DIFF_WIDTH-1:0] aligned_im;
-                  logic [1:0] rotation;
+            current_template_bin = FFT_BIN_WIDTH'(template_bin_int);
+            current_template_active = active_from_template_bin(current_template_bin);
+            current_phase = prs_phase_from_active(current_template_active);
 
-                  sd_re = diff_re(prev_i_q[i], prev_q_q[i], in_i, in_q);
-                  sd_im = diff_im(prev_i_q[i], prev_q_q[i], in_i, in_q);
-                  rotation = current_phase - prev_phase_q[i];
+            if (prev_valid_q[offset_index] &&
+                consecutive_template_bins(prev_template_bin_q[offset_index],
+                                          current_template_bin)) begin
+              logic signed [DIFF_WIDTH-1:0] sd_re;
+              logic signed [DIFF_WIDTH-1:0] sd_im;
+              logic signed [DIFF_WIDTH-1:0] aligned_re;
+              logic signed [DIFF_WIDTH-1:0] aligned_im;
+              logic [1:0] rotation;
 
-                  case (rotation)
-                    2'd0: begin
-                      aligned_re = sd_re;
-                      aligned_im = sd_im;
-                    end
-                    2'd1: begin
-                      aligned_re = -sd_im;
-                      aligned_im = sd_re;
-                    end
-                    2'd2: begin
-                      aligned_re = -sd_re;
-                      aligned_im = -sd_im;
-                    end
-                    default: begin
-                      aligned_re = sd_im;
-                      aligned_im = -sd_re;
-                    end
-                  endcase
+              sd_re = diff_re(prev_i_q[offset_index],
+                              prev_q_q[offset_index],
+                              sample_i_q,
+                              sample_q_q);
+              sd_im = diff_im(prev_i_q[offset_index],
+                              prev_q_q[offset_index],
+                              sample_i_q,
+                              sample_q_q);
+              rotation = current_phase - prev_phase_q[offset_index];
 
-                  corr_re_q[i] <= corr_re_q[i] + extend_diff(aligned_re);
-                  corr_im_q[i] <= corr_im_q[i] + extend_diff(aligned_im);
-                  signal_energy_q[i] <= signal_energy_q[i] + diff_energy(sd_re, sd_im);
-                  used_pairs_q[i] <= used_pairs_q[i] + 1'b1;
+              case (rotation)
+                2'd0: begin
+                  aligned_re = sd_re;
+                  aligned_im = sd_im;
                 end
+                2'd1: begin
+                  aligned_re = -sd_im;
+                  aligned_im = sd_re;
+                end
+                2'd2: begin
+                  aligned_re = -sd_re;
+                  aligned_im = -sd_im;
+                end
+                default: begin
+                  aligned_re = sd_im;
+                  aligned_im = -sd_re;
+                end
+              endcase
 
-                prev_valid_q[i] <= 1'b1;
-                prev_template_bin_q[i] <= current_template_bin;
-                prev_phase_q[i] <= current_phase;
-                prev_i_q[i] <= in_i;
-                prev_q_q[i] <= in_q;
-              end
+              corr_re_q[offset_index] <= corr_re_q[offset_index] + extend_diff(aligned_re);
+              corr_im_q[offset_index] <= corr_im_q[offset_index] + extend_diff(aligned_im);
+              signal_energy_q[offset_index] <= signal_energy_q[offset_index] +
+                  diff_energy(sd_re, sd_im);
+              used_pairs_q[offset_index] <= used_pairs_q[offset_index] + 1'b1;
             end
 
-            if (in_symbol_done) begin
-              state_q <= STATE_FINALIZE;
+            prev_valid_q[offset_index] <= 1'b1;
+            prev_template_bin_q[offset_index] <= current_template_bin;
+            prev_phase_q[offset_index] <= current_phase;
+            prev_i_q[offset_index] <= sample_i_q;
+            prev_q_q[offset_index] <= sample_q_q;
+          end
+
+          if (process_offset_index_q == OFFSET_INDEX_WIDTH'(OFFSET_COUNT - 1)) begin
+            process_offset_index_q <= '0;
+            if (sample_symbol_done_q) begin
+              score_index_q <= '0;
+              best_found_q <= 1'b0;
+              best_score_q <= '0;
+              best_offset_q <= '0;
+              best_corr_re_q <= '0;
+              best_corr_im_q <= '0;
+              best_used_pairs_q <= '0;
+              state_q <= STATE_SCORE;
+            end else begin
+              state_q <= STATE_ACCUM;
             end
+          end else begin
+            process_offset_index_q <= process_offset_index_q + 1'b1;
+          end
+        end
+
+        STATE_SCORE: begin
+          int unsigned offset_index;
+          logic [SCORE_WIDTH-1:0] candidate_score;
+
+          offset_index = int'(score_index_q);
+          candidate_score = score_from_acc(corr_re_q[offset_index],
+                                           corr_im_q[offset_index],
+                                           signal_energy_q[offset_index],
+                                           used_pairs_q[offset_index]);
+          if (used_pairs_q[offset_index] != 12'd0 &&
+              (!best_found_q || candidate_score > best_score_q)) begin
+            best_found_q <= 1'b1;
+            best_score_q <= candidate_score;
+            best_offset_q <= offset_from_index(offset_index);
+            best_corr_re_q <= corr_re_q[offset_index];
+            best_corr_im_q <= corr_im_q[offset_index];
+            best_used_pairs_q <= used_pairs_q[offset_index];
+          end
+
+          if (score_index_q == OFFSET_INDEX_WIDTH'(OFFSET_COUNT - 1)) begin
+            score_index_q <= '0;
+            state_q <= STATE_FINALIZE;
+          end else begin
+            score_index_q <= score_index_q + 1'b1;
           end
         end
 
         STATE_FINALIZE: begin
           out_valid <= 1'b1;
-          out_found <= best_found_comb;
+          out_found <= best_found_q;
           out_symbol_start_sample <= symbol_start_sample_q;
-          out_score <= best_found_comb ? best_score_comb : '0;
-          out_carrier_offset_bins <= best_found_comb ? best_offset_comb : '0;
-          out_fine_timing_error_samples <= best_found_comb ? best_timing_comb : '0;
-          out_used_pairs <= best_found_comb ? best_used_pairs_comb : '0;
+          out_score <= best_found_q ? best_score_q : '0;
+          out_carrier_offset_bins <= best_found_q ? best_offset_q : '0;
+          out_fine_timing_error_samples <= best_found_q ? best_timing_comb : '0;
+          out_used_pairs <= best_found_q ? best_used_pairs_q : '0;
           state_q <= STATE_OUTPUT;
           symbol_active_q <= 1'b0;
         end
@@ -606,6 +669,12 @@ module prs_pilot_refiner
             out_carrier_offset_bins <= '0;
             out_fine_timing_error_samples <= '0;
             out_used_pairs <= '0;
+            best_found_q <= 1'b0;
+            best_score_q <= '0;
+            best_offset_q <= '0;
+            best_corr_re_q <= '0;
+            best_corr_im_q <= '0;
+            best_used_pairs_q <= '0;
             state_q <= STATE_ACCUM;
 
             for (int unsigned i = 0; i < OFFSET_COUNT; i++) begin
