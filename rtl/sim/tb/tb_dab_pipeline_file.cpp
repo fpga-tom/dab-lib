@@ -48,6 +48,8 @@ struct Config {
     uint32_t target_tframes = 1;
     bool require_frame = true;
     bool stop_feed_after_frame_ready = true;
+    bool internal_data_scheduler = true;
+    uint32_t sample_period_cycles = 1;
     double min_cp_score = 0.40;
     double min_pilot_score = 0.50;
     double fft_target_rms = static_cast<double>(1u << 22u);
@@ -146,8 +148,16 @@ Config load_config() {
         cfg.target_tframes = 1u;
     }
     cfg.require_frame = env_bool("DAB_TB_REQUIRE_FRAME", cfg.require_frame);
+    cfg.internal_data_scheduler =
+        env_bool("DAB_TB_INTERNAL_DATA_SCHEDULER", cfg.internal_data_scheduler);
     cfg.stop_feed_after_frame_ready =
-        env_bool("DAB_TB_STOP_FEED_AFTER_FRAME_READY", cfg.target_tframes <= 1u);
+        env_bool("DAB_TB_STOP_FEED_AFTER_FRAME_READY",
+                 !cfg.internal_data_scheduler && cfg.target_tframes <= 1u);
+    cfg.sample_period_cycles = static_cast<uint32_t>(
+        env_u64("DAB_TB_SAMPLE_PERIOD_CYCLES", cfg.internal_data_scheduler ? 16u : 1u));
+    if (cfg.sample_period_cycles == 0u) {
+        cfg.sample_period_cycles = 1u;
+    }
     cfg.min_cp_score = env_f64("DAB_TB_MIN_CP_SCORE", cfg.min_cp_score);
     cfg.min_pilot_score = env_f64("DAB_TB_MIN_PILOT_SCORE", cfg.min_pilot_score);
     cfg.fft_target_rms = env_f64("DAB_TB_FFT_TARGET_RMS", cfg.fft_target_rms);
@@ -585,10 +595,11 @@ void drive_cycle_inputs(Vdab_pipeline_top &top,
                         const DataScheduler &scheduler,
                         const std::vector<Sample> &samples,
                         uint64_t sample_pos,
-                        bool feed_enabled) {
+                        bool feed_enabled,
+                        bool sample_cycle) {
     drive_quiescent(top, cfg);
 
-    if (feed_enabled && sample_pos < samples.size()) {
+    if (feed_enabled && sample_cycle && sample_pos < samples.size()) {
         const Sample &sample = samples[static_cast<size_t>(sample_pos)];
         top.sdr_in_valid = 1;
         top.sdr_in_i = pack_signed(sample.i, kSampleWidth);
@@ -605,7 +616,7 @@ void drive_cycle_inputs(Vdab_pipeline_top &top,
         top.fft_core_out_overflow = 0;
     }
 
-    if (scheduler.command_valid()) {
+    if (!cfg.internal_data_scheduler && scheduler.command_valid()) {
         top.data_symbol_cmd_valid = 1;
         top.data_symbol_cmd_fft_start_sample = scheduler.command_fft_start();
     }
@@ -675,11 +686,14 @@ int main(int argc, char **argv) {
                   << " softbits_path=" << cfg.softbits_path
                   << " target_tframes=" << cfg.target_tframes
                   << " require_frame=" << (cfg.require_frame ? 1 : 0)
+                  << " data_scheduler="
+                  << (cfg.internal_data_scheduler ? "internal" : "external")
+                  << " sample_period_cycles=" << cfg.sample_period_cycles
                   << " fft_scale=" << (cfg.fft_fixed_gain ? "fixed" : "rms")
                   << "\n";
 
         for (uint64_t cycle = 0; cycle < cfg.max_cycles && !Verilated::gotFinish(); ++cycle) {
-            if (scheduler.can_arm(top)) {
+            if (!cfg.internal_data_scheduler && scheduler.can_arm(top)) {
                 scheduler.arm();
                 if (cfg.stop_feed_after_frame_ready) {
                     feed_enabled = false;
@@ -692,7 +706,10 @@ int main(int argc, char **argv) {
                           << " cycle=" << cycle << "\n";
             }
 
-            drive_cycle_inputs(top, cfg, fft, scheduler, samples, sample_pos, feed_enabled);
+            const bool sample_cycle =
+                (cycle % static_cast<uint64_t>(cfg.sample_period_cycles)) == 0u;
+            drive_cycle_inputs(top, cfg, fft, scheduler, samples, sample_pos, feed_enabled,
+                               sample_cycle);
 
             top.clk = 0;
             top.eval();
@@ -709,7 +726,7 @@ int main(int argc, char **argv) {
             if (fires.fft_out) {
                 fft.pop_output();
             }
-            if (fires.data_cmd) {
+            if (!cfg.internal_data_scheduler && fires.data_cmd) {
                 scheduler.command_accepted();
             }
             if (fires.sync) {
@@ -736,7 +753,9 @@ int main(int argc, char **argv) {
             }
             if (fires.frame_done) {
                 ++frames_done;
-                scheduler.frame_done();
+                if (!cfg.internal_data_scheduler) {
+                    scheduler.frame_done();
+                }
                 last_frame_start_sample = fires.frame_start_sample;
                 std::cout << "frame done index=" << frames_done
                           << " frame_start_sample=" << last_frame_start_sample
@@ -745,7 +764,8 @@ int main(int argc, char **argv) {
                 if (frames_done >= cfg.target_tframes) {
                     break;
                 }
-                if (feed_paused_for_frame && sample_pos < samples.size()) {
+                if (!cfg.internal_data_scheduler && feed_paused_for_frame &&
+                    sample_pos < samples.size()) {
                     feed_enabled = true;
                     feed_paused_for_frame = false;
                 }
@@ -781,7 +801,9 @@ int main(int argc, char **argv) {
                   << " sync_events=" << sync_events
                   << " found_sync_events=" << found_sync_events
                   << " sync_frames_observed=" << scheduler.observed_frames()
-                  << " data_frames_scheduled=" << scheduler.scheduled_frames()
+                  << " data_frames_scheduled="
+                  << (cfg.internal_data_scheduler ? uint64_t{frames_done} :
+                                                     scheduler.scheduled_frames())
                   << " last_data_symbol_next=" << scheduler.next_symbol()
                   << " frames_done=" << frames_done
                   << " last_frame_start_sample=" << last_frame_start_sample

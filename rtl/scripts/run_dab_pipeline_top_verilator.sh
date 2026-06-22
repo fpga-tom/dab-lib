@@ -31,6 +31,7 @@ verilator \
        "${ROOT_DIR}/rtl/src/ofdm/frequency_deinterleaver.sv" \
        "${ROOT_DIR}/rtl/src/ofdm/qpsk_softbits.sv" \
        "${ROOT_DIR}/rtl/src/ofdm/tframe_assembler.sv" \
+       "${ROOT_DIR}/rtl/src/top/data_symbol_scheduler.sv" \
        "${ROOT_DIR}/rtl/src/top/dab_pipeline_top.sv" \
   --exe "${ROOT_DIR}/rtl/sim/tb/tb_dab_pipeline_top.cpp" \
   --top-module dab_pipeline_top \

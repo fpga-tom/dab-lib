@@ -45,9 +45,13 @@ Source:
 rtl/src/top/dab_pipeline_top.sv
 ```
 
-The FFT math remains an external core interface. Data-symbol scheduling is also
-external for now through `data_symbol_cmd_*`; the sync path internally schedules
-PRS symbols through `prs_acquire_track`. The top includes a softbit-pair adapter
+The FFT math remains an external core interface. By default, data-symbol
+scheduling is internal: `data_symbol_scheduler` observes accepted sync events
+and requests each of the 75 data symbols only when that symbol's 2048-sample
+FFT window is present in `sample_history`. The legacy external
+`data_symbol_cmd_*` path remains available by setting
+`ENABLE_INTERNAL_DATA_SCHEDULER=0`. The sync path internally schedules PRS
+symbols through `prs_acquire_track`. The top includes a softbit-pair adapter
 that stores QPSK `soft_b` values so `tframe_assembler` still receives the
 C-compatible `soft_a[0..1535]` then `soft_b[0..1535]` order.
 
@@ -98,9 +102,12 @@ This should be bypassable while matching C golden vectors.
 
 ### `sample_history`
 
-Stores enough samples to cover PRS search and all 75 data symbols after a locked
-PRS. The C tool defaults to a 262144-sample history, which is slightly more than
-one 196608-sample Mode I transmission frame.
+Stores enough samples to cover PRS search/scoring latency and in-flight symbol
+extraction. Data symbols are no longer held until a full transmission frame is
+available. The C file replay defaults to a 131072-sample history, half of the
+previous 262144-sample frame-buffer setting. In that bench, the default
+16-cycle sample period models an FPGA fabric clock that is faster than the SDR
+sample strobe.
 
 Source:
 
@@ -675,9 +682,10 @@ rtl/src/top/dab_pipeline_top.sv
 
 The implemented top is a first integration boundary for Verilator and later FPGA
 top-level work. It uses a single-read history arbiter, keeps the FFT core
-external, accepts external data-symbol start commands, and routes PRS symbols
+external, schedules data symbols internally by default, and routes PRS symbols
 through pilot refinement/channel estimation while data symbols continue into
-the transmission-frame assembler.
+the transmission-frame assembler. External data-symbol start commands are still
+available when `ENABLE_INTERNAL_DATA_SCHEDULER=0`.
 
 Verilator test:
 
@@ -685,8 +693,8 @@ Verilator test:
 rtl/scripts/run_dab_pipeline_top_verilator.sh
 ```
 
-File replay Verilator test with a C++ FFT shim and external data-symbol
-scheduler:
+File replay Verilator test with a C++ FFT shim and the default internal
+data-symbol scheduler:
 
 ```text
 rtl/scripts/run_dab_pipeline_file_verilator.sh

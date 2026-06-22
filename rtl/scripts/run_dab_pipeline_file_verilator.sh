@@ -30,7 +30,8 @@ fi
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILD_DIR="${ROOT_DIR}/build/rtl/dab_pipeline_file"
-HISTORY_DEPTH="${DAB_TB_HISTORY_DEPTH:-262144}"
+HISTORY_DEPTH="${DAB_TB_HISTORY_DEPTH:-131072}"
+INTERNAL_DATA_SCHEDULER="${DAB_TB_INTERNAL_DATA_SCHEDULER:-1}"
 NULL_FAST_WINDOW_SAMPLES="${DAB_TB_NULL_FAST_WINDOW_SAMPLES:-39}"
 NULL_SLOW_WINDOW_SAMPLES="${DAB_TB_NULL_SLOW_WINDOW_SAMPLES:-1999}"
 NULL_MIN_SAMPLES="${DAB_TB_NULL_MIN_SAMPLES:-1800}"
@@ -41,6 +42,7 @@ verilator \
   -Wall \
   -CFLAGS "-std=c++17" \
   -GSAMPLE_HISTORY_DEPTH="${HISTORY_DEPTH}" \
+  -GENABLE_INTERNAL_DATA_SCHEDULER="${INTERNAL_DATA_SCHEDULER}" \
   -GNULL_FAST_WINDOW_SAMPLES="${NULL_FAST_WINDOW_SAMPLES}" \
   -GNULL_SLOW_WINDOW_SAMPLES="${NULL_SLOW_WINDOW_SAMPLES}" \
   -GNULL_MIN_SAMPLES="${NULL_MIN_SAMPLES}" \
@@ -63,6 +65,7 @@ verilator \
        "${ROOT_DIR}/rtl/src/ofdm/frequency_deinterleaver.sv" \
        "${ROOT_DIR}/rtl/src/ofdm/qpsk_softbits.sv" \
        "${ROOT_DIR}/rtl/src/ofdm/tframe_assembler.sv" \
+       "${ROOT_DIR}/rtl/src/top/data_symbol_scheduler.sv" \
        "${ROOT_DIR}/rtl/src/top/dab_pipeline_top.sv" \
   --exe "${ROOT_DIR}/rtl/sim/tb/tb_dab_pipeline_file.cpp" \
   --top-module dab_pipeline_top \

@@ -4,7 +4,8 @@ module dab_pipeline_top
   import dab_ofdm_pkg::*, dab_tframe_pkg::*;
 #(
     parameter int SAMPLE_WIDTH = 16,
-    parameter int SAMPLE_HISTORY_DEPTH = 262144,
+    parameter int SAMPLE_HISTORY_DEPTH = 131072,
+    parameter int ENABLE_INTERNAL_DATA_SCHEDULER = 1,
     parameter int NULL_FAST_WINDOW_SAMPLES = 39,
     parameter int NULL_SLOW_WINDOW_SAMPLES = 1999,
     parameter int NULL_MIN_SAMPLES = 128,
@@ -226,6 +227,14 @@ module dab_pipeline_top
   logic symbol_cmd_fire;
   logic symbol_cmd_is_prs;
   logic [63:0] symbol_cmd_fft_start_sample;
+  logic selected_data_symbol_cmd_valid;
+  logic selected_data_symbol_cmd_ready;
+  logic [63:0] selected_data_symbol_cmd_fft_start_sample;
+  logic auto_data_symbol_cmd_valid;
+  logic auto_data_symbol_cmd_ready;
+  logic [63:0] auto_data_symbol_cmd_fft_start_sample;
+  logic sync_out_fire;
+  logic frame_done_fire;
   logic symbol_in_ready;
   logic symbol_done_fire;
   logic symbol_error_fire;
@@ -401,14 +410,30 @@ module dab_pipeline_top
   assign history_resp_done_fire = history_rd_out_valid && history_rd_out_ready &&
       (history_rd_out_last || history_rd_out_error);
 
+  assign selected_data_symbol_cmd_valid =
+      ENABLE_INTERNAL_DATA_SCHEDULER != 0 ? auto_data_symbol_cmd_valid :
+                                            data_symbol_cmd_valid;
+  assign selected_data_symbol_cmd_fft_start_sample =
+      ENABLE_INTERNAL_DATA_SCHEDULER != 0 ? auto_data_symbol_cmd_fft_start_sample :
+                                            data_symbol_cmd_fft_start_sample;
+  assign selected_data_symbol_cmd_ready = !prs_symbol_req_valid && !symbol_active_q &&
+      symbol_in_ready;
+  assign auto_data_symbol_cmd_ready =
+      (ENABLE_INTERNAL_DATA_SCHEDULER != 0) && selected_data_symbol_cmd_ready;
+  assign data_symbol_cmd_ready =
+      (ENABLE_INTERNAL_DATA_SCHEDULER == 0) && selected_data_symbol_cmd_ready;
+
   assign symbol_cmd_is_prs = prs_symbol_req_valid;
-  assign symbol_cmd_valid = !symbol_active_q && (prs_symbol_req_valid || data_symbol_cmd_valid);
+  assign symbol_cmd_valid =
+      !symbol_active_q && (prs_symbol_req_valid || selected_data_symbol_cmd_valid);
   assign symbol_cmd_fft_start_sample =
-      prs_symbol_req_valid ? prs_symbol_req_fft_start_sample : data_symbol_cmd_fft_start_sample;
+      prs_symbol_req_valid ? prs_symbol_req_fft_start_sample :
+                             selected_data_symbol_cmd_fft_start_sample;
   assign symbol_cmd_fire = symbol_cmd_valid && symbol_in_ready;
   assign prs_symbol_req_ready = !symbol_active_q && symbol_in_ready;
-  assign data_symbol_cmd_ready = !prs_symbol_req_valid && !symbol_active_q && symbol_in_ready;
   assign symbol_busy = symbol_active_q;
+  assign sync_out_fire = sync_out_valid && sync_out_ready;
+  assign frame_done_fire = tframe_out_valid && tframe_out_ready && tframe_out_frame_done;
 
   assign cfo_out_ready = cfo_out_error ? 1'b1 : fft_in_ready;
   assign fft_in_valid = cfo_out_valid && !cfo_out_error;
@@ -502,6 +527,25 @@ module dab_pipeline_top
       .next_sample_index(history_next_sample_index),
       .stored_samples(history_stored_samples),
       .history_full(history_full)
+  );
+
+  data_symbol_scheduler #(
+      .GUARD_SAMPLES(GUARD_SAMPLES),
+      .FFT_SAMPLES(FFT_SAMPLES)
+  ) u_data_symbol_scheduler (
+      .clk(clk),
+      .rst_n(rst_n),
+      .clear(clear || (ENABLE_INTERNAL_DATA_SCHEDULER == 0)),
+      .sync_valid(sync_out_fire),
+      .sync_found(sync_out_found),
+      .sync_prs_fft_start_sample(sync_out_prs_fft_start_sample),
+      .history_valid(history_valid),
+      .history_oldest_sample_index(history_oldest_sample_index),
+      .history_next_sample_index(history_next_sample_index),
+      .cmd_valid(auto_data_symbol_cmd_valid),
+      .cmd_ready(auto_data_symbol_cmd_ready),
+      .cmd_fft_start_sample(auto_data_symbol_cmd_fft_start_sample),
+      .frame_done(frame_done_fire)
   );
 
   null_detector #(
