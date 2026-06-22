@@ -99,6 +99,7 @@ void reset(Vdiff_demod &top) {
     top.in_active_index = 0;
     top.in_symbol_start_sample = 0;
     top.in_symbol_done = 0;
+    top.in_seed_only = 0;
     tick(top);
     tick(top);
     top.rst_n = 1;
@@ -148,7 +149,8 @@ void run_symbol(Vdiff_demod &top,
                 uint32_t symbol,
                 uint64_t symbol_start_sample,
                 uint32_t seed,
-                bool expect_output) {
+                bool expect_output,
+                bool seed_only = false) {
     uint32_t sent = 0;
     uint32_t received = 0;
     uint32_t cycles = 0;
@@ -161,6 +163,7 @@ void run_symbol(Vdiff_demod &top,
         top.in_active_index = sent;
         top.in_symbol_start_sample = symbol_start_sample;
         top.in_symbol_done = sent == kActiveCarriers - 1u ? 1 : 0;
+        top.in_seed_only = seed_only ? 1 : 0;
         top.eval();
 
         const bool output_fire = top.out_valid && top.out_ready;
@@ -168,7 +171,7 @@ void run_symbol(Vdiff_demod &top,
 
         if (output_fire) {
             if (!expect_output) {
-                std::cerr << "Unexpected output while loading first symbol\n";
+                std::cerr << "Unexpected output while loading seed-only/first symbol\n";
                 std::exit(1);
             }
             check_output(top, symbol, received, symbol_start_sample, seed);
@@ -191,6 +194,7 @@ void run_symbol(Vdiff_demod &top,
 
     top.out_ready = 1;
     top.in_valid = 0;
+    top.in_seed_only = 0;
     tick(top);
     top.eval();
     if (top.out_valid) {
@@ -207,6 +211,7 @@ void run_clear_test(Vdiff_demod &top) {
     top.in_active_index = 0;
     top.in_symbol_start_sample = 55;
     top.in_symbol_done = 0;
+    top.in_seed_only = 0;
     top.eval();
     tick(top);
 
@@ -232,6 +237,8 @@ int main(int argc, char **argv) {
     run_symbol(top, 0, 100000ull, 5, false);
     run_symbol(top, 1, 102552ull, 5, true);
     run_symbol(top, 2, 105104ull, 5, true);
+    run_symbol(top, 3, 107656ull, 5, false, true);
+    run_symbol(top, 4, 110208ull, 5, true);
     run_clear_test(top);
     run_symbol(top, 0, 200000ull, 17, false);
     run_symbol(top, 1, 202552ull, 17, true);

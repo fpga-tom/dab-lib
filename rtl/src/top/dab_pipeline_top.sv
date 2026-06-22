@@ -329,6 +329,7 @@ module dab_pipeline_top
 
   logic diff_in_valid;
   logic diff_in_ready;
+  logic diff_in_seed_only;
   logic signed [DAB_OFDM_CARRIER_WIDTH-1:0] diff_in_i;
   logic signed [DAB_OFDM_CARRIER_WIDTH-1:0] diff_in_q;
   logic [DAB_OFDM_ACTIVE_INDEX_WIDTH-1:0] diff_in_active_index;
@@ -434,6 +435,7 @@ module dab_pipeline_top
   assign pilot_out_ready = track_pilot_ready && !(symbol_error_fire && symbol_is_prs_q);
 
   assign diff_in_valid = chan_ref_valid || eq_out_valid;
+  assign diff_in_seed_only = chan_ref_valid;
   assign diff_in_i = chan_ref_valid ? chan_ref_i : eq_out_i;
   assign diff_in_q = chan_ref_valid ? chan_ref_q : eq_out_q;
   assign diff_in_active_index = chan_ref_valid ? chan_ref_active_index : eq_out_active_index;
@@ -898,6 +900,7 @@ module dab_pipeline_top
       .in_active_index(diff_in_active_index),
       .in_symbol_start_sample(diff_in_symbol_start_sample),
       .in_symbol_done(diff_in_symbol_done),
+      .in_seed_only(diff_in_seed_only),
       .out_valid(diff_out_valid),
       .out_ready(diff_out_ready),
       .out_i(diff_out_i),

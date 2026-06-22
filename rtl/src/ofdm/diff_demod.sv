@@ -17,6 +17,7 @@ module diff_demod
     input  logic [DAB_OFDM_ACTIVE_INDEX_WIDTH-1:0] in_active_index,
     input  logic [63:0] in_symbol_start_sample,
     input  logic in_symbol_done,
+    input  logic in_seed_only,
 
     output logic out_valid,
     input  logic out_ready,
@@ -156,7 +157,7 @@ module diff_demod
       out_symbol_done <= 1'b0;
     end else begin
       if (input_fire) begin
-        if (have_prev_q) begin
+        if (have_prev_q && !in_seed_only) begin
           out_valid <= 1'b1;
           out_i <= diff_i;
           out_q <= diff_q;
