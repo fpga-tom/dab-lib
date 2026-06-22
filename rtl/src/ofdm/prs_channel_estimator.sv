@@ -172,20 +172,68 @@ module prs_channel_estimator
     end
   endfunction
 
+  function automatic int unsigned bit_length_u128(input logic [127:0] value);
+    integer bit_index;
+    begin
+      bit_length_u128 = 0;
+      for (bit_index = 0; bit_index < 128; bit_index = bit_index + 1) begin
+        if (value[bit_index]) begin
+          bit_length_u128 = bit_index + 1;
+        end
+      end
+    end
+  endfunction
+
+  function automatic logic signed [63:0] scaled_s128_to_s64(
+      input logic signed [127:0] value,
+      input int unsigned scale_shift
+  );
+    /* verilator lint_off UNUSEDSIGNAL */
+    logic signed [127:0] shifted;
+    /* verilator lint_on UNUSEDSIGNAL */
+    begin
+      shifted = value >>> scale_shift;
+      scaled_s128_to_s64 = shifted[63:0];
+    end
+  endfunction
+
   function automatic logic signed [COEFF_WIDTH-1:0] divide_scaled_coeff(
       input logic signed [95:0] numerator,
       input logic signed [63:0] denominator
   );
-    logic signed [95:0] scaled;
-    logic signed [95:0] denom_wide;
+    logic signed [127:0] scaled;
+    logic signed [127:0] denom_wide;
+    logic [127:0] scaled_abs;
+    logic [127:0] denom_abs;
+    logic signed [63:0] scaled_64;
+    logic signed [63:0] denom_64;
+    logic signed [63:0] quotient_64;
     logic signed [95:0] quotient;
+    int unsigned numerator_bits;
+    int unsigned denominator_bits;
+    int unsigned max_bits;
+    int unsigned scale_shift;
     begin
       if (denominator <= 64'sd0) begin
         divide_scaled_coeff = '0;
       end else begin
-        scaled = numerator <<< COEFF_FRAC_BITS;
-        denom_wide = {{32{denominator[63]}}, denominator};
-        quotient = scaled / denom_wide;
+        scaled = {{32{numerator[95]}}, numerator} <<< COEFF_FRAC_BITS;
+        denom_wide = {{64{denominator[63]}}, denominator};
+        scaled_abs = scaled[127] ? (~scaled + 128'd1) : scaled;
+        denom_abs = denom_wide[127] ? (~denom_wide + 128'd1) : denom_wide;
+        numerator_bits = bit_length_u128(scaled_abs);
+        denominator_bits = bit_length_u128(denom_abs);
+        max_bits = numerator_bits > denominator_bits ? numerator_bits : denominator_bits;
+        scale_shift = max_bits > 63 ? max_bits - 63 : 0;
+        scaled_64 = scaled_s128_to_s64(scaled, scale_shift);
+        denom_64 = scaled_s128_to_s64(denom_wide, scale_shift);
+        if (denom_64 == 64'sd0) begin
+          quotient = scaled[127] ? -(96'sd1 <<< (COEFF_WIDTH - 1))
+                                 : ((96'sd1 <<< (COEFF_WIDTH - 1)) - 96'sd1);
+        end else begin
+          quotient_64 = scaled_64 / denom_64;
+          quotient = {{32{quotient_64[63]}}, quotient_64};
+        end
         divide_scaled_coeff = saturate_coeff(quotient);
       end
     end

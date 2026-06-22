@@ -241,6 +241,60 @@ module prs_pilot_refiner
     end
   endfunction
 
+  function automatic int unsigned bit_length_score_num(
+      input logic [SCORE_NUM_WIDTH-1:0] value
+  );
+    integer bit_index;
+    begin
+      bit_length_score_num = 0;
+      for (bit_index = 0; bit_index < SCORE_NUM_WIDTH; bit_index = bit_index + 1) begin
+        if (value[bit_index]) begin
+          bit_length_score_num = bit_index + 1;
+        end
+      end
+    end
+  endfunction
+
+  function automatic int unsigned bit_length_timing_calc(
+      input logic [TIMING_CALC_WIDTH-1:0] value
+  );
+    integer bit_index;
+    begin
+      bit_length_timing_calc = 0;
+      for (bit_index = 0; bit_index < TIMING_CALC_WIDTH; bit_index = bit_index + 1) begin
+        if (value[bit_index]) begin
+          bit_length_timing_calc = bit_index + 1;
+        end
+      end
+    end
+  endfunction
+
+  function automatic logic [63:0] scaled_score_num_to_u64(
+      input logic [SCORE_NUM_WIDTH-1:0] value,
+      input int unsigned scale_shift
+  );
+    /* verilator lint_off UNUSEDSIGNAL */
+    logic [SCORE_NUM_WIDTH-1:0] shifted;
+    /* verilator lint_on UNUSEDSIGNAL */
+    begin
+      shifted = value >> scale_shift;
+      scaled_score_num_to_u64 = shifted[63:0];
+    end
+  endfunction
+
+  function automatic logic signed [63:0] scaled_timing_to_s64(
+      input logic signed [TIMING_CALC_WIDTH-1:0] value,
+      input int unsigned scale_shift
+  );
+    /* verilator lint_off UNUSEDSIGNAL */
+    logic signed [TIMING_CALC_WIDTH-1:0] shifted;
+    /* verilator lint_on UNUSEDSIGNAL */
+    begin
+      shifted = value >>> scale_shift;
+      scaled_timing_to_s64 = shifted[63:0];
+    end
+  endfunction
+
   function automatic logic [SCORE_WIDTH-1:0] score_from_acc(
       input logic signed [CORR_ACC_WIDTH-1:0] corr_re,
       input logic signed [CORR_ACC_WIDTH-1:0] corr_im,
@@ -252,7 +306,15 @@ module prs_pilot_refiner
     logic [(2 * CORR_ACC_WIDTH):0] corr_mag_sq;
     logic [SCORE_DEN_WIDTH-1:0] denominator;
     logic [SCORE_NUM_WIDTH-1:0] numerator;
+    logic [SCORE_NUM_WIDTH-1:0] denominator_wide;
     logic [SCORE_NUM_WIDTH-1:0] quotient;
+    logic [63:0] numerator_64;
+    logic [63:0] denominator_64;
+    logic [63:0] quotient_64;
+    int unsigned numerator_bits;
+    int unsigned denominator_bits;
+    int unsigned max_bits;
+    int unsigned scale_shift;
     begin
       if (used_pairs == 12'd0 || signal_energy == '0) begin
         score_from_acc = '0;
@@ -263,7 +325,16 @@ module prs_pilot_refiner
             (2 * CORR_ACC_WIDTH + 1)'(corr_im_sq);
         denominator = SCORE_DEN_WIDTH'(signal_energy) * SCORE_DEN_WIDTH'(used_pairs);
         numerator = SCORE_NUM_WIDTH'(corr_mag_sq) << SCORE_FRAC_BITS;
-        quotient = denominator == '0 ? '0 : numerator / SCORE_NUM_WIDTH'(denominator);
+        denominator_wide = SCORE_NUM_WIDTH'(denominator);
+        numerator_bits = bit_length_score_num(numerator);
+        denominator_bits = bit_length_score_num(denominator_wide);
+        max_bits = numerator_bits > denominator_bits ? numerator_bits : denominator_bits;
+        scale_shift = max_bits > 64 ? max_bits - 64 : 0;
+        numerator_64 = scaled_score_num_to_u64(numerator, scale_shift);
+        denominator_64 = scaled_score_num_to_u64(denominator_wide, scale_shift);
+        quotient_64 = denominator_64 == 64'd0 ? {64{1'b1}} : numerator_64 / denominator_64;
+        quotient = '0;
+        quotient[63:0] = quotient_64;
         score_from_acc = saturate_score(quotient);
       end
     end
@@ -295,6 +366,15 @@ module prs_pilot_refiner
     logic signed [TIMING_CALC_WIDTH-1:0] numerator;
     logic signed [TIMING_CALC_WIDTH-1:0] denominator;
     logic signed [TIMING_CALC_WIDTH-1:0] quotient;
+    logic [TIMING_CALC_WIDTH-1:0] numerator_abs;
+    logic [TIMING_CALC_WIDTH-1:0] denominator_abs;
+    logic signed [63:0] numerator_64;
+    logic signed [63:0] denominator_64;
+    logic signed [63:0] quotient_64;
+    int unsigned numerator_bits;
+    int unsigned denominator_bits;
+    int unsigned max_bits;
+    int unsigned scale_shift;
     begin
       if (corr_re == {CORR_ACC_WIDTH{1'b0}}) begin
         if (!corr_im[CORR_ACC_WIDTH-1] && corr_im != {CORR_ACC_WIDTH{1'b0}}) begin
@@ -311,7 +391,23 @@ module prs_pilot_refiner
       end else begin
         numerator = TIMING_CALC_WIDTH'(corr_im) * TIMING_CALC_WIDTH'(TIMING_GAIN_Q);
         denominator = TIMING_CALC_WIDTH'(corr_re);
-        quotient = numerator / denominator;
+        numerator_abs = numerator[TIMING_CALC_WIDTH-1] ? (~numerator + TIMING_CALC_WIDTH'(1)) : numerator;
+        denominator_abs = denominator[TIMING_CALC_WIDTH-1] ? (~denominator + TIMING_CALC_WIDTH'(1)) : denominator;
+        numerator_bits = bit_length_timing_calc(numerator_abs);
+        denominator_bits = bit_length_timing_calc(denominator_abs);
+        max_bits = numerator_bits > denominator_bits ? numerator_bits : denominator_bits;
+        scale_shift = max_bits > 63 ? max_bits - 63 : 0;
+        numerator_64 = scaled_timing_to_s64(numerator, scale_shift);
+        denominator_64 = scaled_timing_to_s64(denominator, scale_shift);
+        quotient = '0;
+        if (denominator_64 == 64'sd0) begin
+          quotient[TIMING_CALC_WIDTH-1] = numerator[TIMING_CALC_WIDTH-1];
+          quotient[TIMING_CALC_WIDTH-2:0] = numerator[TIMING_CALC_WIDTH-1] ? '0 : '1;
+        end else begin
+          quotient_64 = numerator_64 / denominator_64;
+          quotient[63:0] = quotient_64;
+          quotient[TIMING_CALC_WIDTH-1:64] = {((TIMING_CALC_WIDTH - 64)){quotient_64[63]}};
+        end
         fine_timing_from_corr = saturate_timing(quotient);
       end
     end

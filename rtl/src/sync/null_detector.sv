@@ -167,6 +167,31 @@ module null_detector #(
     end
   endfunction
 
+  function automatic int unsigned bit_length_u128(input logic [127:0] value);
+    integer bit_index;
+    begin
+      bit_length_u128 = 0;
+      for (bit_index = 0; bit_index < 128; bit_index = bit_index + 1) begin
+        if (value[bit_index]) begin
+          bit_length_u128 = bit_index + 1;
+        end
+      end
+    end
+  endfunction
+
+  function automatic logic [63:0] scaled_u128_to_u64(
+      input logic [127:0] value,
+      input int unsigned scale_shift
+  );
+    /* verilator lint_off UNUSEDSIGNAL */
+    logic [127:0] shifted;
+    /* verilator lint_on UNUSEDSIGNAL */
+    begin
+      shifted = value >> scale_shift;
+      scaled_u128_to_u64 = shifted[63:0];
+    end
+  endfunction
+
   function automatic logic [RATIO_WIDTH-1:0] ratio_q(
       input logic [POWER_SUM_WIDTH-1:0] fast_sum,
       input logic [FAST_COUNT_WIDTH-1:0] fast_count,
@@ -175,8 +200,14 @@ module null_detector #(
   );
     logic [127:0] numerator;
     logic [127:0] denominator;
-    logic [127:0] quotient;
-    logic [127:0] max_ratio;
+    logic [63:0] numerator_64;
+    logic [63:0] denominator_64;
+    logic [63:0] quotient_64;
+    logic [63:0] max_ratio;
+    int unsigned numerator_bits;
+    int unsigned denominator_bits;
+    int unsigned max_bits;
+    int unsigned scale_shift;
     begin
       if (fast_count == '0 || slow_count == '0 || slow_sum == '0) begin
         ratio_q = RATIO_ONE;
@@ -185,13 +216,19 @@ module null_detector #(
         numerator = (numerator * slow_count) << RATIO_FRAC_BITS;
         denominator = 128'(slow_sum);
         denominator = denominator * fast_count;
-        quotient = numerator / denominator;
-        max_ratio = (128'd1 << RATIO_WIDTH) - 128'd1;
+        numerator_bits = bit_length_u128(numerator);
+        denominator_bits = bit_length_u128(denominator);
+        max_bits = numerator_bits > denominator_bits ? numerator_bits : denominator_bits;
+        scale_shift = max_bits > 64 ? max_bits - 64 : 0;
+        numerator_64 = scaled_u128_to_u64(numerator, scale_shift);
+        denominator_64 = scaled_u128_to_u64(denominator, scale_shift);
+        quotient_64 = denominator_64 == 64'd0 ? {64{1'b1}} : numerator_64 / denominator_64;
+        max_ratio = (64'd1 << RATIO_WIDTH) - 64'd1;
 
-        if (quotient > max_ratio) begin
+        if (quotient_64 > max_ratio) begin
           ratio_q = max_ratio[RATIO_WIDTH-1:0];
         end else begin
-          ratio_q = quotient[RATIO_WIDTH-1:0];
+          ratio_q = quotient_64[RATIO_WIDTH-1:0];
         end
       end
     end
