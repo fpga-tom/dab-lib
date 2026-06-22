@@ -1,8 +1,7 @@
 `default_nettype none
 
 module dab_pipeline_top
-  import dab_ofdm_pkg::*;
-  import dab_tframe_pkg::*;
+  import dab_ofdm_pkg::*, dab_tframe_pkg::*;
 #(
     parameter int SAMPLE_WIDTH = 16,
     parameter int SAMPLE_HISTORY_DEPTH = 262144,

@@ -250,11 +250,11 @@ module cp_metric_engine #(
     logic signed [95:0] min_value;
     begin
       max_value = 96'(CFO_MAX_HZ);
-      min_value = -96'(CFO_MAX_HZ);
+      min_value = -(96'(CFO_MAX_HZ));
       if (value > max_value) begin
         saturate_cfo = CFO_WIDTH'(CFO_MAX_HZ);
       end else if (value < min_value) begin
-        saturate_cfo = -CFO_WIDTH'(CFO_MAX_HZ);
+        saturate_cfo = -(CFO_WIDTH'(CFO_MAX_HZ));
       end else begin
         saturate_cfo = value[CFO_WIDTH-1:0];
       end
@@ -275,15 +275,15 @@ module cp_metric_engine #(
         if (corr_im < 64'sd0) begin
           cfo_from_corr = CFO_WIDTH'(CFO_MAX_HZ);
         end else if (corr_im > 64'sd0) begin
-          cfo_from_corr = -CFO_WIDTH'(CFO_MAX_HZ);
+          cfo_from_corr = -(CFO_WIDTH'(CFO_MAX_HZ));
         end else begin
           cfo_from_corr = '0;
         end
       end else if (corr_re < 64'sd0) begin
         cfo_from_corr = corr_im <= 64'sd0 ? CFO_WIDTH'(CFO_MAX_HZ)
-                                           : -CFO_WIDTH'(CFO_MAX_HZ);
+                                           : -(CFO_WIDTH'(CFO_MAX_HZ));
       end else begin
-        numerator = -96'(corr_im) * 96'(CFO_GAIN_Q);
+        numerator = -(96'(corr_im)) * 96'(CFO_GAIN_Q);
         denominator = 96'(corr_re);
         quotient_q = numerator / denominator;
         rounded_q = quotient_q + (96'sd1 <<< (CFO_GAIN_FRAC_BITS - 1));

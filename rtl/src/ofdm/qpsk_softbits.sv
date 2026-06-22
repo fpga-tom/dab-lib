@@ -101,7 +101,7 @@ module qpsk_softbits
       if (quotient > 127) begin
         softbit_from_component = 8'sd127;
       end else if (quotient < -128) begin
-        softbit_from_component = -8'sd128;
+        softbit_from_component = {1'b1, {(SOFTBIT_WIDTH - 1){1'b0}}};
       end else begin
         softbit_from_component = SOFTBIT_WIDTH'(quotient);
       end
