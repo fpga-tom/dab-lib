@@ -452,6 +452,8 @@ Source:
 
 ```text
 rtl/src/ofdm/fft_wrapper.sv
+rtl/src/ofdm/altera_fft_avalon_core.sv
+rtl/src/top/dab_pipeline_top_quartus_fft.sv
 ```
 
 Required wrapper metadata:
@@ -482,6 +484,33 @@ The wrapper intentionally does not implement FFT math. FPGA builds should bind
 the `core_*` ports to the selected FFT IP. Verilator tests use a mock core so
 the wrapper's framing, metadata, and backpressure behavior can be verified
 without choosing vendor IP yet.
+
+For Intel/Altera Quartus builds, use `dab_pipeline_top_quartus_fft` as the top
+entity. It instantiates the normal `dab_pipeline_top`, hides the `fft_core_*`
+ports, and connects them to `altera_fft_avalon_core`. The adapter instantiates a
+Quartus-generated FFT IP entity named `dab_fft_2048` by default; override the
+entity name with the compile macro `DAB_ALTERA_FFT_IP_MODULE` if the generated
+IP uses a different module name.
+
+Expected Quartus FFT IP configuration:
+
+```text
+transform length: 2048, fixed length
+direction: inverse input port enabled; adapter drives it low for forward FFT
+streaming interface: Avalon-ST sink/source
+output order: natural order
+arithmetic: block floating point with source_exp enabled
+sink_real/sink_imag width: 18 bits by default
+source_real/source_imag width: 24 bits by default
+source_exp width: 8 bits by default
+sink_error/source_error width: 2 bits by default
+```
+
+If the generated IP uses different data, exponent, or error widths, set the
+`FFT_IP_INPUT_WIDTH`, `FFT_IP_OUTPUT_WIDTH`, `FFT_IP_EXP_WIDTH`, and
+`FFT_IP_ERROR_WIDTH` parameters on `dab_pipeline_top_quartus_fft` to match the
+IP. Add the generated `.qip`/`.ip` files to the Quartus project together with
+the RTL sources.
 
 ### `active_carrier_mapper`
 
@@ -1014,6 +1043,12 @@ Verilator test:
 
 ```text
 rtl/scripts/run_fft_wrapper_verilator.sh
+```
+
+Quartus FFT top lint:
+
+```text
+rtl/scripts/run_dab_pipeline_top_quartus_fft_lint.sh
 ```
 
 ### `qpsk_softbits`
