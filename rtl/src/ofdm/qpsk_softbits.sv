@@ -37,23 +37,28 @@ module qpsk_softbits
     logic [63:0] op;
     logic [63:0] res;
     logic [63:0] one;
+    integer step;
     begin
       op = value;
       res = 64'd0;
       one = 64'h4000_0000_0000_0000;
 
-      while (one > op) begin
-        one = one >> 2;
+      for (step = 0; step < 32; step = step + 1) begin
+        if (one > op) begin
+          one = one >> 2;
+        end
       end
 
-      while (one != 64'd0) begin
-        if (op >= (res + one)) begin
-          op = op - (res + one);
-          res = (res >> 1) + one;
-        end else begin
-          res = res >> 1;
+      for (step = 0; step < 32; step = step + 1) begin
+        if (one != 64'd0) begin
+          if (op >= (res + one)) begin
+            op = op - (res + one);
+            res = (res >> 1) + one;
+          end else begin
+            res = res >> 1;
+          end
+          one = one >> 2;
         end
-        one = one >> 2;
       end
 
       isqrt_u64 = res[31:0];
