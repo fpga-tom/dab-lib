@@ -14,7 +14,13 @@
 #include <utility>
 #include <vector>
 
+#if defined(DAB_TB_CUSTOM_FFT)
+#include "Vdab_pipeline_top_custom_fft.h"
+using TopType = Vdab_pipeline_top_custom_fft;
+#else
 #include "Vdab_pipeline_top.h"
+using TopType = Vdab_pipeline_top;
+#endif
 #include "verilated.h"
 
 namespace {
@@ -440,7 +446,7 @@ public:
         return true;
     }
 
-    bool can_arm(const Vdab_pipeline_top &top) const {
+    bool can_arm(const TopType &top) const {
         if (pending_.empty() || armed_ || waiting_for_frame_done_) {
             return false;
         }
@@ -544,7 +550,7 @@ private:
     uint64_t scheduled_frames_ = 0;
 };
 
-void drive_quiescent(Vdab_pipeline_top &top, const Config &cfg) {
+void drive_quiescent(TopType &top, const Config &cfg) {
     top.clear = 0;
     top.set_sample_index_valid = 0;
     top.set_sample_index_value = 0;
@@ -562,24 +568,26 @@ void drive_quiescent(Vdab_pipeline_top &top, const Config &cfg) {
     top.predict_in_prs_fft_start_sample = 0;
     top.data_symbol_cmd_valid = 0;
     top.data_symbol_cmd_fft_start_sample = 0;
+#if !defined(DAB_TB_CUSTOM_FFT)
     top.fft_core_in_ready = 0;
     top.fft_core_out_valid = 0;
     top.fft_core_out_i = 0;
     top.fft_core_out_q = 0;
     top.fft_core_out_block_exp = 0;
     top.fft_core_out_overflow = 0;
+#endif
     top.sync_out_ready = 1;
     top.tframe_out_ready = 1;
 }
 
-void raw_tick(Vdab_pipeline_top &top) {
+void raw_tick(TopType &top) {
     top.clk = 0;
     top.eval();
     top.clk = 1;
     top.eval();
 }
 
-void reset_top(Vdab_pipeline_top &top, const Config &cfg) {
+void reset_top(TopType &top, const Config &cfg) {
     drive_quiescent(top, cfg);
     top.rst_n = 0;
     raw_tick(top);
@@ -597,9 +605,11 @@ void reset_top(Vdab_pipeline_top &top, const Config &cfg) {
     raw_tick(top);
 }
 
-void drive_cycle_inputs(Vdab_pipeline_top &top,
+void drive_cycle_inputs(TopType &top,
                         const Config &cfg,
+#if !defined(DAB_TB_CUSTOM_FFT)
                         const FftShim &fft,
+#endif
                         const DataScheduler &scheduler,
                         const std::vector<Sample> &samples,
                         uint64_t sample_pos,
@@ -614,6 +624,7 @@ void drive_cycle_inputs(Vdab_pipeline_top &top,
         top.sdr_in_q = pack_signed(sample.q, kSampleWidth);
     }
 
+#if !defined(DAB_TB_CUSTOM_FFT)
     top.fft_core_in_ready = fft.can_accept() ? 1 : 0;
     if (fft.has_output()) {
         const FftBin bin = fft.current_output();
@@ -623,6 +634,7 @@ void drive_cycle_inputs(Vdab_pipeline_top &top,
         top.fft_core_out_block_exp = 0;
         top.fft_core_out_overflow = 0;
     }
+#endif
 
     if (!cfg.internal_data_scheduler && scheduler.command_valid()) {
         top.data_symbol_cmd_valid = 1;
@@ -630,17 +642,19 @@ void drive_cycle_inputs(Vdab_pipeline_top &top,
     }
 }
 
-CycleFires observe_cycle(const Vdab_pipeline_top &top) {
+CycleFires observe_cycle(const TopType &top) {
     CycleFires fires;
 
     fires.sdr = top.sdr_in_valid && top.sdr_in_ready;
 
+#if !defined(DAB_TB_CUSTOM_FFT)
     fires.fft_in = top.fft_core_in_valid && top.fft_core_in_ready;
     fires.fft_in_last = top.fft_core_in_last != 0;
     fires.fft_in_i = static_cast<int32_t>(sign_extend(top.fft_core_in_i, 18));
     fires.fft_in_q = static_cast<int32_t>(sign_extend(top.fft_core_in_q, 18));
 
     fires.fft_out = top.fft_core_out_valid && top.fft_core_out_ready;
+#endif
     fires.data_cmd = top.data_symbol_cmd_valid && top.data_symbol_cmd_ready;
 
     fires.sync = top.sync_out_valid && top.sync_out_ready;
@@ -674,8 +688,10 @@ int main(int argc, char **argv) {
             throw std::runtime_error("failed to open softbit output: " + cfg.softbits_path);
         }
 
-        Vdab_pipeline_top top;
+        TopType top;
+#if !defined(DAB_TB_CUSTOM_FFT)
         FftShim fft(cfg);
+#endif
         DataScheduler scheduler;
 
         reset_top(top, cfg);
@@ -698,7 +714,12 @@ int main(int argc, char **argv) {
                   << (cfg.internal_data_scheduler ? "internal" : "external")
                   << " cp_search=" << (cfg.streaming_cp_search ? "stream" : "history")
                   << " sample_period_cycles=" << cfg.sample_period_cycles
+#if defined(DAB_TB_CUSTOM_FFT)
+                  << " fft_impl=custom_rtl"
+#else
+                  << " fft_impl=cpp_shim"
                   << " fft_scale=" << (cfg.fft_fixed_gain ? "fixed" : "rms")
+#endif
                   << "\n";
 
         for (uint64_t cycle = 0; cycle < cfg.max_cycles && !Verilated::gotFinish(); ++cycle) {
@@ -717,7 +738,15 @@ int main(int argc, char **argv) {
 
             const bool sample_cycle =
                 (cycle % static_cast<uint64_t>(cfg.sample_period_cycles)) == 0u;
-            drive_cycle_inputs(top, cfg, fft, scheduler, samples, sample_pos, feed_enabled,
+            drive_cycle_inputs(top,
+                               cfg,
+#if !defined(DAB_TB_CUSTOM_FFT)
+                               fft,
+#endif
+                               scheduler,
+                               samples,
+                               sample_pos,
+                               feed_enabled,
                                sample_cycle);
 
             top.clk = 0;
@@ -729,12 +758,14 @@ int main(int argc, char **argv) {
             if (fires.sdr) {
                 ++sample_pos;
             }
+#if !defined(DAB_TB_CUSTOM_FFT)
             if (fires.fft_in) {
                 fft.push_input(fires.fft_in_i, fires.fft_in_q, fires.fft_in_last);
             }
             if (fires.fft_out) {
                 fft.pop_output();
             }
+#endif
             if (!cfg.internal_data_scheduler && fires.data_cmd) {
                 scheduler.command_accepted();
             }
@@ -796,7 +827,9 @@ int main(int argc, char **argv) {
                           << " data_next=" << scheduler.next_symbol()
                           << " frames_done=" << frames_done
                           << " softbits=" << softbit_count
+#if !defined(DAB_TB_CUSTOM_FFT)
                           << " ffts=" << fft.fft_count()
+#endif
                           << "\n";
             }
         }
@@ -817,10 +850,14 @@ int main(int argc, char **argv) {
                   << " frames_done=" << frames_done
                   << " last_frame_start_sample=" << last_frame_start_sample
                   << " softbits=" << softbit_count
+#if !defined(DAB_TB_CUSTOM_FFT)
                   << " ffts=" << fft.fft_count()
                   << " fft_last_scale=" << fft.last_scale()
                   << " fft_max_raw_bin_abs=" << fft.max_raw_bin_abs()
                   << " fft_saturations=" << fft.saturation_count()
+#else
+                  << " fft_impl=custom_rtl"
+#endif
                   << "\n";
 
         if (frames_done >= cfg.target_tframes) {

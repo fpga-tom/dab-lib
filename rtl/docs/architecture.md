@@ -452,7 +452,9 @@ Source:
 
 ```text
 rtl/src/ofdm/fft_wrapper.sv
+rtl/src/ofdm/fft_radix2_core.sv
 rtl/src/ofdm/altera_fft_avalon_core.sv
+rtl/src/top/dab_pipeline_top_custom_fft.sv
 rtl/src/top/dab_pipeline_top_quartus_fft.sv
 ```
 
@@ -511,6 +513,28 @@ If the generated IP uses different data, exponent, or error widths, set the
 `FFT_IP_ERROR_WIDTH` parameters on `dab_pipeline_top_quartus_fft` to match the
 IP. Add the generated `.qip`/`.ip` files to the Quartus project together with
 the RTL sources.
+
+For a vendor-independent build, use `dab_pipeline_top_custom_fft` as the top
+entity. It instantiates `fft_radix2_core` behind the same `core_*` FFT wrapper
+interface. The custom core is an in-place radix-2 decimation-in-time FFT:
+
+```text
+load: 2048 samples into bit-reversed memory addresses
+compute: 11 stages, 1024 butterflies per stage, 2 cycles per butterfly
+output: 2048 natural-order bins from synchronous RAM
+```
+
+The core uses one true dual-port complex sample memory, represented as separate
+I and Q RAMs, and a stage-step twiddle recurrence instead of a 1024-entry
+twiddle ROM. By default it uses 24-bit internal data, 18-bit Q1.16 twiddles, and
+scales each butterfly by one bit. The output therefore reports
+`core_out_block_exp = 11`, equivalent to an FFT result divided by 2048. This
+keeps the datapath bounded without a dynamic block-floating controller. The
+core needs roughly 28.7k fabric cycles per symbol, so continuous DAB Mode I
+operation needs a fabric clock above about 11.3 cycles per 2.048 Msps input
+sample. The core is intended as a portable first hardware FFT; a later version
+can pipeline the butterfly or add ping-pong memories if the clock target needs
+more margin.
 
 ### `active_carrier_mapper`
 
@@ -797,6 +821,15 @@ data-symbol scheduler:
 rtl/scripts/run_dab_pipeline_file_verilator.sh
 ```
 
+File replay Verilator test through the custom synthesizable FFT:
+
+```text
+rtl/scripts/run_dab_pipeline_file_custom_fft_verilator.sh
+```
+
+The custom FFT file replay defaults to `DAB_TB_SAMPLE_PERIOD_CYCLES=16` so the
+iterative RTL FFT has enough cycles to load, compute, and emit each data symbol.
+
 ### `iq_ingress`
 
 Source:
@@ -1043,6 +1076,13 @@ Verilator test:
 
 ```text
 rtl/scripts/run_fft_wrapper_verilator.sh
+rtl/scripts/run_fft_radix2_core_verilator.sh
+```
+
+Custom FFT top lint:
+
+```text
+rtl/scripts/run_dab_pipeline_top_custom_fft_lint.sh
 ```
 
 Quartus FFT top lint:

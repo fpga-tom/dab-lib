@@ -40,7 +40,7 @@ Qm.n = signed fixed point with m integer bits including sign and n fractional bi
 | NCO sin/cos | CORDIC internal | First RTL implementation uses a 16-stage pipelined CORDIC instead of a sine/cosine ROM |
 | CFO-corrected I/Q | signed 18-bit | `cfo_corrector` saturates after CORDIC rotation |
 | FFT input | signed 18-bit complex | Wrapper forwards CFO-corrected samples to FFT IP |
-| FFT internal | vendor scale schedule or block floating | Export scale exponent |
+| FFT internal | vendor scale schedule/block floating or custom 24-bit scaled radix-2 | Custom core scales one bit per stage and exports exponent 11 |
 | FFT output | signed 24-bit complex | Initial generic target |
 | Active carriers | signed 24-bit complex | Same as FFT output after mapping |
 | Channel correction | signed 24-bit Q2.22 complex | Derived from PRS reference / received carrier |
