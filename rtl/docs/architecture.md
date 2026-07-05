@@ -544,11 +544,14 @@ Source:
 
 ```text
 rtl/src/top/dab_zynq_axis_top.v
+rtl/src/top/dab_zynq_axis_top.sv
 ```
 
-The wrapper exposes one clock domain intended for a Zynq PS fabric clock such as
-`FCLK_CLK0`: AXI-Lite control/status, AXI-Stream IQ input, and AXI-Stream
-softbit output. The IQ stream carries one complex sample per beat:
+The Verilog file is a thin Vivado IP-packager top. It instantiates the
+SystemVerilog implementation module `dab_zynq_axis_top_sv`, which exposes one
+clock domain intended for a Zynq PS fabric clock such as `FCLK_CLK0`: AXI-Lite
+control/status, AXI-Stream IQ input, and AXI-Stream softbit output. The IQ
+stream carries one complex sample per beat:
 
 ```text
 s_axis_iq_tdata[15:0]  = signed I
