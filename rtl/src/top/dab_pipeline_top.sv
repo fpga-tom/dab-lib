@@ -19,6 +19,9 @@ module dab_pipeline_top
         DAB_OFDM_CARRIER_WIDTH > DAB_OFDM_SOFTBIT_WIDTH ?
         DAB_OFDM_CARRIER_WIDTH - DAB_OFDM_SOFTBIT_WIDTH : 0,
     parameter int ENABLE_CHANNEL_EQUALIZER = 0,
+    parameter int ENABLE_INTERNAL_CFO_CONTROL = 0,
+    parameter int CFO_CONTROL_GAIN_FRAC_BITS = 16,
+    parameter int CFO_CONTROL_GAIN_SCALE_Q = 68719477,
     parameter int FFT_APPLY_BLOCK_EXP = 0,
     parameter int GUARD_SAMPLES = 504,
     parameter int FFT_SAMPLES = DAB_OFDM_FFT_SAMPLES
@@ -110,9 +113,13 @@ module dab_pipeline_top
   } soft_state_t;
 
   localparam int DATA_INDEX_WIDTH = DAB_OFDM_DATA_INDEX_WIDTH;
+  localparam int CFO_CONTROL_HZ_WIDTH = 16;
+  localparam int CFO_CONTROL_PRODUCT_WIDTH =
+      CFO_CONTROL_HZ_WIDTH + CFO_CONTROL_GAIN_FRAC_BITS + 16;
   localparam logic [DATA_INDEX_WIDTH-1:0] LAST_DATA_INDEX =
       DATA_INDEX_WIDTH'(DAB_OFDM_DATA_CARRIERS - 1);
   localparam bit STREAMING_CP_SEARCH = ENABLE_STREAMING_CP_SEARCH != 0;
+  localparam bit INTERNAL_CFO_CONTROL = ENABLE_INTERNAL_CFO_CONTROL != 0;
 
   read_owner_t read_owner_q;
   soft_state_t soft_state_q;
@@ -316,6 +323,15 @@ module dab_pipeline_top
   logic cfo_out_error;
   /* verilator lint_off UNUSEDSIGNAL */
   logic [31:0] cfo_out_phase;
+  /* verilator lint_on UNUSEDSIGNAL */
+  logic internal_cfo_locked_q;
+  logic [31:0] internal_cfo_phase_inc_q;
+  logic internal_cfo_phase_load_q;
+  logic cfo_cfg_bypass;
+  logic [31:0] cfo_cfg_phase_inc;
+  logic cfo_cfg_phase_load;
+  logic [31:0] cfo_cfg_phase_seed;
+  /* verilator lint_off UNUSEDSIGNAL */
   logic [DAB_OFDM_BLOCK_EXP_WIDTH-1:0] fft_out_block_exp;
   logic fft_out_overflow;
   logic [DAB_OFDM_FFT_INDEX_WIDTH-1:0] fft_out_bin_index;
@@ -538,6 +554,12 @@ module dab_pipeline_top
   assign cfo_out_ready = cfo_out_error ? 1'b1 : fft_in_ready;
   assign fft_in_valid = cfo_out_valid && !cfo_out_error;
   assign symbol_error_fire = cfo_out_valid && cfo_out_ready && cfo_out_error && cfo_out_symbol_done;
+  assign cfo_cfg_bypass = INTERNAL_CFO_CONTROL ? !internal_cfo_locked_q : cfg_cfo_bypass;
+  assign cfo_cfg_phase_inc =
+      INTERNAL_CFO_CONTROL ? internal_cfo_phase_inc_q : cfg_cfo_phase_inc;
+  assign cfo_cfg_phase_load =
+      INTERNAL_CFO_CONTROL ? internal_cfo_phase_load_q : cfg_cfo_phase_load;
+  assign cfo_cfg_phase_seed = INTERNAL_CFO_CONTROL ? 32'd0 : cfg_cfo_phase_seed;
 
   assign active_ready = symbol_is_prs_q ? prs_active_ready : eq_in_ready;
   assign prs_active_ready = pilot_in_ready && chan_ready;
@@ -599,6 +621,31 @@ module dab_pipeline_top
   assign tframe_in_symbol_start_sample =
       soft_state_q == SOFT_STATE_LOAD_A ? soft_pair_symbol_start_sample :
                                           soft_b_symbol_start_sample_q;
+
+  function automatic logic [31:0] cfo_phase_inc_from_hz(
+      input logic signed [CFO_WIDTH-1:0] cfo_hz
+  );
+    /* verilator lint_off UNUSEDSIGNAL */
+    logic [CFO_WIDTH-1:0] abs_hz_wide;
+    /* verilator lint_on UNUSEDSIGNAL */
+    logic [CFO_CONTROL_HZ_WIDTH-1:0] abs_hz;
+    logic [CFO_CONTROL_PRODUCT_WIDTH-1:0] product;
+    /* verilator lint_off UNUSEDSIGNAL */
+    logic [CFO_CONTROL_PRODUCT_WIDTH-1:0] rounded;
+    /* verilator lint_on UNUSEDSIGNAL */
+    logic [31:0] magnitude;
+    begin
+      abs_hz_wide = cfo_hz[CFO_WIDTH-1] ? CFO_WIDTH'(-cfo_hz) : CFO_WIDTH'(cfo_hz);
+      abs_hz = abs_hz_wide[CFO_CONTROL_HZ_WIDTH-1:0];
+      product = CFO_CONTROL_PRODUCT_WIDTH'(abs_hz) *
+          CFO_CONTROL_PRODUCT_WIDTH'(CFO_CONTROL_GAIN_SCALE_Q);
+      rounded = (product +
+          (CFO_CONTROL_PRODUCT_WIDTH'(1) <<< (CFO_CONTROL_GAIN_FRAC_BITS - 1))) >>>
+          CFO_CONTROL_GAIN_FRAC_BITS;
+      magnitude = rounded[31:0];
+      cfo_phase_inc_from_hz = cfo_hz[CFO_WIDTH-1] ? magnitude : (~magnitude + 32'd1);
+    end
+  endfunction
 
   iq_ingress #(
       .SAMPLE_WIDTH(SAMPLE_WIDTH)
@@ -966,10 +1013,10 @@ module dab_pipeline_top
       .clk(clk),
       .rst_n(rst_n),
       .clear(clear),
-      .cfg_bypass(cfg_cfo_bypass),
-      .cfg_phase_inc(cfg_cfo_phase_inc),
-      .cfg_phase_load(cfg_cfo_phase_load),
-      .cfg_phase_seed(cfg_cfo_phase_seed),
+      .cfg_bypass(cfo_cfg_bypass),
+      .cfg_phase_inc(cfo_cfg_phase_inc),
+      .cfg_phase_load(cfo_cfg_phase_load),
+      .cfg_phase_seed(cfo_cfg_phase_seed),
       .in_valid(symbol_out_valid),
       .in_ready(symbol_out_ready),
       .in_i(symbol_out_i),
@@ -1220,6 +1267,25 @@ module dab_pipeline_top
       .out_frame_start_sample(tframe_out_frame_start_sample),
       .out_frame_done(tframe_out_frame_done)
   );
+
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      internal_cfo_locked_q <= 1'b0;
+      internal_cfo_phase_inc_q <= '0;
+      internal_cfo_phase_load_q <= 1'b0;
+    end else if (clear) begin
+      internal_cfo_locked_q <= 1'b0;
+      internal_cfo_phase_inc_q <= '0;
+      internal_cfo_phase_load_q <= 1'b0;
+    end else begin
+      internal_cfo_phase_load_q <= 1'b0;
+      if (INTERNAL_CFO_CONTROL && sync_out_fire && sync_out_found) begin
+        internal_cfo_locked_q <= 1'b1;
+        internal_cfo_phase_inc_q <= cfo_phase_inc_from_hz(sync_out_coarse_freq_error_hz);
+        internal_cfo_phase_load_q <= 1'b1;
+      end
+    end
+  end
 
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin

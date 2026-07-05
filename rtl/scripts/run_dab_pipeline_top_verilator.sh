@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILD_DIR="${ROOT_DIR}/build/rtl/dab_pipeline_top"
 CHANNEL_EQUALIZER="${DAB_TB_ENABLE_CHANNEL_EQUALIZER:-0}"
 QPSK_RAW_SHIFT="${DAB_TB_QPSK_RAW_SHIFT:-16}"
+INTERNAL_CFO_CONTROL="${DAB_TB_ENABLE_INTERNAL_CFO_CONTROL:-0}"
 
 mkdir -p "${BUILD_DIR}"
 
@@ -17,6 +18,7 @@ verilator \
   -GNULL_MIN_SAMPLES=4 \
   -GENABLE_CHANNEL_EQUALIZER="${CHANNEL_EQUALIZER}" \
   -GQPSK_RAW_SHIFT="${QPSK_RAW_SHIFT}" \
+  -GENABLE_INTERNAL_CFO_CONTROL="${INTERNAL_CFO_CONTROL}" \
   --cc "${ROOT_DIR}/rtl/src/common/dab_ofdm_pkg.sv" \
        "${ROOT_DIR}/rtl/src/common/dab_tframe_pkg.sv" \
        "${ROOT_DIR}/rtl/src/frontend/iq_ingress.sv" \
