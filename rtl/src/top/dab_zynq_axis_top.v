@@ -1,6 +1,9 @@
 `default_nettype none
 
-// Zynq-friendly shell around dab_pipeline_top_custom_fft.
+// Verilog-2001 Zynq shell around dab_pipeline_top_custom_fft.
+//
+// The wrapper top is intentionally plain Verilog so Vivado IP packager can use
+// it as the IP top. The DAB pipeline below still uses SystemVerilog sources.
 //
 // Register map, 32-bit AXI-Lite words:
 //   0x00 CONTROL
@@ -59,221 +62,229 @@
 //   0x84 HISTORY_NEXT_SAMPLE_HI
 //   0x88 LATEST_PILOT_USED_PAIRS
 
-module dab_zynq_axis_top
-  import dab_ofdm_pkg::*, dab_tframe_pkg::*;
-#(
-    parameter int AXIL_ADDR_WIDTH = 8,
-    parameter int SAMPLE_WIDTH = 16,
-    parameter int SAMPLE_HISTORY_DEPTH = 32768,
-    parameter int ENABLE_INTERNAL_DATA_SCHEDULER = 1,
-    parameter int ENABLE_STREAMING_CP_SEARCH = 1,
-    parameter int NULL_FAST_WINDOW_SAMPLES = 39,
-    parameter int NULL_SLOW_WINDOW_SAMPLES = 1999,
-    parameter int NULL_MIN_SAMPLES = 128,
-    parameter int SCORE_WIDTH = 32,
-    parameter int CFO_WIDTH = 32,
-    parameter int RATIO_WIDTH = 24,
-    parameter int TIMING_WIDTH = 24,
-    parameter int QPSK_EXACT_NORMALIZE = 0,
-    parameter int QPSK_RAW_SHIFT = 9,
-    parameter int ENABLE_CHANNEL_EQUALIZER = 0,
-    parameter int ENABLE_CFO_CORRECTOR = 0,
-    parameter int ENABLE_INTERNAL_CFO_CONTROL = 0,
-    parameter int CFO_CONTROL_GAIN_FRAC_BITS = 16,
-    parameter int CFO_CONTROL_GAIN_SCALE_Q = 68719477,
-    parameter int GUARD_SAMPLES = 504,
-    parameter int FFT_SAMPLES = DAB_OFDM_FFT_SAMPLES,
-    parameter int FFT_APPLY_BLOCK_EXP = 1,
-    parameter int FFT_INTERNAL_WIDTH = DAB_OFDM_CARRIER_WIDTH,
-    parameter int FFT_TWIDDLE_WIDTH = 18,
-    parameter int FFT_TWIDDLE_FRAC_BITS = 16
+module dab_zynq_axis_top #(
+    parameter AXIL_ADDR_WIDTH = 8,
+    parameter SAMPLE_WIDTH = 16,
+    parameter SAMPLE_HISTORY_DEPTH = 32768,
+    parameter ENABLE_INTERNAL_DATA_SCHEDULER = 1,
+    parameter ENABLE_STREAMING_CP_SEARCH = 1,
+    parameter NULL_FAST_WINDOW_SAMPLES = 39,
+    parameter NULL_SLOW_WINDOW_SAMPLES = 1999,
+    parameter NULL_MIN_SAMPLES = 128,
+    parameter SCORE_WIDTH = 32,
+    parameter CFO_WIDTH = 32,
+    parameter RATIO_WIDTH = 24,
+    parameter TIMING_WIDTH = 24,
+    parameter QPSK_EXACT_NORMALIZE = 0,
+    parameter QPSK_RAW_SHIFT = 9,
+    parameter ENABLE_CHANNEL_EQUALIZER = 0,
+    parameter ENABLE_CFO_CORRECTOR = 0,
+    parameter ENABLE_INTERNAL_CFO_CONTROL = 0,
+    parameter CFO_CONTROL_GAIN_FRAC_BITS = 16,
+    parameter CFO_CONTROL_GAIN_SCALE_Q = 68719477,
+    parameter GUARD_SAMPLES = 504,
+    parameter FFT_SAMPLES = 2048,
+    parameter FFT_APPLY_BLOCK_EXP = 1,
+    parameter FFT_INTERNAL_WIDTH = 24,
+    parameter FFT_TWIDDLE_WIDTH = 18,
+    parameter FFT_TWIDDLE_FRAC_BITS = 16
 ) (
-    input  wire logic s_axi_aclk,
-    input  wire logic s_axi_aresetn,
+    input  wire s_axi_aclk,
+    input  wire s_axi_aresetn,
 
-    input  wire logic [AXIL_ADDR_WIDTH-1:0] s_axi_awaddr,
-    input  wire logic [2:0] s_axi_awprot,
-    input  wire logic s_axi_awvalid,
-    output logic s_axi_awready,
-    input  wire logic [31:0] s_axi_wdata,
-    input  wire logic [3:0] s_axi_wstrb,
-    input  wire logic s_axi_wvalid,
-    output logic s_axi_wready,
-    output logic [1:0] s_axi_bresp,
-    output logic s_axi_bvalid,
-    input  wire logic s_axi_bready,
-    input  wire logic [AXIL_ADDR_WIDTH-1:0] s_axi_araddr,
-    input  wire logic [2:0] s_axi_arprot,
-    input  wire logic s_axi_arvalid,
-    output logic s_axi_arready,
-    output logic [31:0] s_axi_rdata,
-    output logic [1:0] s_axi_rresp,
-    output logic s_axi_rvalid,
-    input  wire logic s_axi_rready,
+    input  wire [AXIL_ADDR_WIDTH-1:0] s_axi_awaddr,
+    input  wire [2:0] s_axi_awprot,
+    input  wire s_axi_awvalid,
+    output wire s_axi_awready,
+    input  wire [31:0] s_axi_wdata,
+    input  wire [3:0] s_axi_wstrb,
+    input  wire s_axi_wvalid,
+    output wire s_axi_wready,
+    output wire [1:0] s_axi_bresp,
+    output reg s_axi_bvalid,
+    input  wire s_axi_bready,
+    input  wire [AXIL_ADDR_WIDTH-1:0] s_axi_araddr,
+    input  wire [2:0] s_axi_arprot,
+    input  wire s_axi_arvalid,
+    output wire s_axi_arready,
+    output reg [31:0] s_axi_rdata,
+    output wire [1:0] s_axi_rresp,
+    output reg s_axi_rvalid,
+    input  wire s_axi_rready,
 
-    input  wire logic s_axis_iq_tvalid,
-    output logic s_axis_iq_tready,
-    input  wire logic [2*SAMPLE_WIDTH-1:0] s_axis_iq_tdata,
-    input  wire logic [(2*SAMPLE_WIDTH+7)/8-1:0] s_axis_iq_tkeep,
-    input  wire logic s_axis_iq_tlast,
+    input  wire s_axis_iq_tvalid,
+    output wire s_axis_iq_tready,
+    input  wire [2*SAMPLE_WIDTH-1:0] s_axis_iq_tdata,
+    input  wire [(2*SAMPLE_WIDTH+7)/8-1:0] s_axis_iq_tkeep,
+    input  wire s_axis_iq_tlast,
 
-    output logic m_axis_softbit_tvalid,
-    input  wire logic m_axis_softbit_tready,
-    output logic [31:0] m_axis_softbit_tdata,
-    output logic [3:0] m_axis_softbit_tkeep,
-    output logic m_axis_softbit_tlast
+    output wire m_axis_softbit_tvalid,
+    input  wire m_axis_softbit_tready,
+    output wire [31:0] m_axis_softbit_tdata,
+    output wire [3:0] m_axis_softbit_tkeep,
+    output wire m_axis_softbit_tlast
 );
-  localparam logic [5:0] REG_CONTROL = 6'h00;
-  localparam logic [5:0] REG_STATUS = 6'h01;
-  localparam logic [5:0] REG_MIN_CP_SCORE = 6'h02;
-  localparam logic [5:0] REG_MIN_PILOT_SCORE = 6'h03;
-  localparam logic [5:0] REG_CFO_CONTROL = 6'h04;
-  localparam logic [5:0] REG_CFO_PHASE_INC = 6'h05;
-  localparam logic [5:0] REG_CFO_PHASE_SEED = 6'h06;
-  localparam logic [5:0] REG_SET_SAMPLE_INDEX_LO = 6'h07;
-  localparam logic [5:0] REG_SET_SAMPLE_INDEX_HI = 6'h08;
-  localparam logic [5:0] REG_SAMPLE_COUNT_LO = 6'h09;
-  localparam logic [5:0] REG_SAMPLE_COUNT_HI = 6'h0a;
-  localparam logic [5:0] REG_SOFTBIT_COUNT_LO = 6'h0b;
-  localparam logic [5:0] REG_SOFTBIT_COUNT_HI = 6'h0c;
-  localparam logic [5:0] REG_SOFTWORD_COUNT_LO = 6'h0d;
-  localparam logic [5:0] REG_SOFTWORD_COUNT_HI = 6'h0e;
-  localparam logic [5:0] REG_FRAME_COUNT = 6'h0f;
-  localparam logic [5:0] REG_SYNC_COUNT = 6'h10;
-  localparam logic [5:0] REG_SYNC_FOUND_COUNT = 6'h11;
-  localparam logic [5:0] REG_LATEST_SYNC_FLAGS = 6'h12;
-  localparam logic [5:0] REG_LATEST_PRS_SCORE = 6'h13;
-  localparam logic [5:0] REG_LATEST_PILOT_SCORE = 6'h14;
-  localparam logic [5:0] REG_LATEST_CFO_HZ = 6'h15;
-  localparam logic [5:0] REG_LATEST_FINE_TIMING = 6'h16;
-  localparam logic [5:0] REG_LATEST_PRS_FFT_START_LO = 6'h17;
-  localparam logic [5:0] REG_LATEST_PRS_FFT_START_HI = 6'h18;
-  localparam logic [5:0] REG_LATEST_NEXT_PRS_FFT_START_LO = 6'h19;
-  localparam logic [5:0] REG_LATEST_NEXT_PRS_FFT_START_HI = 6'h1a;
-  localparam logic [5:0] REG_LATEST_FRAME_START_LO = 6'h1b;
-  localparam logic [5:0] REG_LATEST_FRAME_START_HI = 6'h1c;
-  localparam logic [5:0] REG_HISTORY_STORED_SAMPLES = 6'h1d;
-  localparam logic [5:0] REG_HISTORY_OLDEST_SAMPLE_LO = 6'h1e;
-  localparam logic [5:0] REG_HISTORY_OLDEST_SAMPLE_HI = 6'h1f;
-  localparam logic [5:0] REG_HISTORY_NEXT_SAMPLE_LO = 6'h20;
-  localparam logic [5:0] REG_HISTORY_NEXT_SAMPLE_HI = 6'h21;
-  localparam logic [5:0] REG_LATEST_PILOT_USED_PAIRS = 6'h22;
+  localparam [5:0] REG_CONTROL = 6'h00;
+  localparam [5:0] REG_STATUS = 6'h01;
+  localparam [5:0] REG_MIN_CP_SCORE = 6'h02;
+  localparam [5:0] REG_MIN_PILOT_SCORE = 6'h03;
+  localparam [5:0] REG_CFO_CONTROL = 6'h04;
+  localparam [5:0] REG_CFO_PHASE_INC = 6'h05;
+  localparam [5:0] REG_CFO_PHASE_SEED = 6'h06;
+  localparam [5:0] REG_SET_SAMPLE_INDEX_LO = 6'h07;
+  localparam [5:0] REG_SET_SAMPLE_INDEX_HI = 6'h08;
+  localparam [5:0] REG_SAMPLE_COUNT_LO = 6'h09;
+  localparam [5:0] REG_SAMPLE_COUNT_HI = 6'h0a;
+  localparam [5:0] REG_SOFTBIT_COUNT_LO = 6'h0b;
+  localparam [5:0] REG_SOFTBIT_COUNT_HI = 6'h0c;
+  localparam [5:0] REG_SOFTWORD_COUNT_LO = 6'h0d;
+  localparam [5:0] REG_SOFTWORD_COUNT_HI = 6'h0e;
+  localparam [5:0] REG_FRAME_COUNT = 6'h0f;
+  localparam [5:0] REG_SYNC_COUNT = 6'h10;
+  localparam [5:0] REG_SYNC_FOUND_COUNT = 6'h11;
+  localparam [5:0] REG_LATEST_SYNC_FLAGS = 6'h12;
+  localparam [5:0] REG_LATEST_PRS_SCORE = 6'h13;
+  localparam [5:0] REG_LATEST_PILOT_SCORE = 6'h14;
+  localparam [5:0] REG_LATEST_CFO_HZ = 6'h15;
+  localparam [5:0] REG_LATEST_FINE_TIMING = 6'h16;
+  localparam [5:0] REG_LATEST_PRS_FFT_START_LO = 6'h17;
+  localparam [5:0] REG_LATEST_PRS_FFT_START_HI = 6'h18;
+  localparam [5:0] REG_LATEST_NEXT_PRS_FFT_START_LO = 6'h19;
+  localparam [5:0] REG_LATEST_NEXT_PRS_FFT_START_HI = 6'h1a;
+  localparam [5:0] REG_LATEST_FRAME_START_LO = 6'h1b;
+  localparam [5:0] REG_LATEST_FRAME_START_HI = 6'h1c;
+  localparam [5:0] REG_HISTORY_STORED_SAMPLES = 6'h1d;
+  localparam [5:0] REG_HISTORY_OLDEST_SAMPLE_LO = 6'h1e;
+  localparam [5:0] REG_HISTORY_OLDEST_SAMPLE_HI = 6'h1f;
+  localparam [5:0] REG_HISTORY_NEXT_SAMPLE_LO = 6'h20;
+  localparam [5:0] REG_HISTORY_NEXT_SAMPLE_HI = 6'h21;
+  localparam [5:0] REG_LATEST_PILOT_USED_PAIRS = 6'h22;
 
-  localparam logic [31:0] DEFAULT_MIN_CP_SCORE_Q30 = 32'h1999_999a;
-  localparam logic [31:0] DEFAULT_MIN_PILOT_SCORE_Q30 = 32'h2000_0000;
+  localparam [31:0] DEFAULT_MIN_CP_SCORE_Q30 = 32'h1999_999a;
+  localparam [31:0] DEFAULT_MIN_PILOT_SCORE_Q30 = 32'h2000_0000;
+  localparam DAB_TFRAME_SOFTBIT_WIDTH = 8;
+  localparam DAB_TFRAME_ADDR_WIDTH = 18;
+  localparam DAB_TFRAME_SYMBOL_INDEX_WIDTH = 7;
+  localparam DAB_TFRAME_BYTE_INDEX_WIDTH = 12;
 
-  logic aw_pending_q;
-  logic [5:0] awaddr_word_q;
-  logic w_pending_q;
-  logic [31:0] wdata_q;
-  logic [3:0] wstrb_q;
+  reg aw_pending_q;
+  reg [5:0] awaddr_word_q;
+  reg w_pending_q;
+  reg [31:0] wdata_q;
+  reg [3:0] wstrb_q;
 
-  logic run_enable_q;
-  logic tracking_enable_q;
-  logic clear_pulse_q;
-  logic clear_status_pulse_q;
-  logic set_sample_index_pulse_q;
-  logic [63:0] set_sample_index_value_q;
-  logic [31:0] cfg_min_cp_score_q;
-  logic [31:0] cfg_min_pilot_score_q;
-  logic cfg_cfo_bypass_q;
-  logic [31:0] cfg_cfo_phase_inc_q;
-  logic cfg_cfo_phase_load_pulse_q;
-  logic [31:0] cfg_cfo_phase_seed_q;
+  reg run_enable_q;
+  reg tracking_enable_q;
+  reg clear_pulse_q;
+  reg clear_status_pulse_q;
+  reg set_sample_index_pulse_q;
+  reg [63:0] set_sample_index_value_q;
+  reg [31:0] cfg_min_cp_score_q;
+  reg [31:0] cfg_min_pilot_score_q;
+  reg cfg_cfo_bypass_q;
+  reg [31:0] cfg_cfo_phase_inc_q;
+  reg cfg_cfo_phase_load_pulse_q;
+  reg [31:0] cfg_cfo_phase_seed_q;
 
-  logic sdr_in_valid;
-  logic sdr_in_ready;
-  logic signed [SAMPLE_WIDTH-1:0] sdr_in_i;
-  logic signed [SAMPLE_WIDTH-1:0] sdr_in_q;
+  wire sdr_in_valid;
+  wire sdr_in_ready;
+  wire signed [SAMPLE_WIDTH-1:0] sdr_in_i;
+  wire signed [SAMPLE_WIDTH-1:0] sdr_in_q;
 
-  logic sync_out_valid;
-  logic sync_out_found;
-  logic sync_out_locked;
-  logic [7:0] sync_out_lock_count;
-  logic [7:0] sync_out_miss_count;
-  logic [63:0] sync_out_prs_symbol_start_sample;
-  logic [63:0] sync_out_prs_fft_start_sample;
-  logic [SCORE_WIDTH-1:0] sync_out_prs_score;
-  logic signed [CFO_WIDTH-1:0] sync_out_coarse_freq_error_hz;
-  logic [SCORE_WIDTH-1:0] sync_out_pilot_score;
-  logic signed [3:0] sync_out_carrier_offset_bins;
-  logic signed [TIMING_WIDTH-1:0] sync_out_fine_timing_error_samples;
-  logic [11:0] sync_out_pilot_used_pairs;
-  logic [63:0] sync_out_next_prs_fft_start_sample;
+  wire sync_out_valid;
+  wire sync_out_found;
+  wire sync_out_locked;
+  wire [7:0] sync_out_lock_count;
+  wire [7:0] sync_out_miss_count;
+  wire [63:0] sync_out_prs_symbol_start_sample;
+  wire [63:0] sync_out_prs_fft_start_sample;
+  wire [SCORE_WIDTH-1:0] sync_out_prs_score;
+  wire signed [CFO_WIDTH-1:0] sync_out_coarse_freq_error_hz;
+  wire [SCORE_WIDTH-1:0] sync_out_pilot_score;
+  wire signed [3:0] sync_out_carrier_offset_bins;
+  wire signed [TIMING_WIDTH-1:0] sync_out_fine_timing_error_samples;
+  wire [11:0] sync_out_pilot_used_pairs;
+  wire [63:0] sync_out_next_prs_fft_start_sample;
 
-  logic pipe_tframe_out_valid;
-  logic pipe_tframe_out_ready;
-  logic signed [DAB_TFRAME_SOFTBIT_WIDTH-1:0] pipe_tframe_out_softbit;
+  wire pipe_tframe_out_valid;
+  wire pipe_tframe_out_ready;
+  wire signed [DAB_TFRAME_SOFTBIT_WIDTH-1:0] pipe_tframe_out_softbit;
+  wire pipe_tframe_out_region;
+  wire [DAB_TFRAME_ADDR_WIDTH-1:0] pipe_tframe_out_addr;
+  wire [DAB_TFRAME_SYMBOL_INDEX_WIDTH-1:0] pipe_tframe_out_symbol_index;
+  wire [DAB_TFRAME_BYTE_INDEX_WIDTH-1:0] pipe_tframe_out_byte_index;
+  wire predict_in_ready_unused;
+  wire data_symbol_cmd_ready_unused;
+  wire [63:0] pipe_tframe_out_frame_start_sample;
+  wire pipe_tframe_out_frame_done;
+
+  wire history_valid;
+  wire [63:0] history_oldest_sample_index;
+  wire [63:0] history_next_sample_index;
+  wire [31:0] history_stored_samples;
+  wire history_full;
+  wire symbol_busy;
+
+  reg [1:0] soft_pack_count_q;
+  reg [31:0] soft_pack_data_q;
+  reg soft_word_valid_q;
+  reg [31:0] soft_word_data_q;
+  reg [3:0] soft_word_keep_q;
+  reg soft_word_last_q;
+
+  reg sync_seen_sticky_q;
+  reg sync_found_sticky_q;
+  reg frame_done_sticky_q;
+  reg [63:0] sample_count_q;
+  reg [63:0] softbit_count_q;
+  reg [63:0] softword_count_q;
+  reg [31:0] frame_count_q;
+  reg [31:0] sync_count_q;
+  reg [31:0] sync_found_count_q;
+  reg latest_sync_found_q;
+  reg latest_sync_locked_q;
+  reg [7:0] latest_sync_lock_count_q;
+  reg [7:0] latest_sync_miss_count_q;
+  reg [11:0] latest_sync_pilot_used_pairs_q;
+  reg signed [3:0] latest_sync_carrier_offset_q;
+  reg [31:0] latest_sync_prs_score_q;
+  reg [31:0] latest_sync_pilot_score_q;
+  reg signed [31:0] latest_sync_cfo_hz_q;
+  reg signed [31:0] latest_sync_fine_timing_q;
+  reg [63:0] latest_sync_prs_symbol_start_q;
+  reg [63:0] latest_sync_prs_fft_start_q;
+  reg [63:0] latest_sync_next_prs_fft_start_q;
+  reg [63:0] latest_frame_start_q;
+
+  wire sample_fire = sdr_in_valid && sdr_in_ready;
+  wire softbit_fire = pipe_tframe_out_valid && pipe_tframe_out_ready;
+  wire softword_fire = soft_word_valid_q && m_axis_softbit_tready;
+  wire sync_fire = sync_out_valid;
+
   /* verilator lint_off UNUSEDSIGNAL */
-  logic pipe_tframe_out_region;
-  logic [DAB_TFRAME_ADDR_WIDTH-1:0] pipe_tframe_out_addr;
-  logic [DAB_TFRAME_SYMBOL_INDEX_WIDTH-1:0] pipe_tframe_out_symbol_index;
-  logic [DAB_TFRAME_BYTE_INDEX_WIDTH-1:0] pipe_tframe_out_byte_index;
-  logic predict_in_ready_unused;
-  logic data_symbol_cmd_ready_unused;
-  /* verilator lint_on UNUSEDSIGNAL */
-  logic [63:0] pipe_tframe_out_frame_start_sample;
-  logic pipe_tframe_out_frame_done;
-
-  logic history_valid;
-  logic [63:0] history_oldest_sample_index;
-  logic [63:0] history_next_sample_index;
-  logic [31:0] history_stored_samples;
-  logic history_full;
-  logic symbol_busy;
-
-  logic [1:0] soft_pack_count_q;
-  logic [31:0] soft_pack_data_q;
-  logic soft_word_valid_q;
-  logic [31:0] soft_word_data_q;
-  logic [3:0] soft_word_keep_q;
-  logic soft_word_last_q;
-
-  logic sync_seen_sticky_q;
-  logic sync_found_sticky_q;
-  logic frame_done_sticky_q;
-  logic [63:0] sample_count_q;
-  logic [63:0] softbit_count_q;
-  logic [63:0] softword_count_q;
-  logic [31:0] frame_count_q;
-  logic [31:0] sync_count_q;
-  logic [31:0] sync_found_count_q;
-  logic latest_sync_found_q;
-  logic latest_sync_locked_q;
-  logic [7:0] latest_sync_lock_count_q;
-  logic [7:0] latest_sync_miss_count_q;
-  logic [11:0] latest_sync_pilot_used_pairs_q;
-  logic signed [3:0] latest_sync_carrier_offset_q;
-  logic [31:0] latest_sync_prs_score_q;
-  logic [31:0] latest_sync_pilot_score_q;
-  logic signed [31:0] latest_sync_cfo_hz_q;
-  logic signed [31:0] latest_sync_fine_timing_q;
-  logic [63:0] latest_sync_prs_symbol_start_q;
-  logic [63:0] latest_sync_prs_fft_start_q;
-  logic [63:0] latest_sync_next_prs_fft_start_q;
-  logic [63:0] latest_frame_start_q;
-
-  wire logic sample_fire = sdr_in_valid && sdr_in_ready;
-  wire logic softbit_fire = pipe_tframe_out_valid && pipe_tframe_out_ready;
-  wire logic softword_fire = soft_word_valid_q && m_axis_softbit_tready;
-  wire logic sync_fire = sync_out_valid;
-
-  /* verilator lint_off UNUSEDSIGNAL */
-  wire logic [1:0] unused_awaddr_lsb = s_axi_awaddr[1:0];
-  wire logic [1:0] unused_araddr_lsb = s_axi_araddr[1:0];
-  wire logic [2:0] unused_awprot = s_axi_awprot;
-  wire logic [2:0] unused_arprot = s_axi_arprot;
-  wire logic [(2*SAMPLE_WIDTH+7)/8-1:0] unused_iq_tkeep = s_axis_iq_tkeep;
-  wire logic unused_iq_tlast = s_axis_iq_tlast;
-  wire logic [63:0] unused_latest_sync_prs_symbol_start =
+  wire [1:0] unused_awaddr_lsb = s_axi_awaddr[1:0];
+  wire [1:0] unused_araddr_lsb = s_axi_araddr[1:0];
+  wire [2:0] unused_awprot = s_axi_awprot;
+  wire [2:0] unused_arprot = s_axi_arprot;
+  wire [(2*SAMPLE_WIDTH+7)/8-1:0] unused_iq_tkeep = s_axis_iq_tkeep;
+  wire unused_iq_tlast = s_axis_iq_tlast;
+  wire unused_pipe_tframe_out_region = pipe_tframe_out_region;
+  wire [DAB_TFRAME_ADDR_WIDTH-1:0] unused_pipe_tframe_out_addr =
+      pipe_tframe_out_addr;
+  wire [DAB_TFRAME_SYMBOL_INDEX_WIDTH-1:0] unused_pipe_tframe_out_symbol_index =
+      pipe_tframe_out_symbol_index;
+  wire [DAB_TFRAME_BYTE_INDEX_WIDTH-1:0] unused_pipe_tframe_out_byte_index =
+      pipe_tframe_out_byte_index;
+  wire unused_predict_in_ready = predict_in_ready_unused;
+  wire unused_data_symbol_cmd_ready = data_symbol_cmd_ready_unused;
+  wire [63:0] unused_latest_sync_prs_symbol_start =
       latest_sync_prs_symbol_start_q;
   /* verilator lint_on UNUSEDSIGNAL */
 
-  function automatic logic [31:0] apply_wstrb(
-      input logic [31:0] prior,
-      input logic [31:0] data,
-      input logic [3:0] strb
-  );
+  function [31:0] apply_wstrb;
+    input [31:0] prior;
+    input [31:0] data;
+    input [3:0] strb;
     integer i;
     begin
       apply_wstrb = prior;
@@ -285,9 +296,25 @@ module dab_zynq_axis_top
     end
   endfunction
 
-  function automatic logic [3:0] keep_for_last_index(input logic [1:0] index);
+  function [31:0] pack_softbit_value;
+    input [31:0] prior;
+    input [1:0] index;
+    input [7:0] value;
     begin
-      unique case (index)
+      pack_softbit_value = prior;
+      case (index)
+        2'd0: pack_softbit_value[7:0] = value;
+        2'd1: pack_softbit_value[15:8] = value;
+        2'd2: pack_softbit_value[23:16] = value;
+        default: pack_softbit_value[31:24] = value;
+      endcase
+    end
+  endfunction
+
+  function [3:0] keep_for_last_index;
+    input [1:0] index;
+    begin
+      case (index)
         2'd0: keep_for_last_index = 4'b0001;
         2'd1: keep_for_last_index = 4'b0011;
         2'd2: keep_for_last_index = 4'b0111;
@@ -296,7 +323,7 @@ module dab_zynq_axis_top
     end
   endfunction
 
-  function automatic logic [31:0] control_read_value();
+  function [31:0] control_read_value;
     begin
       control_read_value = 32'd0;
       control_read_value[0] = run_enable_q;
@@ -307,14 +334,14 @@ module dab_zynq_axis_top
     end
   endfunction
 
-  function automatic logic [31:0] cfo_control_read_value();
+  function [31:0] cfo_control_read_value;
     begin
       cfo_control_read_value = 32'd0;
       cfo_control_read_value[0] = cfg_cfo_bypass_q;
     end
   endfunction
 
-  function automatic logic [31:0] status_read_value();
+  function [31:0] status_read_value;
     begin
       status_read_value = 32'd0;
       status_read_value[0] = run_enable_q;
@@ -330,7 +357,7 @@ module dab_zynq_axis_top
     end
   endfunction
 
-  function automatic logic [31:0] latest_sync_flags_read_value();
+  function [31:0] latest_sync_flags_read_value;
     begin
       latest_sync_flags_read_value = 32'd0;
       latest_sync_flags_read_value[0] = latest_sync_found_q;
@@ -342,9 +369,10 @@ module dab_zynq_axis_top
     end
   endfunction
 
-  function automatic logic [31:0] read_reg(input logic [5:0] addr_word);
+  function [31:0] read_reg;
+    input [5:0] addr_word;
     begin
-      unique case (addr_word)
+      case (addr_word)
         REG_CONTROL: read_reg = control_read_value();
         REG_STATUS: read_reg = status_read_value();
         REG_MIN_CP_SCORE: read_reg = cfg_min_cp_score_q;
@@ -368,8 +396,10 @@ module dab_zynq_axis_top
         REG_LATEST_PILOT_SCORE: read_reg = latest_sync_pilot_score_q;
         REG_LATEST_CFO_HZ: read_reg = latest_sync_cfo_hz_q;
         REG_LATEST_FINE_TIMING: read_reg = latest_sync_fine_timing_q;
-        REG_LATEST_PRS_FFT_START_LO: read_reg = latest_sync_prs_fft_start_q[31:0];
-        REG_LATEST_PRS_FFT_START_HI: read_reg = latest_sync_prs_fft_start_q[63:32];
+        REG_LATEST_PRS_FFT_START_LO:
+          read_reg = latest_sync_prs_fft_start_q[31:0];
+        REG_LATEST_PRS_FFT_START_HI:
+          read_reg = latest_sync_prs_fft_start_q[63:32];
         REG_LATEST_NEXT_PRS_FFT_START_LO:
           read_reg = latest_sync_next_prs_fft_start_q[31:0];
         REG_LATEST_NEXT_PRS_FFT_START_HI:
@@ -377,11 +407,14 @@ module dab_zynq_axis_top
         REG_LATEST_FRAME_START_LO: read_reg = latest_frame_start_q[31:0];
         REG_LATEST_FRAME_START_HI: read_reg = latest_frame_start_q[63:32];
         REG_HISTORY_STORED_SAMPLES: read_reg = history_stored_samples;
-        REG_HISTORY_OLDEST_SAMPLE_LO: read_reg = history_oldest_sample_index[31:0];
-        REG_HISTORY_OLDEST_SAMPLE_HI: read_reg = history_oldest_sample_index[63:32];
+        REG_HISTORY_OLDEST_SAMPLE_LO:
+          read_reg = history_oldest_sample_index[31:0];
+        REG_HISTORY_OLDEST_SAMPLE_HI:
+          read_reg = history_oldest_sample_index[63:32];
         REG_HISTORY_NEXT_SAMPLE_LO: read_reg = history_next_sample_index[31:0];
         REG_HISTORY_NEXT_SAMPLE_HI: read_reg = history_next_sample_index[63:32];
-        REG_LATEST_PILOT_USED_PAIRS: read_reg = {20'd0, latest_sync_pilot_used_pairs_q};
+        REG_LATEST_PILOT_USED_PAIRS:
+          read_reg = {20'd0, latest_sync_pilot_used_pairs_q};
         default: read_reg = 32'd0;
       endcase
     end
@@ -393,28 +426,28 @@ module dab_zynq_axis_top
   assign s_axi_arready = !s_axi_rvalid;
   assign s_axi_rresp = 2'b00;
 
-  always_ff @(posedge s_axi_aclk or negedge s_axi_aresetn) begin
+  always @(posedge s_axi_aclk or negedge s_axi_aresetn) begin
     if (!s_axi_aresetn) begin
       aw_pending_q <= 1'b0;
-      awaddr_word_q <= '0;
+      awaddr_word_q <= 6'd0;
       w_pending_q <= 1'b0;
-      wdata_q <= '0;
-      wstrb_q <= '0;
+      wdata_q <= 32'd0;
+      wstrb_q <= 4'd0;
       s_axi_bvalid <= 1'b0;
       s_axi_rvalid <= 1'b0;
-      s_axi_rdata <= '0;
+      s_axi_rdata <= 32'd0;
       run_enable_q <= 1'b0;
       tracking_enable_q <= 1'b1;
       clear_pulse_q <= 1'b0;
       clear_status_pulse_q <= 1'b0;
       set_sample_index_pulse_q <= 1'b0;
-      set_sample_index_value_q <= '0;
+      set_sample_index_value_q <= 64'd0;
       cfg_min_cp_score_q <= DEFAULT_MIN_CP_SCORE_Q30;
       cfg_min_pilot_score_q <= DEFAULT_MIN_PILOT_SCORE_Q30;
       cfg_cfo_bypass_q <= 1'b1;
-      cfg_cfo_phase_inc_q <= '0;
+      cfg_cfo_phase_inc_q <= 32'd0;
       cfg_cfo_phase_load_pulse_q <= 1'b0;
-      cfg_cfo_phase_seed_q <= '0;
+      cfg_cfo_phase_seed_q <= 32'd0;
     end else begin
       clear_pulse_q <= 1'b0;
       clear_status_pulse_q <= 1'b0;
@@ -433,7 +466,7 @@ module dab_zynq_axis_top
       end
 
       if (!s_axi_bvalid && aw_pending_q && w_pending_q) begin
-        unique case (awaddr_word_q)
+        case (awaddr_word_q)
           REG_CONTROL: begin
             if (wstrb_q[0]) begin
               run_enable_q <= wdata_q[0];
@@ -447,7 +480,8 @@ module dab_zynq_axis_top
             cfg_min_cp_score_q <= apply_wstrb(cfg_min_cp_score_q, wdata_q, wstrb_q);
           end
           REG_MIN_PILOT_SCORE: begin
-            cfg_min_pilot_score_q <= apply_wstrb(cfg_min_pilot_score_q, wdata_q, wstrb_q);
+            cfg_min_pilot_score_q <=
+                apply_wstrb(cfg_min_pilot_score_q, wdata_q, wstrb_q);
           end
           REG_CFO_CONTROL: begin
             if (wstrb_q[0]) begin
@@ -500,22 +534,20 @@ module dab_zynq_axis_top
   assign m_axis_softbit_tkeep = soft_word_keep_q;
   assign m_axis_softbit_tlast = soft_word_last_q;
 
-  always_ff @(posedge s_axi_aclk or negedge s_axi_aresetn) begin
-    logic [31:0] next_soft_pack_data;
-
+  always @(posedge s_axi_aclk or negedge s_axi_aresetn) begin
     if (!s_axi_aresetn) begin
-      soft_pack_count_q <= '0;
-      soft_pack_data_q <= '0;
+      soft_pack_count_q <= 2'd0;
+      soft_pack_data_q <= 32'd0;
       soft_word_valid_q <= 1'b0;
-      soft_word_data_q <= '0;
-      soft_word_keep_q <= '0;
+      soft_word_data_q <= 32'd0;
+      soft_word_keep_q <= 4'd0;
       soft_word_last_q <= 1'b0;
     end else if (clear_pulse_q) begin
-      soft_pack_count_q <= '0;
-      soft_pack_data_q <= '0;
+      soft_pack_count_q <= 2'd0;
+      soft_pack_data_q <= 32'd0;
       soft_word_valid_q <= 1'b0;
-      soft_word_data_q <= '0;
-      soft_word_keep_q <= '0;
+      soft_word_data_q <= 32'd0;
+      soft_word_keep_q <= 4'd0;
       soft_word_last_q <= 1'b0;
     end else begin
       if (softword_fire) begin
@@ -524,78 +556,74 @@ module dab_zynq_axis_top
       end
 
       if (softbit_fire) begin
-        next_soft_pack_data = soft_pack_data_q;
-        unique case (soft_pack_count_q)
-          2'd0: next_soft_pack_data[7:0] = pipe_tframe_out_softbit;
-          2'd1: next_soft_pack_data[15:8] = pipe_tframe_out_softbit;
-          2'd2: next_soft_pack_data[23:16] = pipe_tframe_out_softbit;
-          default: next_soft_pack_data[31:24] = pipe_tframe_out_softbit;
-        endcase
-
         if (soft_pack_count_q == 2'd3 || pipe_tframe_out_frame_done) begin
           soft_word_valid_q <= 1'b1;
-          soft_word_data_q <= next_soft_pack_data;
+          soft_word_data_q <= pack_softbit_value(soft_pack_data_q,
+                                                 soft_pack_count_q,
+                                                 pipe_tframe_out_softbit);
           soft_word_keep_q <= keep_for_last_index(soft_pack_count_q);
           soft_word_last_q <= pipe_tframe_out_frame_done;
-          soft_pack_count_q <= '0;
-          soft_pack_data_q <= '0;
+          soft_pack_count_q <= 2'd0;
+          soft_pack_data_q <= 32'd0;
         end else begin
           soft_pack_count_q <= soft_pack_count_q + 2'd1;
-          soft_pack_data_q <= next_soft_pack_data;
+          soft_pack_data_q <= pack_softbit_value(soft_pack_data_q,
+                                                 soft_pack_count_q,
+                                                 pipe_tframe_out_softbit);
         end
       end
     end
   end
 
-  always_ff @(posedge s_axi_aclk or negedge s_axi_aresetn) begin
+  always @(posedge s_axi_aclk or negedge s_axi_aresetn) begin
     if (!s_axi_aresetn) begin
       sync_seen_sticky_q <= 1'b0;
       sync_found_sticky_q <= 1'b0;
       frame_done_sticky_q <= 1'b0;
-      sample_count_q <= '0;
-      softbit_count_q <= '0;
-      softword_count_q <= '0;
-      frame_count_q <= '0;
-      sync_count_q <= '0;
-      sync_found_count_q <= '0;
+      sample_count_q <= 64'd0;
+      softbit_count_q <= 64'd0;
+      softword_count_q <= 64'd0;
+      frame_count_q <= 32'd0;
+      sync_count_q <= 32'd0;
+      sync_found_count_q <= 32'd0;
       latest_sync_found_q <= 1'b0;
       latest_sync_locked_q <= 1'b0;
-      latest_sync_lock_count_q <= '0;
-      latest_sync_miss_count_q <= '0;
-      latest_sync_pilot_used_pairs_q <= '0;
-      latest_sync_carrier_offset_q <= '0;
-      latest_sync_prs_score_q <= '0;
-      latest_sync_pilot_score_q <= '0;
-      latest_sync_cfo_hz_q <= '0;
-      latest_sync_fine_timing_q <= '0;
-      latest_sync_prs_symbol_start_q <= '0;
-      latest_sync_prs_fft_start_q <= '0;
-      latest_sync_next_prs_fft_start_q <= '0;
-      latest_frame_start_q <= '0;
+      latest_sync_lock_count_q <= 8'd0;
+      latest_sync_miss_count_q <= 8'd0;
+      latest_sync_pilot_used_pairs_q <= 12'd0;
+      latest_sync_carrier_offset_q <= 4'sd0;
+      latest_sync_prs_score_q <= 32'd0;
+      latest_sync_pilot_score_q <= 32'd0;
+      latest_sync_cfo_hz_q <= 32'sd0;
+      latest_sync_fine_timing_q <= 32'sd0;
+      latest_sync_prs_symbol_start_q <= 64'd0;
+      latest_sync_prs_fft_start_q <= 64'd0;
+      latest_sync_next_prs_fft_start_q <= 64'd0;
+      latest_frame_start_q <= 64'd0;
     end else if (clear_pulse_q || clear_status_pulse_q) begin
       sync_seen_sticky_q <= 1'b0;
       sync_found_sticky_q <= 1'b0;
       frame_done_sticky_q <= 1'b0;
-      sample_count_q <= '0;
-      softbit_count_q <= '0;
-      softword_count_q <= '0;
-      frame_count_q <= '0;
-      sync_count_q <= '0;
-      sync_found_count_q <= '0;
+      sample_count_q <= 64'd0;
+      softbit_count_q <= 64'd0;
+      softword_count_q <= 64'd0;
+      frame_count_q <= 32'd0;
+      sync_count_q <= 32'd0;
+      sync_found_count_q <= 32'd0;
       latest_sync_found_q <= 1'b0;
       latest_sync_locked_q <= 1'b0;
-      latest_sync_lock_count_q <= '0;
-      latest_sync_miss_count_q <= '0;
-      latest_sync_pilot_used_pairs_q <= '0;
-      latest_sync_carrier_offset_q <= '0;
-      latest_sync_prs_score_q <= '0;
-      latest_sync_pilot_score_q <= '0;
-      latest_sync_cfo_hz_q <= '0;
-      latest_sync_fine_timing_q <= '0;
-      latest_sync_prs_symbol_start_q <= '0;
-      latest_sync_prs_fft_start_q <= '0;
-      latest_sync_next_prs_fft_start_q <= '0;
-      latest_frame_start_q <= '0;
+      latest_sync_lock_count_q <= 8'd0;
+      latest_sync_miss_count_q <= 8'd0;
+      latest_sync_pilot_used_pairs_q <= 12'd0;
+      latest_sync_carrier_offset_q <= 4'sd0;
+      latest_sync_prs_score_q <= 32'd0;
+      latest_sync_pilot_score_q <= 32'd0;
+      latest_sync_cfo_hz_q <= 32'sd0;
+      latest_sync_fine_timing_q <= 32'sd0;
+      latest_sync_prs_symbol_start_q <= 64'd0;
+      latest_sync_prs_fft_start_q <= 64'd0;
+      latest_sync_next_prs_fft_start_q <= 64'd0;
+      latest_frame_start_q <= 64'd0;
     end else begin
       if (sample_fire) begin
         sample_count_q <= sample_count_q + 64'd1;

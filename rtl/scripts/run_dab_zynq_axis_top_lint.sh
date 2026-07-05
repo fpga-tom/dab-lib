@@ -44,5 +44,5 @@ verilator \
   "${ROOT_DIR}/rtl/src/top/data_symbol_scheduler.sv" \
   "${ROOT_DIR}/rtl/src/top/dab_pipeline_top.sv" \
   "${ROOT_DIR}/rtl/src/top/dab_pipeline_top_custom_fft.sv" \
-  "${ROOT_DIR}/rtl/src/top/dab_zynq_axis_top.sv" \
+  "${ROOT_DIR}/rtl/src/top/dab_zynq_axis_top.v" \
   --top-module dab_zynq_axis_top

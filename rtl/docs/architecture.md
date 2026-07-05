@@ -543,7 +543,7 @@ Zynq integration wrapper for `dab_pipeline_top_custom_fft`.
 Source:
 
 ```text
-rtl/src/top/dab_zynq_axis_top.sv
+rtl/src/top/dab_zynq_axis_top.v
 ```
 
 The wrapper exposes one clock domain intended for a Zynq PS fabric clock such as
