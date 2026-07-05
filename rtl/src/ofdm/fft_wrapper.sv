@@ -6,6 +6,7 @@ module fft_wrapper
     parameter int INPUT_WIDTH = DAB_OFDM_SAMPLE_WIDTH,
     parameter int OUTPUT_WIDTH = DAB_OFDM_CARRIER_WIDTH,
     parameter int BLOCK_EXP_WIDTH = DAB_OFDM_BLOCK_EXP_WIDTH,
+    parameter int APPLY_BLOCK_EXP = 0,
     parameter int META_FIFO_DEPTH = 4
 ) (
     input  wire logic clk,
@@ -82,8 +83,8 @@ module fft_wrapper
 
   assign out_valid = !clear && !meta_empty && core_out_valid;
   assign core_out_ready = !clear && !meta_empty && out_ready;
-  assign out_i = core_out_i;
-  assign out_q = core_out_q;
+  assign out_i = rescale_output(core_out_i, core_out_block_exp);
+  assign out_q = rescale_output(core_out_q, core_out_block_exp);
   assign out_fft_bin_index = output_index_q;
   assign out_symbol_start_sample = meta_symbol_start_mem[meta_rd_ptr_q];
   assign out_block_exp = core_out_block_exp;
@@ -146,6 +147,55 @@ module fft_wrapper
       endcase
     end
   end
+
+  function automatic logic signed [OUTPUT_WIDTH-1:0] rescale_output(
+      input logic signed [OUTPUT_WIDTH-1:0] value,
+      input logic [BLOCK_EXP_WIDTH-1:0] block_exp
+  );
+    logic signed [63:0] extended;
+    logic signed [63:0] scaled;
+    logic signed [63:0] max_value;
+    logic signed [63:0] min_value;
+    logic signed [63:0] max_pre_shift;
+    logic signed [63:0] min_pre_shift;
+    int unsigned shift_amount;
+    begin
+      extended = {{(64 - OUTPUT_WIDTH){value[OUTPUT_WIDTH-1]}}, value};
+      max_value = (64'sd1 <<< (OUTPUT_WIDTH - 1)) - 64'sd1;
+      min_value = -(64'sd1 <<< (OUTPUT_WIDTH - 1));
+
+      if (APPLY_BLOCK_EXP != 0) begin
+        shift_amount = int'(block_exp);
+        if (shift_amount >= 63) begin
+          if (extended == 64'sd0) begin
+            scaled = 64'sd0;
+          end else begin
+            scaled = extended[63] ? min_value : max_value;
+          end
+        end else begin
+          max_pre_shift = max_value >>> shift_amount;
+          min_pre_shift = min_value >>> shift_amount;
+          if (extended > max_pre_shift) begin
+            scaled = max_value;
+          end else if (extended < min_pre_shift) begin
+            scaled = min_value;
+          end else begin
+            scaled = extended <<< shift_amount;
+          end
+        end
+      end else begin
+        scaled = extended;
+      end
+
+      if (scaled > max_value) begin
+        rescale_output = max_value[OUTPUT_WIDTH-1:0];
+      end else if (scaled < min_value) begin
+        rescale_output = min_value[OUTPUT_WIDTH-1:0];
+      end else begin
+        rescale_output = scaled[OUTPUT_WIDTH-1:0];
+      end
+    end
+  endfunction
 endmodule
 
 `default_nettype wire

@@ -15,6 +15,7 @@ module dab_pipeline_top
     parameter int RATIO_WIDTH = 24,
     parameter int TIMING_WIDTH = 24,
     parameter int QPSK_EXACT_NORMALIZE = 0,
+    parameter int FFT_APPLY_BLOCK_EXP = 0,
     parameter int GUARD_SAMPLES = 504,
     parameter int FFT_SAMPLES = DAB_OFDM_FFT_SAMPLES
 ) (
@@ -957,7 +958,9 @@ module dab_pipeline_top
       .out_phase(cfo_out_phase)
   );
 
-  fft_wrapper u_fft_wrapper (
+  fft_wrapper #(
+      .APPLY_BLOCK_EXP(FFT_APPLY_BLOCK_EXP)
+  ) u_fft_wrapper (
       .clk(clk),
       .rst_n(rst_n),
       .clear(clear),

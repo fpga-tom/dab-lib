@@ -17,6 +17,7 @@ module dab_pipeline_top_custom_fft
     parameter int QPSK_EXACT_NORMALIZE = 0,
     parameter int GUARD_SAMPLES = 504,
     parameter int FFT_SAMPLES = DAB_OFDM_FFT_SAMPLES,
+    parameter int FFT_APPLY_BLOCK_EXP = 1,
     parameter int FFT_INTERNAL_WIDTH = DAB_OFDM_CARRIER_WIDTH,
     parameter int FFT_TWIDDLE_WIDTH = 18,
     parameter int FFT_TWIDDLE_FRAC_BITS = 16
@@ -109,6 +110,7 @@ module dab_pipeline_top_custom_fft
       .RATIO_WIDTH(RATIO_WIDTH),
       .TIMING_WIDTH(TIMING_WIDTH),
       .QPSK_EXACT_NORMALIZE(QPSK_EXACT_NORMALIZE),
+      .FFT_APPLY_BLOCK_EXP(FFT_APPLY_BLOCK_EXP),
       .GUARD_SAMPLES(GUARD_SAMPLES),
       .FFT_SAMPLES(FFT_SAMPLES)
   ) u_pipeline (
