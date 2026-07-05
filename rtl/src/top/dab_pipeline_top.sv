@@ -19,6 +19,7 @@ module dab_pipeline_top
         DAB_OFDM_CARRIER_WIDTH > DAB_OFDM_SOFTBIT_WIDTH ?
         DAB_OFDM_CARRIER_WIDTH - DAB_OFDM_SOFTBIT_WIDTH : 0,
     parameter int ENABLE_CHANNEL_EQUALIZER = 0,
+    parameter int ENABLE_CFO_CORRECTOR = 0,
     parameter int ENABLE_INTERNAL_CFO_CONTROL = 0,
     parameter int CFO_CONTROL_GAIN_FRAC_BITS = 16,
     parameter int CFO_CONTROL_GAIN_SCALE_Q = 68719477,
@@ -120,6 +121,8 @@ module dab_pipeline_top
       DATA_INDEX_WIDTH'(DAB_OFDM_DATA_CARRIERS - 1);
   localparam bit STREAMING_CP_SEARCH = ENABLE_STREAMING_CP_SEARCH != 0;
   localparam bit INTERNAL_CFO_CONTROL = ENABLE_INTERNAL_CFO_CONTROL != 0;
+  localparam bit USE_CFO_CORRECTOR =
+      (ENABLE_CFO_CORRECTOR != 0) || (ENABLE_INTERNAL_CFO_CONTROL != 0);
 
   read_owner_t read_owner_q;
   soft_state_t soft_state_q;
@@ -327,10 +330,12 @@ module dab_pipeline_top
   logic internal_cfo_locked_q;
   logic [31:0] internal_cfo_phase_inc_q;
   logic internal_cfo_phase_load_q;
+  /* verilator lint_off UNUSEDSIGNAL */
   logic cfo_cfg_bypass;
   logic [31:0] cfo_cfg_phase_inc;
   logic cfo_cfg_phase_load;
   logic [31:0] cfo_cfg_phase_seed;
+  /* verilator lint_on UNUSEDSIGNAL */
   /* verilator lint_off UNUSEDSIGNAL */
   logic [DAB_OFDM_BLOCK_EXP_WIDTH-1:0] fft_out_block_exp;
   logic fft_out_overflow;
@@ -1005,38 +1010,57 @@ module dab_pipeline_top
       .out_error(symbol_out_error)
   );
 
-  cfo_corrector #(
-      .INPUT_WIDTH(SAMPLE_WIDTH),
-      .OUTPUT_WIDTH(DAB_OFDM_SAMPLE_WIDTH),
-      .SAMPLE_OFFSET_WIDTH(DAB_OFDM_FFT_INDEX_WIDTH)
-  ) u_cfo_corrector (
-      .clk(clk),
-      .rst_n(rst_n),
-      .clear(clear),
-      .cfg_bypass(cfo_cfg_bypass),
-      .cfg_phase_inc(cfo_cfg_phase_inc),
-      .cfg_phase_load(cfo_cfg_phase_load),
-      .cfg_phase_seed(cfo_cfg_phase_seed),
-      .in_valid(symbol_out_valid),
-      .in_ready(symbol_out_ready),
-      .in_i(symbol_out_i),
-      .in_q(symbol_out_q),
-      .in_sample_index(symbol_out_sample_index),
-      .in_symbol_start_sample(symbol_out_symbol_start_sample),
-      .in_sample_offset(symbol_out_sample_offset),
-      .in_symbol_done(symbol_out_done),
-      .in_error(symbol_out_error),
-      .out_valid(cfo_out_valid),
-      .out_ready(cfo_out_ready),
-      .out_i(cfo_out_i),
-      .out_q(cfo_out_q),
-      .out_sample_index(cfo_out_sample_index),
-      .out_symbol_start_sample(cfo_out_symbol_start_sample),
-      .out_sample_offset(cfo_out_sample_offset),
-      .out_symbol_done(cfo_out_symbol_done),
-      .out_error(cfo_out_error),
-      .out_phase(cfo_out_phase)
-  );
+  generate
+    if (USE_CFO_CORRECTOR) begin : gen_cfo_corrector
+      cfo_corrector #(
+          .INPUT_WIDTH(SAMPLE_WIDTH),
+          .OUTPUT_WIDTH(DAB_OFDM_SAMPLE_WIDTH),
+          .SAMPLE_OFFSET_WIDTH(DAB_OFDM_FFT_INDEX_WIDTH)
+      ) u_cfo_corrector (
+          .clk(clk),
+          .rst_n(rst_n),
+          .clear(clear),
+          .cfg_bypass(cfo_cfg_bypass),
+          .cfg_phase_inc(cfo_cfg_phase_inc),
+          .cfg_phase_load(cfo_cfg_phase_load),
+          .cfg_phase_seed(cfo_cfg_phase_seed),
+          .in_valid(symbol_out_valid),
+          .in_ready(symbol_out_ready),
+          .in_i(symbol_out_i),
+          .in_q(symbol_out_q),
+          .in_sample_index(symbol_out_sample_index),
+          .in_symbol_start_sample(symbol_out_symbol_start_sample),
+          .in_sample_offset(symbol_out_sample_offset),
+          .in_symbol_done(symbol_out_done),
+          .in_error(symbol_out_error),
+          .out_valid(cfo_out_valid),
+          .out_ready(cfo_out_ready),
+          .out_i(cfo_out_i),
+          .out_q(cfo_out_q),
+          .out_sample_index(cfo_out_sample_index),
+          .out_symbol_start_sample(cfo_out_symbol_start_sample),
+          .out_sample_offset(cfo_out_sample_offset),
+          .out_symbol_done(cfo_out_symbol_done),
+          .out_error(cfo_out_error),
+          .out_phase(cfo_out_phase)
+      );
+    end else begin : gen_cfo_bypass
+      assign symbol_out_ready = cfo_out_ready;
+      assign cfo_out_valid = symbol_out_valid;
+      assign cfo_out_i =
+          {{(DAB_OFDM_SAMPLE_WIDTH - SAMPLE_WIDTH){symbol_out_i[SAMPLE_WIDTH-1]}},
+           symbol_out_i};
+      assign cfo_out_q =
+          {{(DAB_OFDM_SAMPLE_WIDTH - SAMPLE_WIDTH){symbol_out_q[SAMPLE_WIDTH-1]}},
+           symbol_out_q};
+      assign cfo_out_sample_index = symbol_out_sample_index;
+      assign cfo_out_symbol_start_sample = symbol_out_symbol_start_sample;
+      assign cfo_out_sample_offset = symbol_out_sample_offset;
+      assign cfo_out_symbol_done = symbol_out_done;
+      assign cfo_out_error = symbol_out_error;
+      assign cfo_out_phase = '0;
+    end
+  endgenerate
 
   fft_wrapper #(
       .APPLY_BLOCK_EXP(FFT_APPLY_BLOCK_EXP)

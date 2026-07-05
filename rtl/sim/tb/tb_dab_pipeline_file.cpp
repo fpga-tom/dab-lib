@@ -65,6 +65,8 @@ struct Config {
     bool fft_fixed_gain = false;
     double fft_gain = 1.0;
     bool enable_cfo_correction = false;
+    bool rtl_cfo_corrector = false;
+    bool rtl_internal_cfo_control = false;
     uint32_t sample_rate = kDefaultSampleRate;
     int32_t cfo_sign = -1;
     double cfo_gain = 0.5;
@@ -206,6 +208,10 @@ Config load_config() {
     cfg.fft_fixed_gain = std::getenv("DAB_TB_FFT_GAIN") != nullptr;
     cfg.enable_cfo_correction =
         env_bool("DAB_TB_ENABLE_CFO_CORRECTION", cfg.enable_cfo_correction);
+    cfg.rtl_cfo_corrector =
+        env_bool("DAB_TB_RTL_CFO_CORRECTOR", cfg.rtl_cfo_corrector);
+    cfg.rtl_internal_cfo_control =
+        env_bool("DAB_TB_RTL_INTERNAL_CFO_CONTROL", cfg.rtl_internal_cfo_control);
     cfg.sample_rate = static_cast<uint32_t>(
         env_u64("DAB_TB_SAMPLE_RATE", cfg.sample_rate));
     if (cfg.sample_rate == 0u) {
@@ -772,7 +778,10 @@ int main(int argc, char **argv) {
                   << (cfg.internal_data_scheduler ? "internal" : "external")
                   << " cp_search=" << (cfg.streaming_cp_search ? "stream" : "history")
                   << " sample_period_cycles=" << cfg.sample_period_cycles
-                  << " cfo_correction=" << (cfg.enable_cfo_correction ? "sync" : "off")
+                  << " cfo_correction="
+                  << (cfg.rtl_internal_cfo_control ? "internal_rtl" :
+                      (cfg.enable_cfo_correction ? "external_sync" : "off"))
+                  << " rtl_cfo_corrector=" << (cfg.rtl_cfo_corrector ? 1 : 0)
                   << " cfo_sign=" << cfg.cfo_sign
                   << " cfo_gain=" << cfg.cfo_gain
                   << " sample_rate=" << cfg.sample_rate
