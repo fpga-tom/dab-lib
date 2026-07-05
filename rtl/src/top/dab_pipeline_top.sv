@@ -15,6 +15,7 @@ module dab_pipeline_top
     parameter int RATIO_WIDTH = 24,
     parameter int TIMING_WIDTH = 24,
     parameter int QPSK_EXACT_NORMALIZE = 0,
+    parameter int ENABLE_CHANNEL_EQUALIZER = 0,
     parameter int FFT_APPLY_BLOCK_EXP = 0,
     parameter int GUARD_SAMPLES = 504,
     parameter int FFT_SAMPLES = DAB_OFDM_FFT_SAMPLES
@@ -361,10 +362,13 @@ module dab_pipeline_top
   logic [11:0] pilot_used_pairs;
 
   logic chan_ready;
+  /* verilator lint_off UNUSEDSIGNAL */
   logic chan_coeff_valid;
   logic [DAB_OFDM_ACTIVE_INDEX_WIDTH-1:0] chan_coeff_index;
   logic signed [DAB_OFDM_COEFF_WIDTH-1:0] chan_coeff_i;
   logic signed [DAB_OFDM_COEFF_WIDTH-1:0] chan_coeff_q;
+  /* verilator lint_on UNUSEDSIGNAL */
+  /* verilator lint_off UNUSEDSIGNAL */
   logic chan_ref_valid;
   logic chan_ref_ready;
   logic signed [DAB_OFDM_CARRIER_WIDTH-1:0] chan_ref_i;
@@ -372,9 +376,13 @@ module dab_pipeline_top
   logic [DAB_OFDM_ACTIVE_INDEX_WIDTH-1:0] chan_ref_active_index;
   logic [63:0] chan_ref_symbol_start_sample;
   logic chan_ref_symbol_done;
+  /* verilator lint_on UNUSEDSIGNAL */
 
+  /* verilator lint_off UNUSEDSIGNAL */
   logic eq_in_valid;
+  /* verilator lint_on UNUSEDSIGNAL */
   logic eq_in_ready;
+  /* verilator lint_off UNUSEDSIGNAL */
   logic eq_out_valid;
   logic eq_out_ready;
   logic signed [DAB_OFDM_CARRIER_WIDTH-1:0] eq_out_i;
@@ -382,6 +390,7 @@ module dab_pipeline_top
   logic [DAB_OFDM_ACTIVE_INDEX_WIDTH-1:0] eq_out_active_index;
   logic [63:0] eq_out_symbol_start_sample;
   logic eq_out_symbol_done;
+  /* verilator lint_on UNUSEDSIGNAL */
 
   logic diff_in_valid;
   logic diff_in_ready;
@@ -546,16 +555,37 @@ module dab_pipeline_top
   assign track_pilot_used_pairs = symbol_error_fire && symbol_is_prs_q ? '0 : pilot_used_pairs;
   assign pilot_out_ready = track_pilot_ready && !(symbol_error_fire && symbol_is_prs_q);
 
-  assign diff_in_valid = chan_ref_valid || eq_out_valid;
-  assign diff_in_seed_only = chan_ref_valid;
-  assign diff_in_i = chan_ref_valid ? chan_ref_i : eq_out_i;
-  assign diff_in_q = chan_ref_valid ? chan_ref_q : eq_out_q;
-  assign diff_in_active_index = chan_ref_valid ? chan_ref_active_index : eq_out_active_index;
-  assign diff_in_symbol_start_sample =
-      chan_ref_valid ? chan_ref_symbol_start_sample : eq_out_symbol_start_sample;
-  assign diff_in_symbol_done = chan_ref_valid ? chan_ref_symbol_done : eq_out_symbol_done;
-  assign chan_ref_ready = chan_ref_valid && diff_in_ready;
-  assign eq_out_ready = !chan_ref_valid && diff_in_ready;
+  generate
+    if (ENABLE_CHANNEL_EQUALIZER != 0) begin : gen_equalized_diff_input
+      assign diff_in_valid = chan_ref_valid || eq_out_valid;
+      assign diff_in_seed_only = chan_ref_valid;
+      assign diff_in_i = chan_ref_valid ? chan_ref_i : eq_out_i;
+      assign diff_in_q = chan_ref_valid ? chan_ref_q : eq_out_q;
+      assign diff_in_active_index = chan_ref_valid ? chan_ref_active_index : eq_out_active_index;
+      assign diff_in_symbol_start_sample =
+          chan_ref_valid ? chan_ref_symbol_start_sample : eq_out_symbol_start_sample;
+      assign diff_in_symbol_done = chan_ref_valid ? chan_ref_symbol_done : eq_out_symbol_done;
+      assign chan_ref_ready = chan_ref_valid && diff_in_ready;
+      assign eq_out_ready = !chan_ref_valid && diff_in_ready;
+    end else begin : gen_raw_diff_input
+      assign diff_in_valid = prs_active_valid || data_active_valid;
+      assign diff_in_seed_only = prs_active_valid;
+      assign diff_in_i = active_i;
+      assign diff_in_q = active_q;
+      assign diff_in_active_index = active_index;
+      assign diff_in_symbol_start_sample = active_symbol_start_sample;
+      assign diff_in_symbol_done = active_symbol_done;
+      assign chan_ref_ready = 1'b0;
+      assign eq_in_ready = diff_in_ready;
+      assign eq_out_ready = 1'b0;
+      assign eq_out_valid = 1'b0;
+      assign eq_out_i = '0;
+      assign eq_out_q = '0;
+      assign eq_out_active_index = '0;
+      assign eq_out_symbol_start_sample = '0;
+      assign eq_out_symbol_done = 1'b0;
+    end
+  endgenerate
 
   assign soft_pair_ready = soft_state_q == SOFT_STATE_LOAD_A && tframe_in_ready;
   assign tframe_in_valid =
@@ -1035,56 +1065,76 @@ module dab_pipeline_top
       .out_used_pairs(pilot_used_pairs)
   );
 
-  prs_channel_estimator u_prs_channel_estimator (
-      .clk(clk),
-      .rst_n(rst_n),
-      .clear(clear),
-      .in_valid(prs_active_valid),
-      .in_ready(chan_ready),
-      .in_i(active_i),
-      .in_q(active_q),
-      .in_active_index(active_index),
-      .in_symbol_start_sample(active_symbol_start_sample),
-      .in_symbol_done(active_symbol_done),
-      .coeff_valid(chan_coeff_valid),
-      .coeff_ready(1'b1),
-      .coeff_index(chan_coeff_index),
-      .coeff_i(chan_coeff_i),
-      .coeff_q(chan_coeff_q),
-      .coeff_symbol_start_sample(chan_coeff_symbol_start_sample),
-      .coeff_symbol_done(chan_coeff_symbol_done),
-      .ref_valid(chan_ref_valid),
-      .ref_ready(chan_ref_ready),
-      .ref_i(chan_ref_i),
-      .ref_q(chan_ref_q),
-      .ref_active_index(chan_ref_active_index),
-      .ref_symbol_start_sample(chan_ref_symbol_start_sample),
-      .ref_symbol_done(chan_ref_symbol_done)
-  );
+  generate
+    if (ENABLE_CHANNEL_EQUALIZER != 0) begin : gen_channel_equalizer
+      prs_channel_estimator #(
+          .ENABLE_COEFF_OUTPUT(1)
+      ) u_prs_channel_estimator (
+          .clk(clk),
+          .rst_n(rst_n),
+          .clear(clear),
+          .in_valid(prs_active_valid),
+          .in_ready(chan_ready),
+          .in_i(active_i),
+          .in_q(active_q),
+          .in_active_index(active_index),
+          .in_symbol_start_sample(active_symbol_start_sample),
+          .in_symbol_done(active_symbol_done),
+          .coeff_valid(chan_coeff_valid),
+          .coeff_ready(1'b1),
+          .coeff_index(chan_coeff_index),
+          .coeff_i(chan_coeff_i),
+          .coeff_q(chan_coeff_q),
+          .coeff_symbol_start_sample(chan_coeff_symbol_start_sample),
+          .coeff_symbol_done(chan_coeff_symbol_done),
+          .ref_valid(chan_ref_valid),
+          .ref_ready(chan_ref_ready),
+          .ref_i(chan_ref_i),
+          .ref_q(chan_ref_q),
+          .ref_active_index(chan_ref_active_index),
+          .ref_symbol_start_sample(chan_ref_symbol_start_sample),
+          .ref_symbol_done(chan_ref_symbol_done)
+      );
 
-  equalizer u_equalizer (
-      .clk(clk),
-      .rst_n(rst_n),
-      .clear(clear),
-      .coeff_we(chan_coeff_valid),
-      .coeff_index(chan_coeff_index),
-      .coeff_i(chan_coeff_i),
-      .coeff_q(chan_coeff_q),
-      .in_valid(eq_in_valid),
-      .in_ready(eq_in_ready),
-      .in_i(active_i),
-      .in_q(active_q),
-      .in_active_index(active_index),
-      .in_symbol_start_sample(active_symbol_start_sample),
-      .in_symbol_done(active_symbol_done),
-      .out_valid(eq_out_valid),
-      .out_ready(eq_out_ready),
-      .out_i(eq_out_i),
-      .out_q(eq_out_q),
-      .out_active_index(eq_out_active_index),
-      .out_symbol_start_sample(eq_out_symbol_start_sample),
-      .out_symbol_done(eq_out_symbol_done)
-  );
+      equalizer u_equalizer (
+          .clk(clk),
+          .rst_n(rst_n),
+          .clear(clear),
+          .coeff_we(chan_coeff_valid),
+          .coeff_index(chan_coeff_index),
+          .coeff_i(chan_coeff_i),
+          .coeff_q(chan_coeff_q),
+          .in_valid(eq_in_valid),
+          .in_ready(eq_in_ready),
+          .in_i(active_i),
+          .in_q(active_q),
+          .in_active_index(active_index),
+          .in_symbol_start_sample(active_symbol_start_sample),
+          .in_symbol_done(active_symbol_done),
+          .out_valid(eq_out_valid),
+          .out_ready(eq_out_ready),
+          .out_i(eq_out_i),
+          .out_q(eq_out_q),
+          .out_active_index(eq_out_active_index),
+          .out_symbol_start_sample(eq_out_symbol_start_sample),
+          .out_symbol_done(eq_out_symbol_done)
+      );
+    end else begin : gen_channel_ref_only
+      assign chan_ready = diff_in_ready;
+      assign chan_coeff_valid = 1'b0;
+      assign chan_coeff_index = '0;
+      assign chan_coeff_i = '0;
+      assign chan_coeff_q = '0;
+      assign chan_coeff_symbol_start_sample = '0;
+      assign chan_coeff_symbol_done = 1'b0;
+      assign chan_ref_valid = 1'b0;
+      assign chan_ref_i = '0;
+      assign chan_ref_q = '0;
+      assign chan_ref_active_index = '0;
+      assign chan_ref_symbol_start_sample = '0;
+      assign chan_ref_symbol_done = 1'b0;
+    end
+  endgenerate
 
   diff_demod u_diff_demod (
       .clk(clk),

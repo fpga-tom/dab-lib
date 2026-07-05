@@ -5,7 +5,8 @@ module prs_channel_estimator
 #(
     parameter int CARRIER_WIDTH = DAB_OFDM_CARRIER_WIDTH,
     parameter int COEFF_WIDTH = DAB_OFDM_COEFF_WIDTH,
-    parameter int COEFF_FRAC_BITS = DAB_OFDM_COEFF_FRAC_BITS
+    parameter int COEFF_FRAC_BITS = DAB_OFDM_COEFF_FRAC_BITS,
+    parameter int ENABLE_COEFF_OUTPUT = 1
 ) (
     input  wire logic clk,
     input  wire logic rst_n,
@@ -13,8 +14,10 @@ module prs_channel_estimator
 
     input  wire logic in_valid,
     output logic in_ready,
+    /* verilator lint_off UNUSEDSIGNAL */
     input  wire logic signed [CARRIER_WIDTH-1:0] in_i,
     input  wire logic signed [CARRIER_WIDTH-1:0] in_q,
+    /* verilator lint_on UNUSEDSIGNAL */
     input  wire logic [DAB_OFDM_ACTIVE_INDEX_WIDTH-1:0] in_active_index,
     input  wire logic [63:0] in_symbol_start_sample,
     input  wire logic in_symbol_done,
@@ -35,6 +38,7 @@ module prs_channel_estimator
     output logic [63:0] ref_symbol_start_sample,
     output logic ref_symbol_done
 );
+  localparam bit COEFF_OUTPUT_ENABLED = ENABLE_COEFF_OUTPUT != 0;
   localparam logic [DAB_OFDM_ACTIVE_INDEX_WIDTH-1:0] NULL_ACTIVE_INDEX =
       DAB_OFDM_ACTIVE_INDEX_WIDTH'(DAB_OFDM_ACTIVE_CARRIER_HALF);
   localparam logic signed [CARRIER_WIDTH-1:0] PRS_REF_SCALE =
@@ -54,15 +58,31 @@ module prs_channel_estimator
   logic signed [COEFF_WIDTH-1:0] estimated_coeff_i;
   logic signed [COEFF_WIDTH-1:0] estimated_coeff_q;
 
-  assign pending_coeff = coeff_valid && !coeff_ready;
+  assign pending_coeff = COEFF_OUTPUT_ENABLED && coeff_valid && !coeff_ready;
   assign pending_ref = ref_valid && !ref_ready;
   assign in_ready = !clear && !pending_coeff && !pending_ref;
   assign input_fire = in_valid && in_ready;
 
   assign prs_ref_i = prs_reference_i(in_active_index);
   assign prs_ref_q = prs_reference_q(in_active_index);
-  assign estimated_coeff_i = estimate_coeff_i(in_i, in_q, prs_ref_i, prs_ref_q, in_active_index);
-  assign estimated_coeff_q = estimate_coeff_q(in_i, in_q, prs_ref_i, prs_ref_q, in_active_index);
+
+  generate
+    if (ENABLE_COEFF_OUTPUT != 0) begin : gen_coeff_estimate
+      assign estimated_coeff_i = estimate_coeff_i(in_i,
+                                                  in_q,
+                                                  prs_ref_i,
+                                                  prs_ref_q,
+                                                  in_active_index);
+      assign estimated_coeff_q = estimate_coeff_q(in_i,
+                                                  in_q,
+                                                  prs_ref_i,
+                                                  prs_ref_q,
+                                                  in_active_index);
+    end else begin : gen_ref_only
+      assign estimated_coeff_i = '0;
+      assign estimated_coeff_q = '0;
+    end
+  endgenerate
 
   function automatic logic [1:0] phase_from_row(
       input logic [1:0] row,
@@ -324,12 +344,21 @@ module prs_channel_estimator
       ref_symbol_done <= 1'b0;
     end else begin
       if (input_fire) begin
-        coeff_valid <= 1'b1;
-        coeff_index <= in_active_index;
-        coeff_i <= estimated_coeff_i;
-        coeff_q <= estimated_coeff_q;
-        coeff_symbol_start_sample <= in_symbol_start_sample;
-        coeff_symbol_done <= in_symbol_done;
+        if (COEFF_OUTPUT_ENABLED) begin
+          coeff_valid <= 1'b1;
+          coeff_index <= in_active_index;
+          coeff_i <= estimated_coeff_i;
+          coeff_q <= estimated_coeff_q;
+          coeff_symbol_start_sample <= in_symbol_start_sample;
+          coeff_symbol_done <= in_symbol_done;
+        end else begin
+          coeff_valid <= 1'b0;
+          coeff_index <= '0;
+          coeff_i <= '0;
+          coeff_q <= '0;
+          coeff_symbol_start_sample <= '0;
+          coeff_symbol_done <= 1'b0;
+        end
 
         ref_valid <= 1'b1;
         ref_i <= prs_ref_i;
@@ -338,7 +367,7 @@ module prs_channel_estimator
         ref_symbol_start_sample <= in_symbol_start_sample;
         ref_symbol_done <= in_symbol_done;
       end else begin
-        if (coeff_ready) begin
+        if (COEFF_OUTPUT_ENABLED && coeff_ready) begin
           coeff_valid <= 1'b0;
           coeff_symbol_done <= 1'b0;
         end
