@@ -18,18 +18,18 @@ module null_detector #(
     parameter int INTERVAL_TOLERANCE_SAMPLES = 0,
     parameter int MAX_MERGE_GAP_SAMPLES = 0
 ) (
-    input  logic clk,
-    input  logic rst_n,
-    input  logic clear,
+    input  wire logic clk,
+    input  wire logic rst_n,
+    input  wire logic clear,
 
-    input  logic in_valid,
+    input  wire logic in_valid,
     output logic in_ready,
-    input  logic signed [SAMPLE_WIDTH-1:0] in_i,
-    input  logic signed [SAMPLE_WIDTH-1:0] in_q,
-    input  logic [63:0] in_sample_index,
+    input  wire logic signed [SAMPLE_WIDTH-1:0] in_i,
+    input  wire logic signed [SAMPLE_WIDTH-1:0] in_q,
+    input  wire logic [63:0] in_sample_index,
 
     output logic out_valid,
-    input  logic out_ready,
+    input  wire logic out_ready,
     output logic [63:0] out_sample_index,
     output logic [31:0] out_length,
     output logic [POWER_WIDTH-1:0] out_avg_power,

@@ -3,20 +3,20 @@
 module iq_ingress #(
     parameter int SAMPLE_WIDTH = 16
 ) (
-    input  logic clk,
-    input  logic rst_n,
-    input  logic clear,
+    input  wire logic clk,
+    input  wire logic rst_n,
+    input  wire logic clear,
 
-    input  logic set_sample_index_valid,
-    input  logic [63:0] set_sample_index_value,
+    input  wire logic set_sample_index_valid,
+    input  wire logic [63:0] set_sample_index_value,
 
-    input  logic in_valid,
+    input  wire logic in_valid,
     output logic in_ready,
-    input  logic signed [SAMPLE_WIDTH-1:0] in_i,
-    input  logic signed [SAMPLE_WIDTH-1:0] in_q,
+    input  wire logic signed [SAMPLE_WIDTH-1:0] in_i,
+    input  wire logic signed [SAMPLE_WIDTH-1:0] in_q,
 
     output logic out_valid,
-    input  logic out_ready,
+    input  wire logic out_ready,
     output logic signed [SAMPLE_WIDTH-1:0] out_i,
     output logic signed [SAMPLE_WIDTH-1:0] out_q,
     output logic [63:0] out_sample_index

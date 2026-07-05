@@ -6,24 +6,24 @@ module data_symbol_scheduler
     parameter int GUARD_SAMPLES = 504,
     parameter int FFT_SAMPLES = DAB_OFDM_FFT_SAMPLES
 ) (
-    input  logic clk,
-    input  logic rst_n,
-    input  logic clear,
+    input  wire logic clk,
+    input  wire logic rst_n,
+    input  wire logic clear,
 
-    input  logic sync_valid,
-    input  logic sync_found,
-    input  logic [63:0] sync_prs_fft_start_sample,
+    input  wire logic sync_valid,
+    input  wire logic sync_found,
+    input  wire logic [63:0] sync_prs_fft_start_sample,
 
-    input  logic history_valid,
-    input  logic [63:0] history_oldest_sample_index,
-    input  logic [63:0] history_next_sample_index,
+    input  wire logic history_valid,
+    input  wire logic [63:0] history_oldest_sample_index,
+    input  wire logic [63:0] history_next_sample_index,
 
     output logic cmd_valid,
-    input  logic cmd_ready,
+    input  wire logic cmd_ready,
     output logic [63:0] cmd_fft_start_sample,
 
     /* verilator lint_off UNUSEDSIGNAL */
-    input  logic frame_done
+    input  wire logic frame_done
     /* verilator lint_on UNUSEDSIGNAL */
 );
   localparam int SYMBOL_SAMPLES = GUARD_SAMPLES + FFT_SAMPLES;

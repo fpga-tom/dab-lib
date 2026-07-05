@@ -6,18 +6,18 @@ module prs_acquire #(
     parameter int ACQUIRE_WINDOW_SAMPLES = 1200,
     parameter int RATIO_WIDTH = 24
 ) (
-    input  logic clk,
-    input  logic rst_n,
-    input  logic clear,
+    input  wire logic clk,
+    input  wire logic rst_n,
+    input  wire logic clear,
 
-    input  logic in_valid,
+    input  wire logic in_valid,
     output logic in_ready,
-    input  logic [63:0] in_null_start_sample,
-    input  logic [31:0] in_null_length,
-    input  logic [RATIO_WIDTH-1:0] in_null_min_ratio,
+    input  wire logic [63:0] in_null_start_sample,
+    input  wire logic [31:0] in_null_length,
+    input  wire logic [RATIO_WIDTH-1:0] in_null_min_ratio,
 
     output logic out_valid,
-    input  logic out_ready,
+    input  wire logic out_ready,
     output logic [63:0] out_null_start_sample,
     output logic [31:0] out_null_length,
     output logic [RATIO_WIDTH-1:0] out_null_min_ratio,

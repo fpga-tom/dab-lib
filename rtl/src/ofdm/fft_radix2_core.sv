@@ -10,18 +10,18 @@ module fft_radix2_core
     parameter int TWIDDLE_WIDTH = 18,
     parameter int TWIDDLE_FRAC_BITS = 16
 ) (
-    input  logic clk,
-    input  logic rst_n,
-    input  logic clear,
+    input  wire logic clk,
+    input  wire logic rst_n,
+    input  wire logic clear,
 
-    input  logic core_in_valid,
+    input  wire logic core_in_valid,
     output logic core_in_ready,
-    input  logic signed [INPUT_WIDTH-1:0] core_in_i,
-    input  logic signed [INPUT_WIDTH-1:0] core_in_q,
-    input  logic core_in_last,
+    input  wire logic signed [INPUT_WIDTH-1:0] core_in_i,
+    input  wire logic signed [INPUT_WIDTH-1:0] core_in_q,
+    input  wire logic core_in_last,
 
     output logic core_out_valid,
-    input  logic core_out_ready,
+    input  wire logic core_out_ready,
     output logic signed [OUTPUT_WIDTH-1:0] core_out_i,
     output logic signed [OUTPUT_WIDTH-1:0] core_out_q,
     output logic [BLOCK_EXP_WIDTH-1:0] core_out_block_exp,

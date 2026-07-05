@@ -5,18 +5,18 @@ module carrier_mapper
 #(
     parameter int CARRIER_WIDTH = DAB_OFDM_CARRIER_WIDTH
 ) (
-    input  logic clk,
-    input  logic rst_n,
-    input  logic clear,
+    input  wire logic clk,
+    input  wire logic rst_n,
+    input  wire logic clear,
 
-    input  logic in_valid,
+    input  wire logic in_valid,
     output logic in_ready,
-    input  logic signed [CARRIER_WIDTH-1:0] in_i,
-    input  logic signed [CARRIER_WIDTH-1:0] in_q,
-    input  logic [63:0] in_symbol_start_sample,
+    input  wire logic signed [CARRIER_WIDTH-1:0] in_i,
+    input  wire logic signed [CARRIER_WIDTH-1:0] in_q,
+    input  wire logic [63:0] in_symbol_start_sample,
 
     output logic out_valid,
-    input  logic out_ready,
+    input  wire logic out_ready,
     output logic signed [CARRIER_WIDTH-1:0] out_i,
     output logic signed [CARRIER_WIDTH-1:0] out_q,
     output logic [DAB_OFDM_ACTIVE_INDEX_WIDTH-1:0] out_active_index,

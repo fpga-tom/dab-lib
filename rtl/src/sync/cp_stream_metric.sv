@@ -11,14 +11,14 @@ module cp_stream_metric #(
     parameter int GUARD_SAMPLES = 504,
     parameter int FFT_SAMPLES = 2048
 ) (
-    input  logic clk,
-    input  logic rst_n,
-    input  logic clear,
+    input  wire logic clk,
+    input  wire logic rst_n,
+    input  wire logic clear,
 
-    input  logic in_valid,
-    input  logic signed [SAMPLE_WIDTH-1:0] in_i,
-    input  logic signed [SAMPLE_WIDTH-1:0] in_q,
-    input  logic [63:0] in_sample_index,
+    input  wire logic in_valid,
+    input  wire logic signed [SAMPLE_WIDTH-1:0] in_i,
+    input  wire logic signed [SAMPLE_WIDTH-1:0] in_q,
+    input  wire logic [63:0] in_sample_index,
 
     output logic out_valid,
     output logic out_ok,
