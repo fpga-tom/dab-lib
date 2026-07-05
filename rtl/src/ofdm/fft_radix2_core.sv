@@ -31,6 +31,7 @@ module fft_radix2_core
   localparam int FFT_INDEX_WIDTH = DAB_OFDM_FFT_INDEX_WIDTH;
   localparam int FFT_STAGES = FFT_INDEX_WIDTH;
   localparam int STAGE_WIDTH = $clog2(FFT_STAGES);
+  localparam int COMPLEX_WIDTH = INTERNAL_WIDTH * 2;
   localparam logic [FFT_INDEX_WIDTH-1:0] LAST_INDEX =
       FFT_INDEX_WIDTH'(FFT_SAMPLES - 1);
 
@@ -56,11 +57,6 @@ module fft_radix2_core
   logic signed [TWIDDLE_WIDTH-1:0] twiddle_i_q;
   logic frame_error_q;
 
-  (* ram_style = "block", ramstyle = "M20K" *)
-  logic signed [INTERNAL_WIDTH-1:0] mem_i [0:FFT_SAMPLES-1];
-  (* ram_style = "block", ramstyle = "M20K" *)
-  logic signed [INTERNAL_WIDTH-1:0] mem_q [0:FFT_SAMPLES-1];
-
   logic port_a_we;
   logic port_b_we;
   logic [FFT_INDEX_WIDTH-1:0] port_a_addr;
@@ -73,6 +69,10 @@ module fft_radix2_core
   logic signed [INTERNAL_WIDTH-1:0] port_a_q_rd_q;
   logic signed [INTERNAL_WIDTH-1:0] port_b_i_rd_q;
   logic signed [INTERNAL_WIDTH-1:0] port_b_q_rd_q;
+  logic [COMPLEX_WIDTH-1:0] port_a_wr_data;
+  logic [COMPLEX_WIDTH-1:0] port_b_wr_data;
+  logic [COMPLEX_WIDTH-1:0] port_a_rd_data;
+  logic [COMPLEX_WIDTH-1:0] port_b_rd_data;
 
   logic input_fire;
   logic output_fire;
@@ -114,6 +114,13 @@ module fft_radix2_core
   assign core_out_q = resize_output(port_a_q_rd_q);
   assign core_out_block_exp = BLOCK_EXP_WIDTH'(FFT_STAGES);
   assign core_out_overflow = frame_error_q;
+
+  assign port_a_wr_data = {port_a_i_wr, port_a_q_wr};
+  assign port_b_wr_data = {port_b_i_wr, port_b_q_wr};
+  assign port_a_i_rd_q = port_a_rd_data[COMPLEX_WIDTH-1:INTERNAL_WIDTH];
+  assign port_a_q_rd_q = port_a_rd_data[INTERNAL_WIDTH-1:0];
+  assign port_b_i_rd_q = port_b_rd_data[COMPLEX_WIDTH-1:INTERNAL_WIDTH];
+  assign port_b_q_rd_q = port_b_rd_data[INTERNAL_WIDTH-1:0];
 
   assign butterfly_a_i = scale_sum(port_a_i_rd_q, twiddled_i);
   assign butterfly_a_q = scale_sum(port_a_q_rd_q, twiddled_q);
@@ -176,23 +183,21 @@ module fft_radix2_core
     endcase
   end
 
-  always_ff @(posedge clk) begin
-    if (port_a_we) begin
-      mem_i[port_a_addr] <= port_a_i_wr;
-      mem_q[port_a_addr] <= port_a_q_wr;
-    end else begin
-      port_a_i_rd_q <= mem_i[port_a_addr];
-      port_a_q_rd_q <= mem_q[port_a_addr];
-    end
-
-    if (port_b_we) begin
-      mem_i[port_b_addr] <= port_b_i_wr;
-      mem_q[port_b_addr] <= port_b_q_wr;
-    end else begin
-      port_b_i_rd_q <= mem_i[port_b_addr];
-      port_b_q_rd_q <= mem_q[port_b_addr];
-    end
-  end
+  fft_radix2_tdp_ram #(
+      .DATA_WIDTH(COMPLEX_WIDTH),
+      .DEPTH(FFT_SAMPLES),
+      .ADDR_WIDTH(FFT_INDEX_WIDTH)
+  ) u_sample_ram (
+      .clk(clk),
+      .a_we(port_a_we),
+      .a_addr(port_a_addr),
+      .a_din(port_a_wr_data),
+      .a_dout(port_a_rd_data),
+      .b_we(port_b_we),
+      .b_addr(port_b_addr),
+      .b_din(port_b_wr_data),
+      .b_dout(port_b_rd_data)
+  );
 
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
@@ -534,5 +539,40 @@ module fft_radix2_core
     end
   endfunction
 endmodule
+
+/* verilator lint_off DECLFILENAME */
+module fft_radix2_tdp_ram #(
+    parameter int DATA_WIDTH = 48,
+    parameter int DEPTH = 2048,
+    parameter int ADDR_WIDTH = 11
+) (
+    input  wire logic clk,
+    input  wire logic a_we,
+    input  wire logic [ADDR_WIDTH-1:0] a_addr,
+    input  wire logic [DATA_WIDTH-1:0] a_din,
+    output logic [DATA_WIDTH-1:0] a_dout,
+    input  wire logic b_we,
+    input  wire logic [ADDR_WIDTH-1:0] b_addr,
+    input  wire logic [DATA_WIDTH-1:0] b_din,
+    output logic [DATA_WIDTH-1:0] b_dout
+);
+  (* ram_style = "block", ramstyle = "M20K" *)
+  logic [DATA_WIDTH-1:0] ram [0:DEPTH-1];
+
+  always_ff @(posedge clk) begin
+    a_dout <= ram[a_addr];
+    if (a_we) begin
+      ram[a_addr] <= a_din;
+    end
+  end
+
+  always_ff @(posedge clk) begin
+    b_dout <= ram[b_addr];
+    if (b_we) begin
+      ram[b_addr] <= b_din;
+    end
+  end
+endmodule
+/* verilator lint_on DECLFILENAME */
 
 `default_nettype wire
