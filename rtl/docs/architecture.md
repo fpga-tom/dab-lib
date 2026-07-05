@@ -536,6 +536,35 @@ sample. The core is intended as a portable first hardware FFT; a later version
 can pipeline the butterfly or add ping-pong memories if the clock target needs
 more margin.
 
+### `dab_zynq_axis_top`
+
+Zynq integration wrapper for `dab_pipeline_top_custom_fft`.
+
+Source:
+
+```text
+rtl/src/top/dab_zynq_axis_top.sv
+```
+
+The wrapper exposes one clock domain intended for a Zynq PS fabric clock such as
+`FCLK_CLK0`: AXI-Lite control/status, AXI-Stream IQ input, and AXI-Stream
+softbit output. The IQ stream carries one complex sample per beat:
+
+```text
+s_axis_iq_tdata[15:0]  = signed I
+s_axis_iq_tdata[31:16] = signed Q
+```
+
+The softbit stream packs four signed 8-bit softbits per 32-bit AXI beat. The
+first softbit is in bits `[7:0]`, and `m_axis_softbit_tlast` is asserted on the
+packed word containing the DAB transmission-frame end.
+
+The AXI-Lite block provides run/clear controls, threshold and CFO registers,
+sample-index initialization, counters, latest sync metrics, frame count, and
+history status. For normal autonomous operation, leave the internal data
+scheduler enabled, write the desired thresholds, optionally pulse
+`set_sample_index`, then set `CONTROL.run_enable`.
+
 ### `active_carrier_mapper`
 
 Maps FFT bins into the DAB Mode I active-carrier order used by the C code:
@@ -1083,6 +1112,12 @@ Custom FFT top lint:
 
 ```text
 rtl/scripts/run_dab_pipeline_top_custom_fft_lint.sh
+```
+
+Zynq AXI wrapper lint:
+
+```text
+rtl/scripts/run_dab_zynq_axis_top_lint.sh
 ```
 
 Quartus FFT top lint:
