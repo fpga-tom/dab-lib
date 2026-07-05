@@ -36,7 +36,9 @@ module sample_history #(
 );
   localparam int ADDR_WIDTH = DEPTH_SAMPLES <= 2 ? 1 : $clog2(DEPTH_SAMPLES);
 
+  (* ram_style = "block", ramstyle = "M20K" *)
   logic signed [SAMPLE_WIDTH-1:0] i_mem [0:DEPTH_SAMPLES-1];
+  (* ram_style = "block", ramstyle = "M20K" *)
   logic signed [SAMPLE_WIDTH-1:0] q_mem [0:DEPTH_SAMPLES-1];
 
   logic range_valid_q;
@@ -64,6 +66,7 @@ module sample_history #(
   logic read_last_next;
   logic write_is_contiguous;
   logic write_makes_full;
+  logic output_pending_read;
   logic [ADDR_WIDTH-1:0] write_addr;
   logic [ADDR_WIDTH-1:0] request_addr;
   logic [ADDR_WIDTH-1:0] read_addr;
@@ -87,6 +90,7 @@ module sample_history #(
   assign read_last_next = read_remaining_q == 32'd1;
   assign write_is_contiguous = range_valid_q && in_sample_index == next_sample_index_q;
   assign write_makes_full = stored_samples_q >= 32'(DEPTH_SAMPLES);
+  assign output_pending_read = !clear && output_can_advance && read_pending_q;
   assign write_addr = sample_addr(in_sample_index);
   assign request_addr = sample_addr(read_req_start_sample);
   assign read_addr = sample_addr(read_sample_index_q);
@@ -105,6 +109,18 @@ module sample_history #(
   endfunction
   /* verilator lint_on UNUSEDSIGNAL */
 
+  always_ff @(posedge clk) begin
+    if (input_fire) begin
+      i_mem[write_addr] <= in_i;
+      q_mem[write_addr] <= in_q;
+    end
+
+    if (output_pending_read) begin
+      rd_out_i <= read_pending_error_q ? '0 : i_mem[read_pending_addr_q];
+      rd_out_q <= read_pending_error_q ? '0 : q_mem[read_pending_addr_q];
+    end
+  end
+
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       range_valid_q <= 1'b0;
@@ -122,8 +138,6 @@ module sample_history #(
       read_pending_last_q <= 1'b0;
       read_pending_error_q <= 1'b0;
       rd_out_valid <= 1'b0;
-      rd_out_i <= '0;
-      rd_out_q <= '0;
       rd_out_sample_index <= '0;
       rd_out_first <= 1'b0;
       rd_out_last <= 1'b0;
@@ -144,17 +158,12 @@ module sample_history #(
       read_pending_last_q <= 1'b0;
       read_pending_error_q <= 1'b0;
       rd_out_valid <= 1'b0;
-      rd_out_i <= '0;
-      rd_out_q <= '0;
       rd_out_sample_index <= '0;
       rd_out_first <= 1'b0;
       rd_out_last <= 1'b0;
       rd_out_error <= 1'b0;
     end else begin
       if (input_fire) begin
-        i_mem[write_addr] <= in_i;
-        q_mem[write_addr] <= in_q;
-
         if (!write_is_contiguous) begin
           range_valid_q <= 1'b1;
           oldest_sample_index_q <= in_sample_index;
@@ -178,10 +187,8 @@ module sample_history #(
         rd_out_error <= 1'b0;
       end
 
-      if (output_can_advance && read_pending_q) begin
+      if (output_pending_read) begin
         rd_out_valid <= 1'b1;
-        rd_out_i <= read_pending_error_q ? '0 : i_mem[read_pending_addr_q];
-        rd_out_q <= read_pending_error_q ? '0 : q_mem[read_pending_addr_q];
         rd_out_sample_index <= read_pending_sample_index_q;
         rd_out_first <= read_pending_first_q;
         rd_out_last <= read_pending_last_q;
