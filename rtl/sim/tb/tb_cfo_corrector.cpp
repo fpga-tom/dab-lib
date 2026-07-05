@@ -235,7 +235,6 @@ void run_sequence(Vcfo_corrector &top,
     uint32_t sent = 0;
     uint32_t received = 0;
     uint32_t cycles = 0;
-    uint32_t model_phase = phase_seed;
 
     load_phase(top, phase_seed);
 
@@ -271,16 +270,14 @@ void run_sequence(Vcfo_corrector &top,
 
         if (input_fire) {
             const bool sample_error = sent == error_offset;
+            const uint32_t sample_phase = phase_seed + (phase_inc * sent);
             pending.push_back(expected_for(symbol_start_sample,
                                            sent,
                                            seed,
-                                           model_phase,
+                                           sample_phase,
                                            bypass,
                                            sample_error,
                                            total_samples));
-            if (!sample_error) {
-                model_phase += phase_inc;
-            }
             ++sent;
         }
 

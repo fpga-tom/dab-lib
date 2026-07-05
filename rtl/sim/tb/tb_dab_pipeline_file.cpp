@@ -34,6 +34,7 @@ constexpr uint32_t kFrameSoftbits = kTotalSymbols * kSoftbitsPerSymbol;
 constexpr uint32_t kScoreFracBits = 30;
 constexpr uint32_t kCarrierWidth = 24;
 constexpr uint32_t kSampleWidth = 16;
+constexpr uint32_t kDefaultSampleRate = 2048000;
 constexpr double kTwoPi = 6.283185307179586476925286766559;
 
 struct Sample {
@@ -63,6 +64,10 @@ struct Config {
     double fft_target_rms = static_cast<double>(1u << 22u);
     bool fft_fixed_gain = false;
     double fft_gain = 1.0;
+    bool enable_cfo_correction = false;
+    uint32_t sample_rate = kDefaultSampleRate;
+    int32_t cfo_sign = -1;
+    double cfo_gain = 0.5;
 };
 
 struct CycleFires {
@@ -79,12 +84,22 @@ struct CycleFires {
     uint64_t sync_prs_fft_start = 0;
     uint32_t sync_prs_score = 0;
     uint32_t sync_pilot_score = 0;
+    int32_t sync_coarse_freq_error_hz = 0;
     int32_t sync_carrier_offset = 0;
     int32_t sync_fine_timing = 0;
     bool softbit = false;
     int8_t softbit_value = 0;
     bool frame_done = false;
     uint64_t frame_start_sample = 0;
+};
+
+struct CfoControl {
+    bool enabled = false;
+    bool locked = false;
+    bool phase_load_pending = false;
+    int32_t coarse_freq_error_hz = 0;
+    uint32_t phase_inc = 0;
+    uint32_t phase_seed = 0;
 };
 
 uint64_t env_u64(const char *name, uint64_t fallback) {
@@ -115,6 +130,21 @@ double env_f64(const char *name, double fallback) {
         return fallback;
     }
     return parsed;
+}
+
+int64_t env_i64(const char *name, int64_t fallback) {
+    const char *value = std::getenv(name);
+    char *end = nullptr;
+
+    if (value == nullptr || value[0] == '\0') {
+        return fallback;
+    }
+    errno = 0;
+    const long long parsed = std::strtoll(value, &end, 10);
+    if (errno != 0 || end == value || *end != '\0') {
+        return fallback;
+    }
+    return static_cast<int64_t>(parsed);
 }
 
 bool env_bool(const char *name, bool fallback) {
@@ -174,6 +204,18 @@ Config load_config() {
     cfg.fft_target_rms = env_f64("DAB_TB_FFT_TARGET_RMS", cfg.fft_target_rms);
     cfg.fft_gain = env_f64("DAB_TB_FFT_GAIN", cfg.fft_gain);
     cfg.fft_fixed_gain = std::getenv("DAB_TB_FFT_GAIN") != nullptr;
+    cfg.enable_cfo_correction =
+        env_bool("DAB_TB_ENABLE_CFO_CORRECTION", cfg.enable_cfo_correction);
+    cfg.sample_rate = static_cast<uint32_t>(
+        env_u64("DAB_TB_SAMPLE_RATE", cfg.sample_rate));
+    if (cfg.sample_rate == 0u) {
+        cfg.sample_rate = kDefaultSampleRate;
+    }
+    cfg.cfo_sign = static_cast<int32_t>(env_i64("DAB_TB_CFO_SIGN", cfg.cfo_sign));
+    if (cfg.cfo_sign == 0) {
+        cfg.cfo_sign = -1;
+    }
+    cfg.cfo_gain = env_f64("DAB_TB_CFO_GAIN", cfg.cfo_gain);
     return cfg;
 }
 
@@ -205,6 +247,15 @@ int64_t sign_extend(uint64_t value, uint32_t bits) {
 uint32_t pack_signed(int64_t value, uint32_t bits) {
     const uint64_t mask = bits == 32u ? 0xffffffffull : ((uint64_t{1} << bits) - 1u);
     return static_cast<uint32_t>(static_cast<uint64_t>(value) & mask);
+}
+
+uint32_t cfo_phase_inc_from_hz(int32_t cfo_hz, const Config &cfg) {
+    const double cycles_per_sample =
+        (static_cast<double>(cfg.cfo_sign) * cfg.cfo_gain * static_cast<double>(cfo_hz)) /
+        static_cast<double>(cfg.sample_rate);
+    const double scaled = cycles_per_sample * 4294967296.0;
+    const int64_t rounded = static_cast<int64_t>(std::llround(scaled));
+    return pack_signed(rounded, 32);
 }
 
 int16_t clamp_i16(float value) {
@@ -550,7 +601,9 @@ private:
     uint64_t scheduled_frames_ = 0;
 };
 
-void drive_quiescent(TopType &top, const Config &cfg) {
+void drive_quiescent(TopType &top, const Config &cfg, const CfoControl &cfo) {
+    const bool use_cfo = cfg.enable_cfo_correction && cfo.enabled && cfo.locked;
+
     top.clear = 0;
     top.set_sample_index_valid = 0;
     top.set_sample_index_value = 0;
@@ -560,10 +613,10 @@ void drive_quiescent(TopType &top, const Config &cfg) {
     top.cfg_enable_tracking = 1;
     top.cfg_min_cp_score = score_q(cfg.min_cp_score);
     top.cfg_min_pilot_score = score_q(cfg.min_pilot_score);
-    top.cfg_cfo_bypass = 1;
-    top.cfg_cfo_phase_inc = 0;
-    top.cfg_cfo_phase_load = 0;
-    top.cfg_cfo_phase_seed = 0;
+    top.cfg_cfo_bypass = use_cfo ? 0 : 1;
+    top.cfg_cfo_phase_inc = use_cfo ? cfo.phase_inc : 0;
+    top.cfg_cfo_phase_load = use_cfo && cfo.phase_load_pending ? 1 : 0;
+    top.cfg_cfo_phase_seed = use_cfo ? cfo.phase_seed : 0;
     top.predict_in_valid = 0;
     top.predict_in_prs_fft_start_sample = 0;
     top.data_symbol_cmd_valid = 0;
@@ -587,8 +640,8 @@ void raw_tick(TopType &top) {
     top.eval();
 }
 
-void reset_top(TopType &top, const Config &cfg) {
-    drive_quiescent(top, cfg);
+void reset_top(TopType &top, const Config &cfg, const CfoControl &cfo) {
+    drive_quiescent(top, cfg, cfo);
     top.rst_n = 0;
     raw_tick(top);
     raw_tick(top);
@@ -596,17 +649,18 @@ void reset_top(TopType &top, const Config &cfg) {
     top.rst_n = 1;
     raw_tick(top);
 
-    drive_quiescent(top, cfg);
+    drive_quiescent(top, cfg, cfo);
     top.set_sample_index_valid = 1;
     top.set_sample_index_value = 0;
     raw_tick(top);
 
-    drive_quiescent(top, cfg);
+    drive_quiescent(top, cfg, cfo);
     raw_tick(top);
 }
 
 void drive_cycle_inputs(TopType &top,
                         const Config &cfg,
+                        const CfoControl &cfo,
 #if !defined(DAB_TB_CUSTOM_FFT)
                         const FftShim &fft,
 #endif
@@ -615,7 +669,7 @@ void drive_cycle_inputs(TopType &top,
                         uint64_t sample_pos,
                         bool feed_enabled,
                         bool sample_cycle) {
-    drive_quiescent(top, cfg);
+    drive_quiescent(top, cfg, cfo);
 
     if (feed_enabled && sample_cycle && sample_pos < samples.size()) {
         const Sample &sample = samples[static_cast<size_t>(sample_pos)];
@@ -663,6 +717,8 @@ CycleFires observe_cycle(const TopType &top) {
     fires.sync_prs_fft_start = top.sync_out_prs_fft_start_sample;
     fires.sync_prs_score = top.sync_out_prs_score;
     fires.sync_pilot_score = top.sync_out_pilot_score;
+    fires.sync_coarse_freq_error_hz =
+        static_cast<int32_t>(sign_extend(top.sync_out_coarse_freq_error_hz, 32));
     fires.sync_carrier_offset = static_cast<int32_t>(sign_extend(top.sync_out_carrier_offset_bins, 4));
     fires.sync_fine_timing = static_cast<int32_t>(sign_extend(top.sync_out_fine_timing_error_samples, 24));
 
@@ -693,8 +749,10 @@ int main(int argc, char **argv) {
         FftShim fft(cfg);
 #endif
         DataScheduler scheduler;
+        CfoControl cfo;
+        cfo.enabled = cfg.enable_cfo_correction;
 
-        reset_top(top, cfg);
+        reset_top(top, cfg, cfo);
 
         uint64_t sample_pos = 0;
         uint64_t softbit_count = 0;
@@ -714,6 +772,10 @@ int main(int argc, char **argv) {
                   << (cfg.internal_data_scheduler ? "internal" : "external")
                   << " cp_search=" << (cfg.streaming_cp_search ? "stream" : "history")
                   << " sample_period_cycles=" << cfg.sample_period_cycles
+                  << " cfo_correction=" << (cfg.enable_cfo_correction ? "sync" : "off")
+                  << " cfo_sign=" << cfg.cfo_sign
+                  << " cfo_gain=" << cfg.cfo_gain
+                  << " sample_rate=" << cfg.sample_rate
 #if defined(DAB_TB_CUSTOM_FFT)
                   << " fft_impl=custom_rtl"
 #else
@@ -738,8 +800,12 @@ int main(int argc, char **argv) {
 
             const bool sample_cycle =
                 (cycle % static_cast<uint64_t>(cfg.sample_period_cycles)) == 0u;
+            const bool cfo_phase_load_driven =
+                cfg.enable_cfo_correction && cfo.enabled && cfo.locked &&
+                cfo.phase_load_pending;
             drive_cycle_inputs(top,
                                cfg,
+                               cfo,
 #if !defined(DAB_TB_CUSTOM_FFT)
                                fft,
 #endif
@@ -754,6 +820,9 @@ int main(int argc, char **argv) {
             const CycleFires fires = observe_cycle(top);
             top.clk = 1;
             top.eval();
+            if (cfo_phase_load_driven) {
+                cfo.phase_load_pending = false;
+            }
 
             if (fires.sdr) {
                 ++sample_pos;
@@ -778,8 +847,19 @@ int main(int argc, char **argv) {
                               << " pilot_score=" << score_to_float(fires.sync_pilot_score)
                               << " locked=" << (fires.sync_locked ? 1 : 0)
                               << " ifo=" << fires.sync_carrier_offset
+                              << " cfo_hz=" << fires.sync_coarse_freq_error_hz
                               << " fine_timing_q12=" << fires.sync_fine_timing
-                              << " cycle=" << cycle << "\n";
+                              << " cycle=" << cycle;
+                    if (cfg.enable_cfo_correction) {
+                        cfo.locked = true;
+                        cfo.coarse_freq_error_hz = fires.sync_coarse_freq_error_hz;
+                        cfo.phase_inc = cfo_phase_inc_from_hz(cfo.coarse_freq_error_hz, cfg);
+                        cfo.phase_seed = 0;
+                        cfo.phase_load_pending = true;
+                        std::cout << " cfo_phase_inc="
+                                  << static_cast<int32_t>(sign_extend(cfo.phase_inc, 32));
+                    }
+                    std::cout << "\n";
                 }
                 (void)scheduler.observe_sync(fires);
             }

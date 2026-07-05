@@ -7,7 +7,8 @@ module cfo_corrector
     parameter int OUTPUT_WIDTH = DAB_OFDM_SAMPLE_WIDTH,
     parameter int PHASE_WIDTH = 32,
     parameter int CORDIC_STAGES = 16,
-    parameter int SAMPLE_OFFSET_WIDTH = DAB_OFDM_FFT_INDEX_WIDTH
+    parameter int SAMPLE_OFFSET_WIDTH = DAB_OFDM_FFT_INDEX_WIDTH,
+    parameter int GAP_WIDTH = 32
 ) (
     input  wire logic clk,
     input  wire logic rst_n,
@@ -44,6 +45,7 @@ module cfo_corrector
   localparam int GAIN_FRAC_BITS = 16;
   localparam int GAIN_WIDTH = GAIN_FRAC_BITS + 1;
   localparam int PRODUCT_WIDTH = INPUT_WIDTH + GAIN_WIDTH;
+  localparam int GAP_PRODUCT_WIDTH = PHASE_WIDTH + GAP_WIDTH;
   localparam logic signed [GAIN_WIDTH-1:0] CORDIC_GAIN_SCALE = GAIN_WIDTH'(39797);
 
   logic valid_q [0:CORDIC_STAGES];
@@ -60,7 +62,17 @@ module cfo_corrector
 
   logic [PHASE_WIDTH-1:0] phase_q;
   logic [PHASE_WIDTH-1:0] phase_for_input;
+  logic [PHASE_WIDTH-1:0] phase_gap_adjust;
   logic [PHASE_WIDTH-1:0] residual_phase;
+  logic last_sample_valid_q;
+  logic [63:0] last_sample_index_q;
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic [63:0] phase_gap_samples_wide;
+  /* verilator lint_on UNUSEDSIGNAL */
+  logic [GAP_WIDTH-1:0] phase_gap_samples;
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic [GAP_PRODUCT_WIDTH-1:0] phase_gap_product;
+  /* verilator lint_on UNUSEDSIGNAL */
   logic signed [INTERNAL_WIDTH-1:0] input_i_scaled;
   logic signed [INTERNAL_WIDTH-1:0] input_q_scaled;
   logic signed [INTERNAL_WIDTH-1:0] input_i_extended;
@@ -84,7 +96,14 @@ module cfo_corrector
   assign out_error = error_q[CORDIC_STAGES];
   assign out_phase = phase_used_q[CORDIC_STAGES];
 
-  assign phase_for_input = cfg_phase_load ? cfg_phase_seed : phase_q;
+  assign phase_gap_samples_wide =
+      last_sample_valid_q && in_sample_index > (last_sample_index_q + 64'd1) ?
+      in_sample_index - last_sample_index_q - 64'd1 : 64'd0;
+  assign phase_gap_samples = phase_gap_samples_wide[GAP_WIDTH-1:0];
+  assign phase_gap_product = GAP_PRODUCT_WIDTH'(cfg_phase_inc) *
+      GAP_PRODUCT_WIDTH'(phase_gap_samples);
+  assign phase_gap_adjust = phase_gap_product[PHASE_WIDTH-1:0];
+  assign phase_for_input = cfg_phase_load ? cfg_phase_seed : phase_q + phase_gap_adjust;
   assign residual_phase = {{2{1'b0}}, phase_for_input[PHASE_WIDTH-3:0]};
   assign input_i_scaled = prescale_input(in_i);
   assign input_q_scaled = prescale_input(in_q);
@@ -206,6 +225,8 @@ module cfo_corrector
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       phase_q <= '0;
+      last_sample_valid_q <= 1'b0;
+      last_sample_index_q <= '0;
       for (int i = 0; i <= CORDIC_STAGES; i++) begin
         valid_q[i] <= 1'b0;
         bypass_q[i] <= 1'b0;
@@ -221,6 +242,8 @@ module cfo_corrector
       end
     end else if (clear) begin
       phase_q <= cfg_phase_load ? cfg_phase_seed : '0;
+      last_sample_valid_q <= 1'b0;
+      last_sample_index_q <= '0;
       for (int i = 0; i <= CORDIC_STAGES; i++) begin
         valid_q[i] <= 1'b0;
         bypass_q[i] <= 1'b0;
@@ -237,10 +260,13 @@ module cfo_corrector
     end else begin
       if (cfg_phase_load) begin
         phase_q <= cfg_phase_seed;
+        last_sample_valid_q <= 1'b0;
       end
 
       if (input_fire && !in_error) begin
         phase_q <= phase_for_input + cfg_phase_inc;
+        last_sample_valid_q <= 1'b1;
+        last_sample_index_q <= in_sample_index;
       end
 
       if (advance_pipeline) begin
