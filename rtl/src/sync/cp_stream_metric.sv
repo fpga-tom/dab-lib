@@ -29,26 +29,40 @@ module cp_stream_metric #(
   localparam int FFT_ADDR_WIDTH = FFT_SAMPLES <= 2 ? 1 : $clog2(FFT_SAMPLES);
   localparam int GUARD_ADDR_WIDTH = GUARD_SAMPLES <= 2 ? 1 : $clog2(GUARD_SAMPLES);
   localparam int SAMPLE_COUNT_LIMIT = FFT_SAMPLES + GUARD_SAMPLES + 1;
+  localparam int SAMPLE_PRODUCT_WIDTH = 2 * SAMPLE_WIDTH;
+  localparam int SAMPLE_CORR_WIDTH = SAMPLE_PRODUCT_WIDTH + 1;
+  localparam int SAMPLE_POWER_WIDTH = SAMPLE_PRODUCT_WIDTH + 1;
+  localparam int GUARD_ACC_EXTRA = GUARD_SAMPLES <= 1 ? 1 : $clog2(GUARD_SAMPLES + 1);
+  localparam int CORR_ACC_WIDTH = SAMPLE_CORR_WIDTH + GUARD_ACC_EXTRA;
+  localparam int ENERGY_ACC_WIDTH = SAMPLE_POWER_WIDTH + GUARD_ACC_EXTRA;
+  localparam int SCORE_MAG_WIDTH = (2 * CORR_ACC_WIDTH) + 1;
+  localparam int SCORE_DEN_WIDTH = 2 * ENERGY_ACC_WIDTH;
+  localparam int SCORE_NUM_WIDTH = SCORE_MAG_WIDTH + SCORE_FRAC_BITS;
+  localparam int SCORE_SCALE_WIDTH =
+      SCORE_NUM_WIDTH > SCORE_DEN_WIDTH ? SCORE_NUM_WIDTH : SCORE_DEN_WIDTH;
+  localparam int SCORE_WORK_WIDTH = SCORE_SCALE_WIDTH < 64 ? 64 : SCORE_SCALE_WIDTH;
+  localparam int CFO_CALC_WIDTH = CORR_ACC_WIDTH + 34;
+  localparam int CFO_WORK_WIDTH = CFO_CALC_WIDTH < 64 ? 64 : CFO_CALC_WIDTH;
 
   (* ram_style = "block", ramstyle = "M10K" *)
   logic signed [SAMPLE_WIDTH-1:0] delay_i_mem [0:FFT_SAMPLES-1];
   (* ram_style = "block", ramstyle = "M10K" *)
   logic signed [SAMPLE_WIDTH-1:0] delay_q_mem [0:FFT_SAMPLES-1];
   (* ram_style = "block", ramstyle = "M10K" *)
-  logic signed [63:0] prod_re_mem [0:GUARD_SAMPLES-1];
+  logic signed [SAMPLE_CORR_WIDTH-1:0] prod_re_mem [0:GUARD_SAMPLES-1];
   (* ram_style = "block", ramstyle = "M10K" *)
-  logic signed [63:0] prod_im_mem [0:GUARD_SAMPLES-1];
+  logic signed [SAMPLE_CORR_WIDTH-1:0] prod_im_mem [0:GUARD_SAMPLES-1];
   (* ram_style = "block", ramstyle = "M10K" *)
-  logic [63:0] energy_a_mem [0:GUARD_SAMPLES-1];
+  logic [SAMPLE_POWER_WIDTH-1:0] energy_a_mem [0:GUARD_SAMPLES-1];
   (* ram_style = "block", ramstyle = "M10K" *)
-  logic [63:0] energy_b_mem [0:GUARD_SAMPLES-1];
+  logic [SAMPLE_POWER_WIDTH-1:0] energy_b_mem [0:GUARD_SAMPLES-1];
 
   logic signed [SAMPLE_WIDTH-1:0] delay_i_rd_q;
   logic signed [SAMPLE_WIDTH-1:0] delay_q_rd_q;
-  logic signed [63:0] old_prod_re_q;
-  logic signed [63:0] old_prod_im_q;
-  logic [63:0] old_energy_a_q;
-  logic [63:0] old_energy_b_q;
+  logic signed [SAMPLE_CORR_WIDTH-1:0] old_prod_re_q;
+  logic signed [SAMPLE_CORR_WIDTH-1:0] old_prod_im_q;
+  logic [SAMPLE_POWER_WIDTH-1:0] old_energy_a_q;
+  logic [SAMPLE_POWER_WIDTH-1:0] old_energy_b_q;
 
   logic range_valid_q;
   logic [63:0] next_sample_index_q;
@@ -64,25 +78,25 @@ module cp_stream_metric #(
   logic pending_valid_q;
   logic [GUARD_ADDR_WIDTH-1:0] pending_addr_q;
   logic [63:0] pending_sample_index_q;
-  logic signed [63:0] pending_prod_re_q;
-  logic signed [63:0] pending_prod_im_q;
-  logic [63:0] pending_energy_a_q;
-  logic [63:0] pending_energy_b_q;
+  logic signed [SAMPLE_CORR_WIDTH-1:0] pending_prod_re_q;
+  logic signed [SAMPLE_CORR_WIDTH-1:0] pending_prod_im_q;
+  logic [SAMPLE_POWER_WIDTH-1:0] pending_energy_a_q;
+  logic [SAMPLE_POWER_WIDTH-1:0] pending_energy_b_q;
 
-  logic signed [63:0] corr_re_sum_q;
-  logic signed [63:0] corr_im_sum_q;
-  logic [63:0] energy_a_sum_q;
-  logic [63:0] energy_b_sum_q;
+  logic signed [CORR_ACC_WIDTH-1:0] corr_re_sum_q;
+  logic signed [CORR_ACC_WIDTH-1:0] corr_im_sum_q;
+  logic [ENERGY_ACC_WIDTH-1:0] energy_a_sum_q;
+  logic [ENERGY_ACC_WIDTH-1:0] energy_b_sum_q;
 
   logic input_fire;
   logic input_contiguous;
   logic delayed_sample_valid;
   logic [FFT_ADDR_WIDTH-1:0] delay_addr;
   logic ring_last;
-  logic signed [63:0] stage_prod_re;
-  logic signed [63:0] stage_prod_im;
-  logic [63:0] stage_energy_a;
-  logic [63:0] stage_energy_b;
+  logic signed [SAMPLE_CORR_WIDTH-1:0] stage_prod_re;
+  logic signed [SAMPLE_CORR_WIDTH-1:0] stage_prod_im;
+  logic [SAMPLE_POWER_WIDTH-1:0] stage_energy_a;
+  logic [SAMPLE_POWER_WIDTH-1:0] stage_energy_b;
 
   assign input_fire = in_valid && !clear;
   assign input_contiguous = range_valid_q && in_sample_index == next_sample_index_q;
@@ -94,79 +108,120 @@ module cp_stream_metric #(
   assign stage_energy_a = sample_power(delay_i_rd_q, delay_q_rd_q);
   assign stage_energy_b = sample_power(stage_i_q, stage_q_q);
 
-  function automatic logic signed [63:0] extend_sample(
+  function automatic logic signed [SAMPLE_PRODUCT_WIDTH-1:0] extend_sample_for_product(
       input logic signed [SAMPLE_WIDTH-1:0] value
   );
     begin
-      extend_sample = {{(64 - SAMPLE_WIDTH){value[SAMPLE_WIDTH-1]}}, value};
+      extend_sample_for_product =
+          {{(SAMPLE_PRODUCT_WIDTH - SAMPLE_WIDTH){value[SAMPLE_WIDTH-1]}}, value};
     end
   endfunction
 
-  function automatic logic [63:0] sample_power(
+  function automatic logic signed [SAMPLE_CORR_WIDTH-1:0] extend_product_to_corr(
+      input logic signed [SAMPLE_PRODUCT_WIDTH-1:0] value
+  );
+    begin
+      extend_product_to_corr = {{(SAMPLE_CORR_WIDTH - SAMPLE_PRODUCT_WIDTH)
+          {value[SAMPLE_PRODUCT_WIDTH-1]}}, value};
+    end
+  endfunction
+
+  function automatic logic signed [CORR_ACC_WIDTH-1:0] extend_corr_sample_to_acc(
+      input logic signed [SAMPLE_CORR_WIDTH-1:0] value
+  );
+    begin
+      extend_corr_sample_to_acc =
+          {{(CORR_ACC_WIDTH - SAMPLE_CORR_WIDTH){value[SAMPLE_CORR_WIDTH-1]}}, value};
+    end
+  endfunction
+
+  function automatic logic [ENERGY_ACC_WIDTH-1:0] extend_energy_sample_to_acc(
+      input logic [SAMPLE_POWER_WIDTH-1:0] value
+  );
+    begin
+      extend_energy_sample_to_acc =
+          {{(ENERGY_ACC_WIDTH - SAMPLE_POWER_WIDTH){1'b0}}, value};
+    end
+  endfunction
+
+  function automatic logic signed [CFO_WORK_WIDTH-1:0] extend_corr_to_cfo(
+      input logic signed [CORR_ACC_WIDTH-1:0] value
+  );
+    begin
+      extend_corr_to_cfo =
+          {{(CFO_WORK_WIDTH - CORR_ACC_WIDTH){value[CORR_ACC_WIDTH-1]}}, value};
+    end
+  endfunction
+
+  function automatic logic [SAMPLE_POWER_WIDTH-1:0] sample_power(
       input logic signed [SAMPLE_WIDTH-1:0] sample_i,
       input logic signed [SAMPLE_WIDTH-1:0] sample_q
   );
-    logic signed [63:0] i_wide;
-    logic signed [63:0] q_wide;
-    logic signed [127:0] i_sq;
-    logic signed [127:0] q_sq;
-    logic [127:0] total;
+    logic signed [SAMPLE_PRODUCT_WIDTH-1:0] i_wide;
+    logic signed [SAMPLE_PRODUCT_WIDTH-1:0] q_wide;
+    logic signed [SAMPLE_PRODUCT_WIDTH-1:0] i_sq;
+    logic signed [SAMPLE_PRODUCT_WIDTH-1:0] q_sq;
+    logic [SAMPLE_POWER_WIDTH-1:0] total;
     begin
-      i_wide = extend_sample(sample_i);
-      q_wide = extend_sample(sample_q);
+      i_wide = extend_sample_for_product(sample_i);
+      q_wide = extend_sample_for_product(sample_q);
       i_sq = i_wide * i_wide;
       q_sq = q_wide * q_wide;
-      total = 128'(i_sq) + 128'(q_sq);
-      if (total > 128'({64{1'b1}})) begin
-        sample_power = {64{1'b1}};
-      end else begin
-        sample_power = total[63:0];
-      end
+      total = SAMPLE_POWER_WIDTH'(i_sq) + SAMPLE_POWER_WIDTH'(q_sq);
+      sample_power = total;
     end
   endfunction
 
-  function automatic logic signed [63:0] corr_re_sample(
+  function automatic logic signed [SAMPLE_CORR_WIDTH-1:0] corr_re_sample(
       input logic signed [SAMPLE_WIDTH-1:0] a_i,
       input logic signed [SAMPLE_WIDTH-1:0] a_q,
       input logic signed [SAMPLE_WIDTH-1:0] b_i,
       input logic signed [SAMPLE_WIDTH-1:0] b_q
   );
-    logic signed [63:0] ai;
-    logic signed [63:0] aq;
-    logic signed [63:0] bi;
-    logic signed [63:0] bq;
+    logic signed [SAMPLE_PRODUCT_WIDTH-1:0] ai;
+    logic signed [SAMPLE_PRODUCT_WIDTH-1:0] aq;
+    logic signed [SAMPLE_PRODUCT_WIDTH-1:0] bi;
+    logic signed [SAMPLE_PRODUCT_WIDTH-1:0] bq;
+    logic signed [SAMPLE_PRODUCT_WIDTH-1:0] prod_i;
+    logic signed [SAMPLE_PRODUCT_WIDTH-1:0] prod_q;
     begin
-      ai = extend_sample(a_i);
-      aq = extend_sample(a_q);
-      bi = extend_sample(b_i);
-      bq = extend_sample(b_q);
-      corr_re_sample = (ai * bi) + (aq * bq);
+      ai = extend_sample_for_product(a_i);
+      aq = extend_sample_for_product(a_q);
+      bi = extend_sample_for_product(b_i);
+      bq = extend_sample_for_product(b_q);
+      prod_i = ai * bi;
+      prod_q = aq * bq;
+      corr_re_sample = extend_product_to_corr(prod_i) + extend_product_to_corr(prod_q);
     end
   endfunction
 
-  function automatic logic signed [63:0] corr_im_sample(
+  function automatic logic signed [SAMPLE_CORR_WIDTH-1:0] corr_im_sample(
       input logic signed [SAMPLE_WIDTH-1:0] a_i,
       input logic signed [SAMPLE_WIDTH-1:0] a_q,
       input logic signed [SAMPLE_WIDTH-1:0] b_i,
       input logic signed [SAMPLE_WIDTH-1:0] b_q
   );
-    logic signed [63:0] ai;
-    logic signed [63:0] aq;
-    logic signed [63:0] bi;
-    logic signed [63:0] bq;
+    logic signed [SAMPLE_PRODUCT_WIDTH-1:0] ai;
+    logic signed [SAMPLE_PRODUCT_WIDTH-1:0] aq;
+    logic signed [SAMPLE_PRODUCT_WIDTH-1:0] bi;
+    logic signed [SAMPLE_PRODUCT_WIDTH-1:0] bq;
+    logic signed [SAMPLE_PRODUCT_WIDTH-1:0] prod_qi;
+    logic signed [SAMPLE_PRODUCT_WIDTH-1:0] prod_iq;
     begin
-      ai = extend_sample(a_i);
-      aq = extend_sample(a_q);
-      bi = extend_sample(b_i);
-      bq = extend_sample(b_q);
-      corr_im_sample = (aq * bi) - (ai * bq);
+      ai = extend_sample_for_product(a_i);
+      aq = extend_sample_for_product(a_q);
+      bi = extend_sample_for_product(b_i);
+      bq = extend_sample_for_product(b_q);
+      prod_qi = aq * bi;
+      prod_iq = ai * bq;
+      corr_im_sample = extend_product_to_corr(prod_qi) - extend_product_to_corr(prod_iq);
     end
   endfunction
 
-  function automatic logic [SCORE_WIDTH-1:0] saturate_score(input logic [127:0] value);
-    logic [127:0] max_value;
+  function automatic logic [SCORE_WIDTH-1:0] saturate_score(input logic [63:0] value);
+    logic [63:0] max_value;
     begin
-      max_value = 128'({SCORE_WIDTH{1'b1}});
+      max_value = 64'({SCORE_WIDTH{1'b1}});
       if (value > max_value) begin
         saturate_score = {SCORE_WIDTH{1'b1}};
       end else begin
@@ -175,36 +230,36 @@ module cp_stream_metric #(
     end
   endfunction
 
-  function automatic int unsigned bit_length_u128(input logic [127:0] value);
+  function automatic int unsigned bit_length_score_work(input logic [SCORE_WORK_WIDTH-1:0] value);
     integer bit_index;
     begin
-      bit_length_u128 = 0;
-      for (bit_index = 0; bit_index < 128; bit_index = bit_index + 1) begin
+      bit_length_score_work = 0;
+      for (bit_index = 0; bit_index < SCORE_WORK_WIDTH; bit_index = bit_index + 1) begin
         if (value[bit_index]) begin
-          bit_length_u128 = bit_index + 1;
+          bit_length_score_work = bit_index + 1;
         end
       end
     end
   endfunction
 
-  function automatic int unsigned bit_length_u96(input logic [95:0] value);
+  function automatic int unsigned bit_length_cfo_work(input logic [CFO_WORK_WIDTH-1:0] value);
     integer bit_index;
     begin
-      bit_length_u96 = 0;
-      for (bit_index = 0; bit_index < 96; bit_index = bit_index + 1) begin
+      bit_length_cfo_work = 0;
+      for (bit_index = 0; bit_index < CFO_WORK_WIDTH; bit_index = bit_index + 1) begin
         if (value[bit_index]) begin
-          bit_length_u96 = bit_index + 1;
+          bit_length_cfo_work = bit_index + 1;
         end
       end
     end
   endfunction
 
   function automatic logic [63:0] scaled_score_numerator_u64(
-      input logic [127:0] corr_mag_sq,
+      input logic [SCORE_WORK_WIDTH-1:0] corr_mag_sq,
       input int unsigned scale_shift
   );
     /* verilator lint_off UNUSEDSIGNAL */
-    logic [127:0] shifted;
+    logic [SCORE_WORK_WIDTH-1:0] shifted;
     /* verilator lint_on UNUSEDSIGNAL */
     begin
       if (scale_shift >= SCORE_FRAC_BITS) begin
@@ -216,42 +271,44 @@ module cp_stream_metric #(
     end
   endfunction
 
-  function automatic logic [63:0] scaled_u128_to_u64(
-      input logic [127:0] value,
+  function automatic logic [63:0] scaled_score_work_to_u64(
+      input logic [SCORE_WORK_WIDTH-1:0] value,
       input int unsigned scale_shift
   );
     /* verilator lint_off UNUSEDSIGNAL */
-    logic [127:0] shifted;
+    logic [SCORE_WORK_WIDTH-1:0] shifted;
     /* verilator lint_on UNUSEDSIGNAL */
     begin
       shifted = value >> scale_shift;
-      scaled_u128_to_u64 = shifted[63:0];
+      scaled_score_work_to_u64 = shifted[63:0];
     end
   endfunction
 
-  function automatic logic signed [63:0] scaled_s96_to_s64(
-      input logic signed [95:0] value,
+  function automatic logic signed [63:0] scaled_cfo_work_to_s64(
+      input logic signed [CFO_WORK_WIDTH-1:0] value,
       input int unsigned scale_shift
   );
     /* verilator lint_off UNUSEDSIGNAL */
-    logic signed [95:0] shifted;
+    logic signed [CFO_WORK_WIDTH-1:0] shifted;
     /* verilator lint_on UNUSEDSIGNAL */
     begin
       shifted = value >>> scale_shift;
-      scaled_s96_to_s64 = shifted[63:0];
+      scaled_cfo_work_to_s64 = shifted[63:0];
     end
   endfunction
 
   function automatic logic [SCORE_WIDTH-1:0] score_from_acc(
-      input logic signed [63:0] corr_re,
-      input logic signed [63:0] corr_im,
-      input logic [63:0] energy_a,
-      input logic [63:0] energy_b
+      input logic signed [CORR_ACC_WIDTH-1:0] corr_re,
+      input logic signed [CORR_ACC_WIDTH-1:0] corr_im,
+      input logic [ENERGY_ACC_WIDTH-1:0] energy_a,
+      input logic [ENERGY_ACC_WIDTH-1:0] energy_b
   );
-    logic signed [127:0] corr_re_sq;
-    logic signed [127:0] corr_im_sq;
-    logic [127:0] corr_mag_sq;
-    logic [127:0] denominator;
+    logic signed [(2 * CORR_ACC_WIDTH)-1:0] corr_re_sq;
+    logic signed [(2 * CORR_ACC_WIDTH)-1:0] corr_im_sq;
+    logic [SCORE_MAG_WIDTH-1:0] corr_mag_sq;
+    logic [SCORE_DEN_WIDTH-1:0] denominator;
+    logic [SCORE_WORK_WIDTH-1:0] corr_mag_sq_wide;
+    logic [SCORE_WORK_WIDTH-1:0] denominator_wide;
     logic [63:0] numerator_64;
     logic [63:0] denominator_64;
     logic [63:0] quotient_64;
@@ -260,33 +317,35 @@ module cp_stream_metric #(
     int unsigned max_bits;
     int unsigned scale_shift;
     begin
-      if (energy_a == 64'd0 || energy_b == 64'd0) begin
+      if (energy_a == '0 || energy_b == '0) begin
         score_from_acc = '0;
       end else begin
         corr_re_sq = corr_re * corr_re;
         corr_im_sq = corr_im * corr_im;
-        corr_mag_sq = 128'(corr_re_sq) + 128'(corr_im_sq);
-        denominator = 128'(energy_a) * 128'(energy_b);
-        numerator_bits = bit_length_u128(corr_mag_sq) + SCORE_FRAC_BITS;
-        denominator_bits = bit_length_u128(denominator);
+        corr_mag_sq = SCORE_MAG_WIDTH'(corr_re_sq) + SCORE_MAG_WIDTH'(corr_im_sq);
+        denominator = SCORE_DEN_WIDTH'(energy_a) * SCORE_DEN_WIDTH'(energy_b);
+        corr_mag_sq_wide = SCORE_WORK_WIDTH'(corr_mag_sq);
+        denominator_wide = SCORE_WORK_WIDTH'(denominator);
+        numerator_bits = bit_length_score_work(corr_mag_sq_wide) + SCORE_FRAC_BITS;
+        denominator_bits = bit_length_score_work(denominator_wide);
         max_bits = numerator_bits > denominator_bits ? numerator_bits : denominator_bits;
         scale_shift = max_bits > 64 ? max_bits - 64 : 0;
-        numerator_64 = scaled_score_numerator_u64(corr_mag_sq, scale_shift);
-        denominator_64 = scaled_u128_to_u64(denominator, scale_shift);
+        numerator_64 = scaled_score_numerator_u64(corr_mag_sq_wide, scale_shift);
+        denominator_64 = scaled_score_work_to_u64(denominator_wide, scale_shift);
         quotient_64 = denominator_64 == 64'd0 ? {64{1'b1}} : numerator_64 / denominator_64;
-        score_from_acc = saturate_score({64'd0, quotient_64});
+        score_from_acc = saturate_score(quotient_64);
       end
     end
   endfunction
 
   function automatic logic signed [CFO_WIDTH-1:0] saturate_cfo(
-      input logic signed [95:0] value
+      input logic signed [CFO_WORK_WIDTH-1:0] value
   );
-    logic signed [95:0] max_value;
-    logic signed [95:0] min_value;
+    logic signed [CFO_WORK_WIDTH-1:0] max_value;
+    logic signed [CFO_WORK_WIDTH-1:0] min_value;
     begin
-      max_value = 96'(CFO_MAX_HZ);
-      min_value = -(96'(CFO_MAX_HZ));
+      max_value = CFO_WORK_WIDTH'(CFO_MAX_HZ);
+      min_value = -(CFO_WORK_WIDTH'(CFO_MAX_HZ));
       if (value > max_value) begin
         saturate_cfo = CFO_WIDTH'(CFO_MAX_HZ);
       end else if (value < min_value) begin
@@ -298,16 +357,17 @@ module cp_stream_metric #(
   endfunction
 
   function automatic logic signed [CFO_WIDTH-1:0] cfo_from_corr(
-      input logic signed [63:0] corr_re,
-      input logic signed [63:0] corr_im
+      input logic signed [CORR_ACC_WIDTH-1:0] corr_re,
+      input logic signed [CORR_ACC_WIDTH-1:0] corr_im
   );
-    logic signed [95:0] numerator;
-    logic signed [95:0] denominator;
-    logic signed [95:0] quotient_q;
-    logic signed [95:0] rounded_q;
-    logic signed [95:0] hz_value;
-    logic [95:0] numerator_abs;
-    logic [95:0] denominator_abs;
+    logic signed [CFO_WORK_WIDTH-1:0] numerator;
+    logic signed [CFO_WORK_WIDTH-1:0] denominator;
+    logic signed [CFO_WORK_WIDTH-1:0] quotient_q;
+    logic signed [CFO_WORK_WIDTH-1:0] rounded_q;
+    logic signed [CFO_WORK_WIDTH-1:0] rounding_q;
+    logic signed [CFO_WORK_WIDTH-1:0] hz_value;
+    logic [CFO_WORK_WIDTH-1:0] numerator_abs;
+    logic [CFO_WORK_WIDTH-1:0] denominator_abs;
     logic signed [63:0] numerator_64;
     logic signed [63:0] denominator_64;
     logic signed [63:0] quotient_64;
@@ -316,36 +376,40 @@ module cp_stream_metric #(
     int unsigned max_bits;
     int unsigned scale_shift;
     begin
-      if (corr_re == 64'sd0) begin
-        if (corr_im < 64'sd0) begin
+      if (corr_re == '0) begin
+        if (corr_im[CORR_ACC_WIDTH-1]) begin
           cfo_from_corr = CFO_WIDTH'(CFO_MAX_HZ);
-        end else if (corr_im > 64'sd0) begin
+        end else if (corr_im != '0) begin
           cfo_from_corr = -(CFO_WIDTH'(CFO_MAX_HZ));
         end else begin
           cfo_from_corr = '0;
         end
-      end else if (corr_re < 64'sd0) begin
-        cfo_from_corr = corr_im <= 64'sd0 ? CFO_WIDTH'(CFO_MAX_HZ)
-                                           : -(CFO_WIDTH'(CFO_MAX_HZ));
+      end else if (corr_re[CORR_ACC_WIDTH-1]) begin
+        cfo_from_corr = (corr_im[CORR_ACC_WIDTH-1] || corr_im == '0) ?
+            CFO_WIDTH'(CFO_MAX_HZ) : -(CFO_WIDTH'(CFO_MAX_HZ));
       end else begin
-        numerator = -(96'(corr_im)) * 96'(CFO_GAIN_Q);
-        denominator = 96'(corr_re);
-        numerator_abs = numerator[95] ? (~numerator + 96'd1) : numerator;
-        denominator_abs = denominator[95:0];
-        numerator_bits = bit_length_u96(numerator_abs);
-        denominator_bits = bit_length_u96(denominator_abs);
+        numerator = -(extend_corr_to_cfo(corr_im)) * CFO_WORK_WIDTH'(CFO_GAIN_Q);
+        denominator = extend_corr_to_cfo(corr_re);
+        numerator_abs = numerator[CFO_WORK_WIDTH-1] ? (~numerator + CFO_WORK_WIDTH'(1)) :
+                        numerator;
+        denominator_abs = denominator[CFO_WORK_WIDTH-1] ? (~denominator + CFO_WORK_WIDTH'(1)) :
+                          denominator;
+        numerator_bits = bit_length_cfo_work(numerator_abs);
+        denominator_bits = bit_length_cfo_work(denominator_abs);
         max_bits = numerator_bits > denominator_bits ? numerator_bits : denominator_bits;
         scale_shift = max_bits > 63 ? max_bits - 63 : 0;
-        numerator_64 = scaled_s96_to_s64(numerator, scale_shift);
-        denominator_64 = scaled_s96_to_s64(denominator, scale_shift);
+        numerator_64 = scaled_cfo_work_to_s64(numerator, scale_shift);
+        denominator_64 = scaled_cfo_work_to_s64(denominator, scale_shift);
         if (denominator_64 == 64'sd0) begin
-          quotient_q = numerator[95] ? -(96'(CFO_MAX_HZ) <<< CFO_GAIN_FRAC_BITS)
-                                     : (96'(CFO_MAX_HZ) <<< CFO_GAIN_FRAC_BITS);
+          quotient_q = numerator[CFO_WORK_WIDTH-1] ?
+              -(CFO_WORK_WIDTH'(CFO_MAX_HZ) <<< CFO_GAIN_FRAC_BITS) :
+              (CFO_WORK_WIDTH'(CFO_MAX_HZ) <<< CFO_GAIN_FRAC_BITS);
         end else begin
           quotient_64 = numerator_64 / denominator_64;
-          quotient_q = {{32{quotient_64[63]}}, quotient_64};
+          quotient_q = {{(CFO_WORK_WIDTH - 64){quotient_64[63]}}, quotient_64};
         end
-        rounded_q = quotient_q + (96'sd1 <<< (CFO_GAIN_FRAC_BITS - 1));
+        rounding_q = CFO_WORK_WIDTH'(1) <<< (CFO_GAIN_FRAC_BITS - 1);
+        rounded_q = quotient_q + rounding_q;
         hz_value = rounded_q >>> CFO_GAIN_FRAC_BITS;
         cfo_from_corr = saturate_cfo(hz_value);
       end
@@ -439,26 +503,34 @@ module cp_stream_metric #(
       out_ok <= 1'b0;
 
       if (pending_valid_q) begin
-        logic signed [63:0] next_corr_re;
-        logic signed [63:0] next_corr_im;
-        logic [63:0] next_energy_a;
-        logic [63:0] next_energy_b;
+        logic signed [CORR_ACC_WIDTH-1:0] next_corr_re;
+        logic signed [CORR_ACC_WIDTH-1:0] next_corr_im;
+        logic [ENERGY_ACC_WIDTH-1:0] next_energy_a;
+        logic [ENERGY_ACC_WIDTH-1:0] next_energy_b;
         logic [31:0] next_ring_count;
         logic ring_full;
         logic metric_ok;
 
         ring_full = ring_count_q >= 32'(GUARD_SAMPLES);
-        next_corr_re = ring_full ? corr_re_sum_q + pending_prod_re_q - old_prod_re_q :
-                                   corr_re_sum_q + pending_prod_re_q;
-        next_corr_im = ring_full ? corr_im_sum_q + pending_prod_im_q - old_prod_im_q :
-                                   corr_im_sum_q + pending_prod_im_q;
-        next_energy_a = ring_full ? energy_a_sum_q + pending_energy_a_q - old_energy_a_q :
-                                    energy_a_sum_q + pending_energy_a_q;
-        next_energy_b = ring_full ? energy_b_sum_q + pending_energy_b_q - old_energy_b_q :
-                                    energy_b_sum_q + pending_energy_b_q;
+        next_corr_re = ring_full ?
+            corr_re_sum_q + extend_corr_sample_to_acc(pending_prod_re_q) -
+                extend_corr_sample_to_acc(old_prod_re_q) :
+            corr_re_sum_q + extend_corr_sample_to_acc(pending_prod_re_q);
+        next_corr_im = ring_full ?
+            corr_im_sum_q + extend_corr_sample_to_acc(pending_prod_im_q) -
+                extend_corr_sample_to_acc(old_prod_im_q) :
+            corr_im_sum_q + extend_corr_sample_to_acc(pending_prod_im_q);
+        next_energy_a = ring_full ?
+            energy_a_sum_q + extend_energy_sample_to_acc(pending_energy_a_q) -
+                extend_energy_sample_to_acc(old_energy_a_q) :
+            energy_a_sum_q + extend_energy_sample_to_acc(pending_energy_a_q);
+        next_energy_b = ring_full ?
+            energy_b_sum_q + extend_energy_sample_to_acc(pending_energy_b_q) -
+                extend_energy_sample_to_acc(old_energy_b_q) :
+            energy_b_sum_q + extend_energy_sample_to_acc(pending_energy_b_q);
         next_ring_count = ring_full ? ring_count_q : ring_count_q + 1'b1;
         metric_ok = next_ring_count >= 32'(GUARD_SAMPLES) &&
-            next_energy_a != 64'd0 && next_energy_b != 64'd0;
+            next_energy_a != '0 && next_energy_b != '0;
 
         corr_re_sum_q <= next_corr_re;
         corr_im_sum_q <= next_corr_im;
