@@ -44,7 +44,9 @@ module null_detector #(
   localparam logic [RATIO_WIDTH-1:0] RATIO_ONE =
       RATIO_WIDTH'(1) << RATIO_FRAC_BITS;
 
+  (* ram_style = "distributed", ramstyle = "MLAB" *)
   logic [POWER_WIDTH-1:0] fast_history [0:FAST_WINDOW_SAMPLES-1];
+  (* ram_style = "block", ramstyle = "M10K" *)
   logic [POWER_WIDTH-1:0] slow_history [0:SLOW_WINDOW_SAMPLES-1];
 
   logic [FAST_POS_WIDTH-1:0] fast_pos_q;

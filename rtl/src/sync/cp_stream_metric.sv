@@ -30,17 +30,17 @@ module cp_stream_metric #(
   localparam int GUARD_ADDR_WIDTH = GUARD_SAMPLES <= 2 ? 1 : $clog2(GUARD_SAMPLES);
   localparam int SAMPLE_COUNT_LIMIT = FFT_SAMPLES + GUARD_SAMPLES + 1;
 
-  (* ramstyle = "M10K" *)
+  (* ram_style = "block", ramstyle = "M10K" *)
   logic signed [SAMPLE_WIDTH-1:0] delay_i_mem [0:FFT_SAMPLES-1];
-  (* ramstyle = "M10K" *)
+  (* ram_style = "block", ramstyle = "M10K" *)
   logic signed [SAMPLE_WIDTH-1:0] delay_q_mem [0:FFT_SAMPLES-1];
-  (* ramstyle = "M10K" *)
+  (* ram_style = "block", ramstyle = "M10K" *)
   logic signed [63:0] prod_re_mem [0:GUARD_SAMPLES-1];
-  (* ramstyle = "M10K" *)
+  (* ram_style = "block", ramstyle = "M10K" *)
   logic signed [63:0] prod_im_mem [0:GUARD_SAMPLES-1];
-  (* ramstyle = "M10K" *)
+  (* ram_style = "block", ramstyle = "M10K" *)
   logic [63:0] energy_a_mem [0:GUARD_SAMPLES-1];
-  (* ramstyle = "M10K" *)
+  (* ram_style = "block", ramstyle = "M10K" *)
   logic [63:0] energy_b_mem [0:GUARD_SAMPLES-1];
 
   logic signed [SAMPLE_WIDTH-1:0] delay_i_rd_q;

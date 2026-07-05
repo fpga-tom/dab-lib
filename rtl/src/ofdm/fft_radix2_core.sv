@@ -56,9 +56,9 @@ module fft_radix2_core
   logic signed [TWIDDLE_WIDTH-1:0] twiddle_i_q;
   logic frame_error_q;
 
-  (* ramstyle = "M20K" *)
+  (* ram_style = "block", ramstyle = "M20K" *)
   logic signed [INTERNAL_WIDTH-1:0] mem_i [0:FFT_SAMPLES-1];
-  (* ramstyle = "M20K" *)
+  (* ram_style = "block", ramstyle = "M20K" *)
   logic signed [INTERNAL_WIDTH-1:0] mem_q [0:FFT_SAMPLES-1];
 
   logic port_a_we;

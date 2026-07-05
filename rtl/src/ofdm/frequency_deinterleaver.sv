@@ -44,12 +44,15 @@ module frequency_deinterleaver
   logic [DAB_OFDM_DATA_INDEX_WIDTH-1:0] emit_read_carrier_index_q;
   logic emit_read_symbol_done_q;
 
+  (* ram_style = "block", ramstyle = "M10K" *)
   logic signed [CARRIER_WIDTH-1:0] carrier_i_mem [0:DAB_OFDM_ACTIVE_CARRIERS-1];
+  (* ram_style = "block", ramstyle = "M10K" *)
   logic signed [CARRIER_WIDTH-1:0] carrier_q_mem [0:DAB_OFDM_ACTIVE_CARRIERS-1];
 
   logic input_fire;
   logic generator_step;
   logic output_can_advance;
+  logic output_emit_read;
   logic candidate_accepted;
   logic [DAB_OFDM_ACTIVE_INDEX_WIDTH-1:0] mapped_source_index;
 
@@ -62,6 +65,7 @@ module frequency_deinterleaver
   endfunction
 
   assign output_can_advance = !out_valid || out_ready;
+  assign output_emit_read = !clear && output_can_advance && emit_read_valid_q;
   assign in_ready = (state_q == STATE_LOAD) && output_can_advance && !emit_read_valid_q;
   assign input_fire = in_valid && in_ready;
   assign generator_step = (state_q == STATE_EMIT) &&
@@ -71,6 +75,18 @@ module frequency_deinterleaver
                               (lcg_p_q <= 11'd1792) &&
                               (lcg_p_q != 11'd1024);
   assign mapped_source_index = DAB_OFDM_ACTIVE_INDEX_WIDTH'(lcg_p_q - 11'd256);
+
+  always_ff @(posedge clk) begin
+    if (input_fire) begin
+      carrier_i_mem[load_index_q] <= in_i;
+      carrier_q_mem[load_index_q] <= in_q;
+    end
+
+    if (output_emit_read) begin
+      out_i <= carrier_i_mem[emit_read_source_index_q];
+      out_q <= carrier_q_mem[emit_read_source_index_q];
+    end
+  end
 
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
@@ -84,8 +100,6 @@ module frequency_deinterleaver
       emit_read_carrier_index_q <= '0;
       emit_read_symbol_done_q <= 1'b0;
       out_valid <= 1'b0;
-      out_i <= '0;
-      out_q <= '0;
       out_carrier_index <= '0;
       out_source_index <= '0;
       out_symbol_start_sample <= '0;
@@ -101,8 +115,6 @@ module frequency_deinterleaver
       emit_read_carrier_index_q <= '0;
       emit_read_symbol_done_q <= 1'b0;
       out_valid <= 1'b0;
-      out_i <= '0;
-      out_q <= '0;
       out_carrier_index <= '0;
       out_source_index <= '0;
       out_symbol_start_sample <= '0;
@@ -114,8 +126,6 @@ module frequency_deinterleaver
 
         if (emit_read_valid_q) begin
           out_valid <= 1'b1;
-          out_i <= carrier_i_mem[emit_read_source_index_q];
-          out_q <= carrier_q_mem[emit_read_source_index_q];
           out_carrier_index <= emit_read_carrier_index_q;
           out_source_index <= emit_read_source_index_q;
           out_symbol_start_sample <= symbol_start_sample_q;
@@ -131,8 +141,6 @@ module frequency_deinterleaver
       end
 
       if (input_fire) begin
-        carrier_i_mem[load_index_q] <= in_i;
-        carrier_q_mem[load_index_q] <= in_q;
         if (load_index_q == '0) begin
           symbol_start_sample_q <= in_symbol_start_sample;
         end

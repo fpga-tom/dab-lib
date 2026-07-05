@@ -45,9 +45,9 @@ module carrier_mapper
   logic [63:0] symbol_start_sample_q;
   logic low_data_valid_q;
 
-  (* ramstyle = "M10K" *)
+  (* ram_style = "block", ramstyle = "M10K" *)
   logic signed [CARRIER_WIDTH-1:0] low_i_mem [0:DAB_OFDM_ACTIVE_CARRIER_HALF];
-  (* ramstyle = "M10K" *)
+  (* ram_style = "block", ramstyle = "M10K" *)
   logic signed [CARRIER_WIDTH-1:0] low_q_mem [0:DAB_OFDM_ACTIVE_CARRIER_HALF];
   logic signed [CARRIER_WIDTH-1:0] low_i_rd_q;
   logic signed [CARRIER_WIDTH-1:0] low_q_rd_q;

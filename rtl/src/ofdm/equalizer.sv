@@ -45,7 +45,9 @@ module equalizer
   logic output_can_advance;
   logic stage_can_accept;
 
+  (* ram_style = "block", ramstyle = "M10K" *)
   logic signed [COEFF_WIDTH-1:0] channel_i_mem [0:DAB_OFDM_ACTIVE_CARRIERS-1];
+  (* ram_style = "block", ramstyle = "M10K" *)
   logic signed [COEFF_WIDTH-1:0] channel_q_mem [0:DAB_OFDM_ACTIVE_CARRIERS-1];
 
   logic signed [COEFF_WIDTH-1:0] channel_i_rd_q;

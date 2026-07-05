@@ -57,7 +57,9 @@ module cp_metric_engine #(
 
   state_t state_q;
 
+  (* ram_style = "block", ramstyle = "M10K" *)
   logic signed [SAMPLE_WIDTH-1:0] prefix_i_mem [0:GUARD_SAMPLES-1];
+  (* ram_style = "block", ramstyle = "M10K" *)
   logic signed [SAMPLE_WIDTH-1:0] prefix_q_mem [0:GUARD_SAMPLES-1];
 
   logic [63:0] fft_start_sample_q;

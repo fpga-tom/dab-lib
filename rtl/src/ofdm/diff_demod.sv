@@ -43,7 +43,9 @@ module diff_demod
   logic output_can_advance;
   logic stage_can_accept;
 
+  (* ram_style = "block", ramstyle = "M10K" *)
   logic signed [CARRIER_WIDTH-1:0] prev_i_mem [0:DAB_OFDM_ACTIVE_CARRIERS-1];
+  (* ram_style = "block", ramstyle = "M10K" *)
   logic signed [CARRIER_WIDTH-1:0] prev_q_mem [0:DAB_OFDM_ACTIVE_CARRIERS-1];
 
   logic signed [CARRIER_WIDTH-1:0] prev_i_rd_q;
