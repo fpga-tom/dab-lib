@@ -15,6 +15,9 @@ module dab_pipeline_top
     parameter int RATIO_WIDTH = 24,
     parameter int TIMING_WIDTH = 24,
     parameter int QPSK_EXACT_NORMALIZE = 0,
+    parameter int QPSK_RAW_SHIFT =
+        DAB_OFDM_CARRIER_WIDTH > DAB_OFDM_SOFTBIT_WIDTH ?
+        DAB_OFDM_CARRIER_WIDTH - DAB_OFDM_SOFTBIT_WIDTH : 0,
     parameter int ENABLE_CHANNEL_EQUALIZER = 0,
     parameter int FFT_APPLY_BLOCK_EXP = 0,
     parameter int GUARD_SAMPLES = 504,
@@ -1177,7 +1180,8 @@ module dab_pipeline_top
   );
 
   qpsk_softbits #(
-      .EXACT_NORMALIZE(QPSK_EXACT_NORMALIZE)
+      .EXACT_NORMALIZE(QPSK_EXACT_NORMALIZE),
+      .RAW_SHIFT(QPSK_RAW_SHIFT)
   ) u_qpsk_softbits (
       .clk(clk),
       .rst_n(rst_n),

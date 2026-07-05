@@ -15,6 +15,9 @@ module dab_pipeline_top_quartus_fft
     parameter int RATIO_WIDTH = 24,
     parameter int TIMING_WIDTH = 24,
     parameter int QPSK_EXACT_NORMALIZE = 0,
+    parameter int QPSK_RAW_SHIFT =
+        DAB_OFDM_CARRIER_WIDTH > DAB_OFDM_SOFTBIT_WIDTH ?
+        DAB_OFDM_CARRIER_WIDTH - DAB_OFDM_SOFTBIT_WIDTH : 0,
     parameter int ENABLE_CHANNEL_EQUALIZER = 0,
     parameter int GUARD_SAMPLES = 504,
     parameter int FFT_SAMPLES = DAB_OFDM_FFT_SAMPLES,
@@ -111,6 +114,7 @@ module dab_pipeline_top_quartus_fft
       .RATIO_WIDTH(RATIO_WIDTH),
       .TIMING_WIDTH(TIMING_WIDTH),
       .QPSK_EXACT_NORMALIZE(QPSK_EXACT_NORMALIZE),
+      .QPSK_RAW_SHIFT(QPSK_RAW_SHIFT),
       .ENABLE_CHANNEL_EQUALIZER(ENABLE_CHANNEL_EQUALIZER),
       .GUARD_SAMPLES(GUARD_SAMPLES),
       .FFT_SAMPLES(FFT_SAMPLES)
