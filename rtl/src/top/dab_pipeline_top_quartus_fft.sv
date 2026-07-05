@@ -14,6 +14,7 @@ module dab_pipeline_top_quartus_fft
     parameter int CFO_WIDTH = 32,
     parameter int RATIO_WIDTH = 24,
     parameter int TIMING_WIDTH = 24,
+    parameter int QPSK_EXACT_NORMALIZE = 0,
     parameter int GUARD_SAMPLES = 504,
     parameter int FFT_SAMPLES = DAB_OFDM_FFT_SAMPLES,
     parameter int FFT_IP_INPUT_WIDTH = DAB_OFDM_SAMPLE_WIDTH,
@@ -108,6 +109,7 @@ module dab_pipeline_top_quartus_fft
       .CFO_WIDTH(CFO_WIDTH),
       .RATIO_WIDTH(RATIO_WIDTH),
       .TIMING_WIDTH(TIMING_WIDTH),
+      .QPSK_EXACT_NORMALIZE(QPSK_EXACT_NORMALIZE),
       .GUARD_SAMPLES(GUARD_SAMPLES),
       .FFT_SAMPLES(FFT_SAMPLES)
   ) u_pipeline (

@@ -14,6 +14,7 @@ module dab_pipeline_top
     parameter int CFO_WIDTH = 32,
     parameter int RATIO_WIDTH = 24,
     parameter int TIMING_WIDTH = 24,
+    parameter int QPSK_EXACT_NORMALIZE = 0,
     parameter int GUARD_SAMPLES = 504,
     parameter int FFT_SAMPLES = DAB_OFDM_FFT_SAMPLES
 ) (
@@ -1122,7 +1123,9 @@ module dab_pipeline_top
       .out_symbol_done(deint_out_symbol_done)
   );
 
-  qpsk_softbits u_qpsk_softbits (
+  qpsk_softbits #(
+      .EXACT_NORMALIZE(QPSK_EXACT_NORMALIZE)
+  ) u_qpsk_softbits (
       .clk(clk),
       .rst_n(rst_n),
       .clear(clear),

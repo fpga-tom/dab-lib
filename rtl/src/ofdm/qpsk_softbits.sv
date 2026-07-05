@@ -4,7 +4,9 @@ module qpsk_softbits
   import dab_ofdm_pkg::*;
 #(
     parameter int CARRIER_WIDTH = DAB_OFDM_CARRIER_WIDTH,
-    parameter int SOFTBIT_WIDTH = DAB_OFDM_SOFTBIT_WIDTH
+    parameter int SOFTBIT_WIDTH = DAB_OFDM_SOFTBIT_WIDTH,
+    parameter int EXACT_NORMALIZE = 1,
+    parameter int RAW_SHIFT = CARRIER_WIDTH > SOFTBIT_WIDTH ? CARRIER_WIDTH - SOFTBIT_WIDTH : 0
 ) (
     input  wire logic clk,
     input  wire logic rst_n,
@@ -31,13 +33,21 @@ module qpsk_softbits
   localparam int ISQRT_ONE_BIT = ((POWER_WIDTH - 1) / 2) * 2;
   localparam int NUM_WIDTH = CARRIER_WIDTH + SOFTBIT_WIDTH + 1;
   localparam int DEN_WIDTH = CARRIER_WIDTH + 2;
+  localparam int RAW_WIDTH = CARRIER_WIDTH + 1;
 
   logic accept;
   logic [MAG_WIDTH-1:0] magnitude;
 
   assign in_ready = !out_valid || out_ready;
   assign accept = in_valid && in_ready;
-  assign magnitude = complex_magnitude(in_i, in_q);
+
+  generate
+    if (EXACT_NORMALIZE != 0) begin : gen_exact_magnitude
+      assign magnitude = complex_magnitude(in_i, in_q);
+    end else begin : gen_no_magnitude
+      assign magnitude = '0;
+    end
+  endgenerate
 
   function automatic logic [MAG_WIDTH-1:0] isqrt_power(
       input logic [POWER_WIDTH-1:0] value
@@ -140,6 +150,33 @@ module qpsk_softbits
     end
   endfunction
 
+  function automatic logic signed [SOFTBIT_WIDTH-1:0] raw_softbit_from_component(
+      input logic signed [CARRIER_WIDTH-1:0] component
+  );
+    logic signed [RAW_WIDTH-1:0] inverted;
+    logic signed [RAW_WIDTH-1:0] shifted;
+    logic signed [RAW_WIDTH-1:0] soft_max;
+    logic signed [RAW_WIDTH-1:0] soft_min;
+    begin
+      inverted = -({component[CARRIER_WIDTH-1], component});
+      if (RAW_SHIFT == 0) begin
+        shifted = inverted;
+      end else begin
+        shifted = inverted >>> RAW_SHIFT;
+      end
+
+      soft_max = (RAW_WIDTH'(1) <<< (SOFTBIT_WIDTH - 1)) - RAW_WIDTH'(1);
+      soft_min = -(RAW_WIDTH'(1) <<< (SOFTBIT_WIDTH - 1));
+      if (shifted > soft_max) begin
+        raw_softbit_from_component = {1'b0, {(SOFTBIT_WIDTH - 1){1'b1}}};
+      end else if (shifted < soft_min) begin
+        raw_softbit_from_component = {1'b1, {(SOFTBIT_WIDTH - 1){1'b0}}};
+      end else begin
+        raw_softbit_from_component = SOFTBIT_WIDTH'(shifted);
+      end
+    end
+  endfunction
+
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       out_valid <= 1'b0;
@@ -158,8 +195,13 @@ module qpsk_softbits
     end else begin
       if (accept) begin
         out_valid <= 1'b1;
-        out_soft_a <= softbit_from_component(in_i, magnitude);
-        out_soft_b <= softbit_from_component(in_q, magnitude);
+        if (EXACT_NORMALIZE != 0) begin
+          out_soft_a <= softbit_from_component(in_i, magnitude);
+          out_soft_b <= softbit_from_component(in_q, magnitude);
+        end else begin
+          out_soft_a <= raw_softbit_from_component(in_i);
+          out_soft_b <= raw_softbit_from_component(in_q);
+        end
         out_carrier_index <= in_carrier_index;
         out_symbol_start_sample <= in_symbol_start_sample;
         out_symbol_done <= in_symbol_done;
