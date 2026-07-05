@@ -26,33 +26,44 @@ module qpsk_softbits
     output logic [63:0] out_symbol_start_sample,
     output logic out_symbol_done
 );
+  localparam int MAG_WIDTH = CARRIER_WIDTH;
+  localparam int POWER_WIDTH = 2 * CARRIER_WIDTH;
+  localparam int ISQRT_ONE_BIT = ((POWER_WIDTH - 1) / 2) * 2;
+  localparam int NUM_WIDTH = CARRIER_WIDTH + SOFTBIT_WIDTH + 1;
+  localparam int DEN_WIDTH = CARRIER_WIDTH + 2;
+
   logic accept;
-  logic [31:0] magnitude;
+  logic [MAG_WIDTH-1:0] magnitude;
 
   assign in_ready = !out_valid || out_ready;
   assign accept = in_valid && in_ready;
   assign magnitude = complex_magnitude(in_i, in_q);
 
-  function automatic logic [31:0] isqrt_u64(input logic [63:0] value);
-    logic [63:0] op;
-    logic [63:0] res;
-    logic [63:0] one;
+  function automatic logic [MAG_WIDTH-1:0] isqrt_power(
+      input logic [POWER_WIDTH-1:0] value
+  );
+    logic [POWER_WIDTH-1:0] op;
+    logic [POWER_WIDTH-1:0] res;
+    logic [POWER_WIDTH-1:0] one;
+    logic [POWER_WIDTH:0] trial;
     integer step;
     begin
       op = value;
-      res = 64'd0;
-      one = 64'h4000_0000_0000_0000;
+      res = '0;
+      one = '0;
+      one[ISQRT_ONE_BIT] = 1'b1;
 
-      for (step = 0; step < 32; step = step + 1) begin
+      for (step = 0; step < MAG_WIDTH; step = step + 1) begin
         if (one > op) begin
           one = one >> 2;
         end
       end
 
-      for (step = 0; step < 32; step = step + 1) begin
-        if (one != 64'd0) begin
-          if (op >= (res + one)) begin
-            op = op - (res + one);
+      for (step = 0; step < MAG_WIDTH; step = step + 1) begin
+        if (one != '0) begin
+          trial = {1'b0, res} + {1'b0, one};
+          if ({1'b0, op} >= trial) begin
+            op = POWER_WIDTH'({1'b0, op} - trial);
             res = (res >> 1) + one;
           end else begin
             res = res >> 1;
@@ -61,51 +72,67 @@ module qpsk_softbits
         end
       end
 
-      isqrt_u64 = res[31:0];
+      isqrt_power = res[MAG_WIDTH-1:0];
     end
   endfunction
 
-  function automatic logic [31:0] complex_magnitude(
+  function automatic logic [CARRIER_WIDTH-1:0] abs_carrier(
+      input logic signed [CARRIER_WIDTH-1:0] value
+  );
+    logic [CARRIER_WIDTH-1:0] value_u;
+    begin
+      value_u = value;
+      abs_carrier = value[CARRIER_WIDTH-1] ? (~value_u + CARRIER_WIDTH'(1)) : value_u;
+    end
+  endfunction
+
+  function automatic logic [MAG_WIDTH-1:0] complex_magnitude(
       input logic signed [CARRIER_WIDTH-1:0] carrier_i,
       input logic signed [CARRIER_WIDTH-1:0] carrier_q
   );
-    longint signed i_ext;
-    longint signed q_ext;
-    longint unsigned abs_i;
-    longint unsigned abs_q;
-    longint unsigned power;
+    logic [CARRIER_WIDTH-1:0] abs_i;
+    logic [CARRIER_WIDTH-1:0] abs_q;
+    logic [POWER_WIDTH-1:0] i_sq;
+    logic [POWER_WIDTH-1:0] q_sq;
+    logic [POWER_WIDTH-1:0] power;
     begin
-      i_ext = {{(64 - CARRIER_WIDTH){carrier_i[CARRIER_WIDTH-1]}}, carrier_i};
-      q_ext = {{(64 - CARRIER_WIDTH){carrier_q[CARRIER_WIDTH-1]}}, carrier_q};
-      abs_i = i_ext < 0 ? -i_ext : i_ext;
-      abs_q = q_ext < 0 ? -q_ext : q_ext;
-      power = (abs_i * abs_i) + (abs_q * abs_q);
-      complex_magnitude = isqrt_u64(power);
+      abs_i = abs_carrier(carrier_i);
+      abs_q = abs_carrier(carrier_q);
+      i_sq = POWER_WIDTH'(abs_i * abs_i);
+      q_sq = POWER_WIDTH'(abs_q * abs_q);
+      power = i_sq + q_sq;
+      complex_magnitude = isqrt_power(power);
     end
   endfunction
 
   function automatic logic signed [SOFTBIT_WIDTH-1:0] softbit_from_component(
       input logic signed [CARRIER_WIDTH-1:0] component,
-      input logic [31:0] carrier_magnitude
+      input logic [MAG_WIDTH-1:0] carrier_magnitude
   );
-    longint signed component_ext;
-    longint signed numerator;
-    longint signed denominator;
-    longint signed quotient;
+    logic signed [NUM_WIDTH-1:0] component_ext;
+    logic signed [NUM_WIDTH-1:0] numerator;
+    logic signed [DEN_WIDTH-1:0] denominator;
+    logic signed [NUM_WIDTH-1:0] denominator_ext;
+    logic signed [NUM_WIDTH-1:0] quotient;
+    logic signed [NUM_WIDTH-1:0] soft_max;
+    logic signed [NUM_WIDTH-1:0] soft_min;
     begin
-      if (carrier_magnitude == 32'd0) begin
-        quotient = 0;
+      soft_max = (NUM_WIDTH'(1) <<< (SOFTBIT_WIDTH - 1)) - NUM_WIDTH'(1);
+      soft_min = -(NUM_WIDTH'(1) <<< (SOFTBIT_WIDTH - 1));
+
+      if (carrier_magnitude == '0) begin
+        quotient = '0;
       end else begin
-        component_ext = {{(64 - CARRIER_WIDTH){component[CARRIER_WIDTH-1]}}, component};
-        numerator = -component_ext * 64'sd255;
-        denominator = {32'd0, carrier_magnitude};
-        denominator = denominator <<< 1;
-        quotient = numerator / denominator;
+        component_ext = {{(NUM_WIDTH - CARRIER_WIDTH){component[CARRIER_WIDTH-1]}}, component};
+        numerator = component_ext - (component_ext <<< SOFTBIT_WIDTH);
+        denominator = $signed({1'b0, carrier_magnitude, 1'b0});
+        denominator_ext = {{(NUM_WIDTH - DEN_WIDTH){1'b0}}, denominator};
+        quotient = numerator / denominator_ext;
       end
 
-      if (quotient > 127) begin
-        softbit_from_component = 8'sd127;
-      end else if (quotient < -128) begin
+      if (quotient > soft_max) begin
+        softbit_from_component = {1'b0, {(SOFTBIT_WIDTH - 1){1'b1}}};
+      end else if (quotient < soft_min) begin
         softbit_from_component = {1'b1, {(SOFTBIT_WIDTH - 1){1'b0}}};
       end else begin
         softbit_from_component = SOFTBIT_WIDTH'(quotient);
