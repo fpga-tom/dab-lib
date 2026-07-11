@@ -839,16 +839,18 @@ static int compare_deinterleaver_state_stage(const char *stage,
 
     for (i = 0u; i < conv_len; ++i) {
         uint32_t j;
-        const uint32_t base = i * DAB_MSC_CONV_DEINTERLEAVER_DEPTH;
 
         for (j = 0u; j < DAB_MSC_CONV_DEINTERLEAVER_DEPTH; ++j) {
-            if ((int)ours->regs[base + j] != (int)ref[i][j]) {
+            int8_t ours_value = 0;
+
+            if (dab_msc_deinterleaver_get_history(ours, i, j, &ours_value) != 0 ||
+                (int)ours_value != (int)ref[i][j]) {
                 fprintf(stderr,
                         "%s-mismatch bit=%u delay=%u ours=%d ref=%d\n",
                         stage,
                         i,
                         j,
-                        (int)ours->regs[base + j],
+                        (int)ours_value,
                         (int)ref[i][j]);
                 return 1;
             }
@@ -870,10 +872,13 @@ static void seed_ref_deinterleaver_state(dab_subch_runtime_t *ref_subch,
 
     for (i = 0u; i < conv_len; ++i) {
         uint32_t j;
-        const uint32_t base = i * DAB_MSC_CONV_DEINTERLEAVER_DEPTH;
 
         for (j = 0u; j < DAB_MSC_CONV_DEINTERLEAVER_DEPTH; ++j) {
-            ref_subch->conv_reg_deintlv[i][j] = (bit_t)ours->regs[base + j];
+            int8_t value = 0;
+
+            if (dab_msc_deinterleaver_get_history(ours, i, j, &value) == 0) {
+                ref_subch->conv_reg_deintlv[i][j] = (bit_t)value;
+            }
         }
     }
 }

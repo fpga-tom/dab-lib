@@ -433,6 +433,51 @@ void test_msc_convolutional_deinterleave_applies_delay_line(void) {
     TEST_ASSERT(out == 1);
 }
 
+void test_msc_convolutional_deinterleave_matches_shift_register(void) {
+    enum { TEST_BITS = 64, TEST_STEPS = 40 };
+    static const uint8_t delays[DAB_MSC_CONV_DEINTERLEAVER_DEPTH] = {
+        15u, 7u, 11u, 3u, 13u, 5u, 9u, 1u, 14u, 6u, 10u, 2u, 12u, 4u, 8u, 0u
+    };
+    dab_msc_deinterleaver_t state;
+    int8_t reference[TEST_BITS][DAB_MSC_CONV_DEINTERLEAVER_DEPTH] = {{0}};
+    int8_t input[TEST_BITS];
+    int8_t output[TEST_BITS];
+    uint32_t step;
+
+    dab_msc_deinterleaver_reset(&state);
+    for (step = 0u; step < TEST_STEPS; ++step) {
+        uint32_t bit;
+
+        for (bit = 0u; bit < TEST_BITS; ++bit) {
+            input[bit] = (int8_t)(((step * 37u) + (bit * 11u)) & 0x7Fu);
+        }
+        TEST_ASSERT(dab_msc_convolutional_deinterleave(&state,
+                                                       input,
+                                                       TEST_BITS,
+                                                       output,
+                                                       TEST_BITS) == 0);
+
+        for (bit = 0u; bit < TEST_BITS; ++bit) {
+            const uint32_t delay = delays[bit & 0x0Fu];
+            uint32_t age;
+            int8_t history_value = 0;
+
+            for (age = DAB_MSC_CONV_DEINTERLEAVER_DEPTH - 1u; age > 0u; --age) {
+                reference[bit][age] = reference[bit][age - 1u];
+            }
+            reference[bit][0] = input[bit];
+            TEST_ASSERT(output[bit] == reference[bit][delay]);
+            for (age = 0u; age < DAB_MSC_CONV_DEINTERLEAVER_DEPTH; ++age) {
+                TEST_ASSERT(dab_msc_deinterleaver_get_history(&state,
+                                                              bit,
+                                                              age,
+                                                              &history_value) == 0);
+                TEST_ASSERT(history_value == reference[bit][age]);
+            }
+        }
+    }
+}
+
 void test_msc_decode_deinterleaved_cif_decodes_synthetic_eep_payload(void) {
     dab_msc_subchannel_t eep = {
         .valid = 1u,

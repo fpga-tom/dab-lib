@@ -37,6 +37,7 @@ void test_msc_process_frame_with_fic_populates_layout(void);
 void test_msc_build_frame_view_tracks_component_offsets(void);
 void test_msc_prepare_decoder_config_resolves_uep_and_eep_segments(void);
 void test_msc_convolutional_deinterleave_applies_delay_line(void);
+void test_msc_convolutional_deinterleave_matches_shift_register(void);
 void test_msc_decode_deinterleaved_cif_decodes_synthetic_eep_payload(void);
 void test_msc_sync_runtimes_prepares_and_resets_decoder_state(void);
 void test_msc_service_filter_decodes_only_selected_audio_subchannel(void);
@@ -113,6 +114,7 @@ int main(void) {
     test_msc_build_frame_view_tracks_component_offsets();
     test_msc_prepare_decoder_config_resolves_uep_and_eep_segments();
     test_msc_convolutional_deinterleave_applies_delay_line();
+    test_msc_convolutional_deinterleave_matches_shift_register();
     test_msc_decode_deinterleaved_cif_decodes_synthetic_eep_payload();
     test_msc_sync_runtimes_prepares_and_resets_decoder_state();
     test_msc_service_filter_decodes_only_selected_audio_subchannel();

@@ -1310,30 +1310,64 @@ void dab_msc_deinterleaver_reset(dab_msc_deinterleaver_t *state) {
     memset(state, 0, sizeof(*state));
 }
 
+int dab_msc_deinterleaver_get_history(const dab_msc_deinterleaver_t *state,
+                                      uint32_t bit_index,
+                                      uint32_t age,
+                                      int8_t *value) {
+    const uint32_t lane = bit_index & (DAB_MSC_CONV_DEINTERLEAVER_DEPTH - 1u);
+    const uint32_t group = bit_index / DAB_MSC_CONV_DEINTERLEAVER_DEPTH;
+    uint32_t slot;
+
+    if (state == 0 || value == 0 || bit_index >= state->conv_len ||
+        age >= DAB_MSC_CONV_DEINTERLEAVER_DEPTH) {
+        return -1;
+    }
+
+    slot = (state->write_index - 1u - age) & (DAB_MSC_CONV_DEINTERLEAVER_DEPTH - 1u);
+    *value = state->regs[((lane * DAB_MSC_CONV_DEINTERLEAVER_DEPTH + slot) *
+                          DAB_MSC_CONV_DEINTERLEAVER_GROUPS) + group];
+    return 0;
+}
+
 int dab_msc_convolutional_deinterleave(dab_msc_deinterleaver_t *state,
                                        const int8_t *input,
                                        uint32_t input_count,
                                        int8_t *output,
                                        uint32_t output_count) {
-    uint32_t i;
+    const uint32_t history_mask = DAB_MSC_CONV_DEINTERLEAVER_DEPTH - 1u;
+    uint32_t write_index;
+    uint32_t lane;
 
     if (state == 0 || input == 0 || output == 0 || input_count == 0u || input_count != output_count ||
         input_count > DAB_MSC_MAX_CONV_BITS) {
         return -1;
     }
 
-    state->conv_len = input_count;
-    for (i = 0u; i < input_count; ++i) {
-        const uint32_t base = i * DAB_MSC_CONV_DEINTERLEAVER_DEPTH;
-        const uint8_t delay = DAB_MSC_DEINTERLEAVER_DELAYS[i & 0x0Fu];
-        uint32_t j;
-
-        for (j = delay; j > 0u; --j) {
-            state->regs[base + j] = state->regs[base + j - 1u];
-        }
-        state->regs[base] = input[i];
-        output[i] = state->regs[base + delay];
+    if (state->conv_len != 0u && state->conv_len != input_count) {
+        dab_msc_deinterleaver_reset(state);
     }
+    state->conv_len = input_count;
+    write_index = state->write_index;
+    for (lane = 0u; lane < DAB_MSC_CONV_DEINTERLEAVER_DEPTH && lane < input_count; ++lane) {
+        const uint8_t delay = DAB_MSC_DEINTERLEAVER_DELAYS[lane];
+        const uint32_t read_index = (write_index - delay) & history_mask;
+        const uint32_t write_base =
+            ((lane * DAB_MSC_CONV_DEINTERLEAVER_DEPTH) + write_index) *
+            DAB_MSC_CONV_DEINTERLEAVER_GROUPS;
+        const uint32_t read_base =
+            ((lane * DAB_MSC_CONV_DEINTERLEAVER_DEPTH) + read_index) *
+            DAB_MSC_CONV_DEINTERLEAVER_GROUPS;
+        uint32_t bit_index = lane;
+        uint32_t group = 0u;
+
+        while (bit_index < input_count) {
+            state->regs[write_base + group] = input[bit_index];
+            output[bit_index] = state->regs[read_base + group];
+            bit_index += DAB_MSC_CONV_DEINTERLEAVER_DEPTH;
+            group++;
+        }
+    }
+    state->write_index = (uint8_t)((write_index + 1u) & history_mask);
 
     return 0;
 }
