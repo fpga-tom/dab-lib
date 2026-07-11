@@ -61,7 +61,8 @@ constexpr int kSpectrumSettingsMenuId = wxID_HIGHEST + 5;
 
 enum class SpectrumDisplayMode {
     RtaBars = 0,
-    FftCurve = 1
+    FftCurve = 1,
+    LedBars = 2
 };
 
 static SpectrumDisplayMode gSpectrumDisplayMode = SpectrumDisplayMode::RtaBars;
@@ -340,10 +341,13 @@ private:
         }
 
         DrawGlText(frame.x + 10, frame.y + 16, wxColour(210, 221, 230), "Spectrum Analyzer");
-        DrawGlText(frame.GetRight() - 205, frame.y + 16, wxColour(120, 146, 163),
-                   gSpectrumDisplayMode == SpectrumDisplayMode::RtaBars
-                       ? "RTA BARS  |  LOG FREQ  |  dBFS"
-                       : "FFT 1024  |  LOG FREQ  |  dBFS");
+        const char *displayLabel = "FFT 1024  |  LOG FREQ  |  dBFS";
+        if (gSpectrumDisplayMode == SpectrumDisplayMode::RtaBars) {
+            displayLabel = "RTA BARS  |  LOG FREQ  |  dBFS";
+        } else if (gSpectrumDisplayMode == SpectrumDisplayMode::LedBars) {
+            displayLabel = "LED BARS  |  LOG FREQ  |  dBFS";
+        }
+        DrawGlText(frame.GetRight() - 205, frame.y + 16, wxColour(120, 146, 163), displayLabel);
 
         for (i = 0; i < visibleBins; ++i) {
             static constexpr float kMinHz = 20.0f;
@@ -388,6 +392,68 @@ private:
                            wxColour(205, 252, 255, 36),
                            wxColour(235, 255, 255, 86));
                 DrawGlLine(x, peakY[i], x + width, peakY[i], wxColour(255, 184, 92, 215), 2.0f);
+            }
+        } else if (gSpectrumDisplayMode == SpectrumDisplayMode::LedBars) {
+            static constexpr float kMinHz = 20.0f;
+            static constexpr float kMaxHz = 20000.0f;
+            const int segmentGap = 2;
+            const int segmentCount = std::clamp(plot.height / 9, 8, 28);
+            const int segmentStride = std::max(4, plot.height / segmentCount);
+            const int segmentHeight = std::max(2, segmentStride - segmentGap);
+
+            for (i = 0; i < visibleBins; ++i) {
+                const float startT = static_cast<float>(i) / static_cast<float>(visibleBins);
+                const float endT = static_cast<float>(i + 1u) / static_cast<float>(visibleBins);
+                const float startHz = kMinHz * std::pow(kMaxHz / kMinHz, startT);
+                const float endHz = kMinHz * std::pow(kMaxHz / kMinHz, endT);
+                const int bandLeft = FrequencyToX(plot, startHz);
+                const int bandRight = FrequencyToX(plot, endHz);
+                const int gap = std::max(2, (bandRight - bandLeft) / 8);
+                const int x = std::min(bandRight - 1, bandLeft + gap);
+                const int width = std::max(3, bandRight - bandLeft - (2 * gap));
+                const float level = std::clamp(VisualLevel(levels_[i]), 0.0f, 1.0f);
+                const float peak = std::clamp(std::max(level, VisualLevel(peaks_[i])), 0.0f, 1.0f);
+                const int litSegments = std::clamp(
+                    static_cast<int>(std::ceil(level * static_cast<float>(segmentCount))),
+                    0,
+                    segmentCount);
+                const int peakSegment = std::clamp(
+                    static_cast<int>(std::ceil(peak * static_cast<float>(segmentCount))) - 1,
+                    0,
+                    segmentCount - 1);
+
+                for (int segment = 0; segment < segmentCount; ++segment) {
+                    const float position = (static_cast<float>(segment) + 0.5f) /
+                                           static_cast<float>(segmentCount);
+                    const bool lit = segment < litSegments;
+                    const bool isPeak = segment == peakSegment && peak > 0.02f;
+                    wxColour base;
+                    wxColour top;
+
+                    if (position >= 0.82f) {
+                        base = lit ? wxColour(190, 30, 25, 255) : wxColour(48, 18, 20, 210);
+                        top = lit ? wxColour(255, 92, 50, 255) : wxColour(72, 25, 24, 220);
+                    } else if (position >= 0.62f) {
+                        base = lit ? wxColour(205, 126, 15, 255) : wxColour(49, 38, 15, 210);
+                        top = lit ? wxColour(255, 220, 48, 255) : wxColour(70, 53, 19, 220);
+                    } else {
+                        base = lit ? wxColour(18, 150, 70, 255) : wxColour(15, 43, 31, 210);
+                        top = lit ? wxColour(78, 245, 116, 255) : wxColour(19, 62, 40, 220);
+                    }
+
+                    const int y = plot.GetBottom() - ((segment + 1) * segmentStride);
+                    DrawGlQuad(x, y, width, segmentHeight, base, top);
+                    if (lit) {
+                        DrawGlLine(x + 1,
+                                   y + 1,
+                                   x + width - 1,
+                                   y + 1,
+                                   wxColour(235, 255, 238, 100));
+                    }
+                    if (isPeak) {
+                        DrawGlRectOutline(wxRect(x, y, width, segmentHeight), wxColour(255, 255, 225, 245));
+                    }
+                }
             }
         } else {
             glBegin(GL_TRIANGLE_STRIP);
@@ -766,18 +832,18 @@ public:
         : wxDialog(parent, wxID_ANY, "Spectrum Settings", wxDefaultPosition, wxDefaultSize,
                    wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER) {
         auto *outer = new wxBoxSizer(wxVERTICAL);
-        wxString displayChoices[] = {"RTA bars", "FFT curve"};
+        wxString displayChoices[] = {"RTA bars", "FFT curve", "LED bars"};
 
         displayModeChoice_ = new wxRadioBox(this,
                                             wxID_ANY,
                                             "Display mode",
                                             wxDefaultPosition,
                                             wxDefaultSize,
-                                            2,
+                                            3,
                                             displayChoices,
                                             1,
                                             wxRA_SPECIFY_COLS);
-        displayModeChoice_->SetSelection(mode == SpectrumDisplayMode::RtaBars ? 0 : 1);
+        displayModeChoice_->SetSelection(static_cast<int>(mode));
 
         auto *buttons = new wxStdDialogButtonSizer();
         buttons->AddButton(new wxButton(this, wxID_OK));
@@ -793,8 +859,7 @@ public:
     }
 
     SpectrumDisplayMode DisplayMode() const {
-        return displayModeChoice_->GetSelection() == 0 ?
-            SpectrumDisplayMode::RtaBars : SpectrumDisplayMode::FftCurve;
+        return static_cast<SpectrumDisplayMode>(displayModeChoice_->GetSelection());
     }
 
 private:
@@ -1120,18 +1185,25 @@ void MainFrame::LoadSpectrumSettings() {
     wxString displayMode;
 
     config.Read("/spectrum/display_mode", &displayMode, "rta_bars");
-    gSpectrumDisplayMode = displayMode == "rta_bars"
-                               ? SpectrumDisplayMode::RtaBars
-                               : SpectrumDisplayMode::FftCurve;
+    if (displayMode == "fft_curve") {
+        gSpectrumDisplayMode = SpectrumDisplayMode::FftCurve;
+    } else if (displayMode == "led_bars") {
+        gSpectrumDisplayMode = SpectrumDisplayMode::LedBars;
+    } else {
+        gSpectrumDisplayMode = SpectrumDisplayMode::RtaBars;
+    }
     spectrumDisplayMode_ = static_cast<int>(gSpectrumDisplayMode);
 }
 
 void MainFrame::SaveSpectrumSettings() {
     wxConfig config("dab-lib");
-    config.Write("/spectrum/display_mode",
-                 static_cast<SpectrumDisplayMode>(spectrumDisplayMode_) == SpectrumDisplayMode::RtaBars
-                     ? "rta_bars"
-                     : "fft_curve");
+    wxString displayMode = "rta_bars";
+    if (static_cast<SpectrumDisplayMode>(spectrumDisplayMode_) == SpectrumDisplayMode::FftCurve) {
+        displayMode = "fft_curve";
+    } else if (static_cast<SpectrumDisplayMode>(spectrumDisplayMode_) == SpectrumDisplayMode::LedBars) {
+        displayMode = "led_bars";
+    }
+    config.Write("/spectrum/display_mode", displayMode);
     config.Flush();
 }
 
