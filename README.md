@@ -48,6 +48,12 @@ The generated installer is written to:
 ctest --test-dir build --output-on-failure
 ```
 
+The SIMD conversion microbenchmark accepts an optional iteration count:
+
+```sh
+./build/dab_simd_bench 20000
+```
+
 ## SDRplay Probe
 
 One-shot real-hardware sanity probe:

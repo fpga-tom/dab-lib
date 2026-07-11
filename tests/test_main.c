@@ -56,6 +56,7 @@ void test_rtlsdr_device_specific_config_propagates_to_samples(void);
 void test_rtlsdr_rejects_invalid_device_specific_config(void);
 void test_simd_scalar_fallback(void);
 void test_simd_convert_and_dot(void);
+void test_simd_complex_convert_vector_and_tail(void);
 void test_audio_eq_zero_input_stays_zero(void);
 void test_audio_spectrum_detects_tone_energy(void);
 void test_sync_acquires_and_tracks(void);
@@ -134,6 +135,7 @@ int main(void) {
     test_rtlsdr_rejects_invalid_device_specific_config();
     test_simd_scalar_fallback();
     test_simd_convert_and_dot();
+    test_simd_complex_convert_vector_and_tail();
     test_audio_eq_zero_input_stays_zero();
     test_audio_spectrum_detects_tone_energy();
     test_sync_acquires_and_tracks();

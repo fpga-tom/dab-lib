@@ -314,6 +314,11 @@ add_executable(dab_sdrplay_probe
 
 target_link_libraries(dab_sdrplay_probe PRIVATE dab)
 
+add_executable(dab_simd_bench
+    tools/dab_simd_bench.c
+)
+target_link_libraries(dab_simd_bench PRIVATE dab)
+
 add_executable(dab_sdrplay_null_probe
     tools/sdrplay_null_probe.c
 )
