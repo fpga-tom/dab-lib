@@ -108,11 +108,25 @@ int dab_prs_score_search_i16(const dab_prs_score_t *score,
                              const dab_sdr_block_view_t *block,
                              const dab_prs_candidate_t *candidate,
                              dab_prs_result_t *result) {
-    const uint64_t search_start = dab_prs_candidate_search_start_sample(candidate);
-    const uint64_t search_end = dab_prs_candidate_search_end_sample(candidate);
+    uint64_t search_start;
+    uint64_t search_end;
+    uint64_t block_start;
+    uint64_t block_end;
+    uint64_t valid_start;
+    uint64_t valid_end;
     uint64_t fft_start_sample;
+    uint32_t guard;
+    uint32_t fft;
+    uint32_t guard_start_offset;
+    uint32_t useful_tail_offset;
+    uint32_t i;
+    double corr_re = 0.0;
+    double corr_im = 0.0;
+    double energy_a = 0.0;
+    double energy_b = 0.0;
+    double best_corr_re = 0.0;
+    double best_corr_im = 0.0;
     float best_score = -1.0f;
-    float best_cfo = 0.0f;
 
     if (score == 0 || block == 0 || candidate == 0 || result == 0) {
         return -1;
@@ -123,27 +137,83 @@ int dab_prs_score_search_i16(const dab_prs_score_t *score,
 
     *result = (dab_prs_result_t){0};
 
-    for (fft_start_sample = search_start; fft_start_sample < search_end; ++fft_start_sample) {
-        float candidate_score;
-        float candidate_cfo;
+    guard = score->config.guard_samples;
+    fft = score->config.fft_samples;
+    search_start = dab_prs_candidate_search_start_sample(candidate);
+    search_end = dab_prs_candidate_search_end_sample(candidate);
+    block_start = block->sample_index;
+    block_end = block_start + block->sample_count;
+    if (block_end < block_start || block->sample_count < fft ||
+        (block->sample_count - fft) < guard) {
+        return 0;
+    }
 
-        if (dab_prs_score_cp_metric_i16(score,
-                                        block,
-                                        fft_start_sample,
-                                        &candidate_score,
-                                        &candidate_cfo) != 0) {
-            continue;
+    valid_start = block_start + guard;
+    valid_end = (block_end - fft) + 1u;
+    if (search_start < valid_start) {
+        search_start = valid_start;
+    }
+    if (search_end > valid_end) {
+        search_end = valid_end;
+    }
+    if (search_start >= search_end) {
+        return 0;
+    }
+
+    guard_start_offset = (uint32_t)((search_start - guard) - block_start);
+    useful_tail_offset = (uint32_t)((search_start + fft - guard) - block_start);
+    for (i = 0u; i < guard; ++i) {
+        const double ai = (double)block->iq_interleaved[2u * (guard_start_offset + i)];
+        const double aq = (double)block->iq_interleaved[(2u * (guard_start_offset + i)) + 1u];
+        const double bi = (double)block->iq_interleaved[2u * (useful_tail_offset + i)];
+        const double bq = (double)block->iq_interleaved[(2u * (useful_tail_offset + i)) + 1u];
+
+        corr_re += (ai * bi) + (aq * bq);
+        corr_im += (aq * bi) - (ai * bq);
+        energy_a += (ai * ai) + (aq * aq);
+        energy_b += (bi * bi) + (bq * bq);
+    }
+
+    for (fft_start_sample = search_start; fft_start_sample < search_end; ++fft_start_sample) {
+        if (energy_a > 0.0 && energy_b > 0.0) {
+            const double score_value = ((corr_re * corr_re) + (corr_im * corr_im)) /
+                                       (energy_a * energy_b);
+            const float candidate_score = (float)score_value;
+
+            if (candidate_score > best_score) {
+                best_score = candidate_score;
+                best_corr_re = corr_re;
+                best_corr_im = corr_im;
+                result->prs_peak_sample = fft_start_sample;
+                result->prs_fft_start_sample = fft_start_sample;
+                result->prs_symbol_start_sample = fft_start_sample - guard;
+                result->prs_score = candidate_score;
+                result->valid = 1;
+            }
         }
 
-        if (candidate_score > best_score) {
-            best_score = candidate_score;
-            best_cfo = candidate_cfo;
-            result->prs_peak_sample = fft_start_sample;
-            result->prs_fft_start_sample = fft_start_sample;
-            result->prs_symbol_start_sample = fft_start_sample - score->config.guard_samples;
-            result->prs_score = candidate_score;
-            result->coarse_freq_error_hz = candidate_cfo;
-            result->valid = 1;
+        if ((fft_start_sample + 1u) < search_end) {
+            const uint32_t incoming_guard_offset = guard_start_offset + guard;
+            const uint32_t incoming_tail_offset = useful_tail_offset + guard;
+            const double old_ai = (double)block->iq_interleaved[2u * guard_start_offset];
+            const double old_aq = (double)block->iq_interleaved[(2u * guard_start_offset) + 1u];
+            const double old_bi = (double)block->iq_interleaved[2u * useful_tail_offset];
+            const double old_bq = (double)block->iq_interleaved[(2u * useful_tail_offset) + 1u];
+            const double new_ai = (double)block->iq_interleaved[2u * incoming_guard_offset];
+            const double new_aq = (double)block->iq_interleaved[(2u * incoming_guard_offset) + 1u];
+            const double new_bi = (double)block->iq_interleaved[2u * incoming_tail_offset];
+            const double new_bq = (double)block->iq_interleaved[(2u * incoming_tail_offset) + 1u];
+
+            corr_re -= (old_ai * old_bi) + (old_aq * old_bq);
+            corr_im -= (old_aq * old_bi) - (old_ai * old_bq);
+            energy_a -= (old_ai * old_ai) + (old_aq * old_aq);
+            energy_b -= (old_bi * old_bi) + (old_bq * old_bq);
+            corr_re += (new_ai * new_bi) + (new_aq * new_bq);
+            corr_im += (new_aq * new_bi) - (new_ai * new_bq);
+            energy_a += (new_ai * new_ai) + (new_aq * new_aq);
+            energy_b += (new_bi * new_bi) + (new_bq * new_bq);
+            guard_start_offset++;
+            useful_tail_offset++;
         }
     }
 
@@ -152,7 +222,9 @@ int dab_prs_score_search_i16(const dab_prs_score_t *score,
     }
 
     result->prs_score = best_score;
-    result->coarse_freq_error_hz = best_cfo;
+    result->coarse_freq_error_hz = (float)(-atan2(best_corr_im, best_corr_re) *
+                                           (double)score->config.sample_rate /
+                                           (DAB_TWO_PI_D * (double)fft));
     return 1;
 }
 

@@ -58,6 +58,7 @@ void test_sync_falls_back_to_acquire_after_bad_tracking(void);
 void test_prs_candidate_from_null_uses_mode_i_boundaries(void);
 void test_prs_score_search_i16_finds_cp_aligned_fft_start(void);
 void test_prs_score_cp_metric_i16_estimates_positive_cfo_with_positive_sign(void);
+void test_prs_score_search_i16_matches_brute_force_metrics(void);
 void test_prs_reference_score_f32_distinguishes_match_from_mismatch(void);
 void test_prs_reference_template_f32_scores_only_active_bins(void);
 void test_prs_template_tracks_active_bins(void);
@@ -130,6 +131,7 @@ int main(void) {
     test_prs_candidate_from_null_uses_mode_i_boundaries();
     test_prs_score_search_i16_finds_cp_aligned_fft_start();
     test_prs_score_cp_metric_i16_estimates_positive_cfo_with_positive_sign();
+    test_prs_score_search_i16_matches_brute_force_metrics();
     test_prs_reference_score_f32_distinguishes_match_from_mismatch();
     test_prs_reference_template_f32_scores_only_active_bins();
     test_prs_fft_execute_i16_detects_single_bin_tone();

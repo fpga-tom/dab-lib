@@ -100,6 +100,69 @@ void test_prs_score_cp_metric_i16_estimates_positive_cfo_with_positive_sign(void
     TEST_ASSERT(fabsf(cfo_hz - expected_cfo_hz) <= 1.0e-3f);
 }
 
+void test_prs_score_search_i16_matches_brute_force_metrics(void) {
+    dab_prs_score_t score;
+    dab_prs_score_config_t config;
+    dab_sdr_block_view_t block;
+    dab_prs_candidate_t candidate;
+    dab_prs_result_t result;
+    int16_t iq[2u * 256u];
+    uint32_t state = 0x12345678u;
+    uint32_t i;
+    uint64_t sample;
+    uint64_t best_sample = 0u;
+    float best_score = -1.0f;
+    float best_cfo = 0.0f;
+    const uint32_t guard = 16u;
+    const uint32_t fft = 64u;
+    const uint32_t symbol_start = 96u;
+    const uint32_t fft_start = symbol_start + guard;
+
+    dab_prs_score_default_config(&config);
+    config.sample_rate = 64000u;
+    config.guard_samples = guard;
+    config.fft_samples = fft;
+    TEST_ASSERT(dab_prs_score_init(&score, &config) == 0);
+
+    for (i = 0u; i < 2u * 256u; ++i) {
+        state = (state * 1664525u) + 1013904223u;
+        iq[i] = (int16_t)((int32_t)((state >> 16u) & 0x1ffu) - 256);
+    }
+    for (i = 0u; i < guard; ++i) {
+        iq[2u * (symbol_start + i)] = iq[2u * (fft_start + fft - guard + i)];
+        iq[(2u * (symbol_start + i)) + 1u] = iq[(2u * (fft_start + fft - guard + i)) + 1u];
+    }
+
+    block.iq_interleaved = iq;
+    block.sample_count = 256u;
+    block.sample_index = 5000u;
+    block.timestamp_ns = 0u;
+    candidate.null_start_sample = 0u;
+    candidate.prs_symbol_start_sample = block.sample_index + 60u - guard;
+    candidate.prs_fft_start_sample = block.sample_index + 60u;
+    candidate.timing_search_start_offset = 60u;
+    candidate.timing_search_length = 140u;
+
+    for (sample = dab_prs_candidate_search_start_sample(&candidate);
+         sample < dab_prs_candidate_search_end_sample(&candidate);
+         ++sample) {
+        float candidate_score;
+        float candidate_cfo;
+
+        if (dab_prs_score_cp_metric_i16(&score, &block, sample, &candidate_score, &candidate_cfo) == 0 &&
+            candidate_score > best_score) {
+            best_score = candidate_score;
+            best_cfo = candidate_cfo;
+            best_sample = sample;
+        }
+    }
+
+    TEST_ASSERT(dab_prs_score_search_i16(&score, &block, &candidate, &result) == 1);
+    TEST_ASSERT(result.prs_fft_start_sample == best_sample);
+    TEST_ASSERT(fabsf(result.prs_score - best_score) <= 1.0e-7f);
+    TEST_ASSERT(fabsf(result.coarse_freq_error_hz - best_cfo) <= 1.0e-6f);
+}
+
 void test_prs_reference_score_f32_distinguishes_match_from_mismatch(void) {
     const float ref_i[4] = {1.0f, 0.0f, -1.0f, 0.0f};
     const float ref_q[4] = {0.0f, 1.0f, 0.0f, -1.0f};
