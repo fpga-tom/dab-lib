@@ -4,6 +4,7 @@
 void test_pc_queue_basic(void);
 void test_pc_queue_stop_wakes_waiter(void);
 void test_block_pool_acquire_release(void);
+void test_block_storage_is_compact_and_aligned(void);
 void test_sample_history_wraps_with_contiguous_view(void);
 void test_sample_history_resets_on_discontinuity_and_oversized_block(void);
 void test_frontend_converts_iq_and_preserves_metadata(void);
@@ -81,6 +82,7 @@ int main(void) {
     test_pc_queue_basic();
     test_pc_queue_stop_wakes_waiter();
     test_block_pool_acquire_release();
+    test_block_storage_is_compact_and_aligned();
     test_sample_history_wraps_with_contiguous_view();
     test_sample_history_resets_on_discontinuity_and_oversized_block();
     test_frontend_converts_iq_and_preserves_metadata();

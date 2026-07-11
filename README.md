@@ -14,6 +14,10 @@ cmake -S . -B build
 cmake --build build
 ```
 
+Live SDR streams preallocate 32 IQ capture blocks by default (about 2 MiB per
+open stream). Builds that need a larger capture latency cushion can override
+the depth, for example `cmake -S . -B build -DDAB_CAPTURE_BLOCK_COUNT=64`.
+
 ## Windows Installer
 
 To stage the GUI application and build an installer on Windows:

@@ -1,5 +1,62 @@
 #include "dab/core/block_pool.h"
 
+#include <stdint.h>
+#include <stdlib.h>
+
+int dab_iq_block_storage_init(dab_iq_block_storage_t *storage,
+                              uint32_t block_count,
+                              uint32_t queue_capacity) {
+    const size_t alignment = DAB_IQ_BLOCK_ALIGNMENT;
+    size_t block_bytes;
+    size_t pointer_count;
+    size_t pointer_bytes;
+    size_t allocation_bytes;
+    uintptr_t aligned_address;
+    void *allocation;
+
+    if (storage == 0 || block_count == 0u || queue_capacity == 0u ||
+        (alignment & (alignment - 1u)) != 0u ||
+        (size_t)block_count > SIZE_MAX / sizeof(dab_iq_block_t) ||
+        (size_t)queue_capacity > SIZE_MAX - (size_t)block_count) {
+        return -1;
+    }
+
+    *storage = (dab_iq_block_storage_t){0};
+    block_bytes = (size_t)block_count * sizeof(dab_iq_block_t);
+    pointer_count = (size_t)block_count + (size_t)queue_capacity;
+    if (pointer_count > SIZE_MAX / sizeof(void *)) {
+        return -1;
+    }
+    pointer_bytes = pointer_count * sizeof(void *);
+    if (block_bytes > SIZE_MAX - pointer_bytes ||
+        block_bytes + pointer_bytes > SIZE_MAX - (alignment - 1u)) {
+        return -1;
+    }
+    allocation_bytes = block_bytes + pointer_bytes + (alignment - 1u);
+    allocation = malloc(allocation_bytes);
+    if (allocation == 0) {
+        return -1;
+    }
+
+    aligned_address = ((uintptr_t)allocation + alignment - 1u) & ~(uintptr_t)(alignment - 1u);
+    storage->allocation = allocation;
+    storage->allocation_bytes = allocation_bytes;
+    storage->blocks = (dab_iq_block_t *)aligned_address;
+    storage->free_storage = (void **)((unsigned char *)storage->blocks + block_bytes);
+    storage->filled_storage = storage->free_storage + block_count;
+    storage->block_count = block_count;
+    storage->queue_capacity = queue_capacity;
+    return 0;
+}
+
+void dab_iq_block_storage_destroy(dab_iq_block_storage_t *storage) {
+    if (storage == 0) {
+        return;
+    }
+    free(storage->allocation);
+    *storage = (dab_iq_block_storage_t){0};
+}
+
 int dab_iq_block_pool_init(dab_iq_block_pool_t *pool, dab_iq_block_t *blocks, void **storage, uint32_t block_count) {
     uint32_t i;
 

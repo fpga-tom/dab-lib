@@ -31,10 +31,12 @@ void test_rtlsdr_device_specific_config_propagates_to_samples(void) {
     TEST_ASSERT(stream != 0);
     TEST_ASSERT(stream->vtbl->start(stream) == DAB_SDR_STATUS_OK);
     TEST_ASSERT(stream->vtbl->read(stream, &block) == DAB_SDR_STATUS_OK);
-    TEST_ASSERT(block.sample_count == 1024u);
+    TEST_ASSERT(block.sample_count == DAB_IQ_BLOCK_SAMPLES);
     TEST_ASSERT(block.iq_interleaved != 0);
     TEST_ASSERT(block.iq_interleaved[0] == 0);
     TEST_ASSERT(block.iq_interleaved[1] == 0);
+    TEST_ASSERT(block.iq_interleaved[2u * (block.sample_count - 1u)] == -256);
+    TEST_ASSERT(block.iq_interleaved[(2u * (block.sample_count - 1u)) + 1u] == 256);
     TEST_ASSERT(stream->vtbl->stop(stream) == DAB_SDR_STATUS_OK);
 
     dab_sdr_stream_close(stream);

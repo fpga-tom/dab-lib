@@ -3,6 +3,10 @@ cmake_minimum_required(VERSION 3.21)
 project(dab_lib C CXX)
 
 set(DAB_APP_VERSION "0.1.2")
+set(DAB_CAPTURE_BLOCK_COUNT 32 CACHE STRING "Preallocated IQ blocks per open SDR stream")
+if(DAB_CAPTURE_BLOCK_COUNT LESS 2)
+    message(FATAL_ERROR "DAB_CAPTURE_BLOCK_COUNT must be at least 2")
+endif()
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -242,6 +246,8 @@ target_include_directories(dab
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+
+target_compile_definitions(dab PUBLIC DAB_CAPTURE_BLOCK_COUNT=${DAB_CAPTURE_BLOCK_COUNT})
 
 if(DAB_BUILD_GUI)
     find_package(OpenGL QUIET)
