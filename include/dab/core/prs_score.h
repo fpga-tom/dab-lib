@@ -100,6 +100,13 @@ int dab_prs_estimate_equalized_snr_f32(const float *rx_i,
                                        const float *ref_q,
                                        uint32_t count,
                                        dab_prs_snr_result_t *result);
+int dab_prs_estimate_spectrum_cn_mode_i_f32(const float *fft_i,
+                                            const float *fft_q,
+                                            float *cn_db_out);
+int dab_prs_estimate_rf_level_dbfs_i16(const dab_sdr_block_view_t *block,
+                                       uint64_t start_sample,
+                                       uint32_t count,
+                                       float *level_dbfs_out);
 int dab_prs_score_to_snr_db(float score, float *snr_db_out);
 
 #endif

@@ -411,8 +411,11 @@ private:
                 const int gap = std::max(2, (bandRight - bandLeft) / 8);
                 const int x = std::min(bandRight - 1, bandLeft + gap);
                 const int width = std::max(3, bandRight - bandLeft - (2 * gap));
-                const float level = std::clamp(VisualLevel(levels_[i]), 0.0f, 1.0f);
-                const float peak = std::clamp(std::max(level, VisualLevel(peaks_[i])), 0.0f, 1.0f);
+                const float level = std::clamp(VisualLevel(levels_[i]) * 1.16f, 0.0f, 1.0f);
+                const float peak = std::clamp(
+                    std::max(level, VisualLevel(peaks_[i]) * 1.16f),
+                    0.0f,
+                    1.0f);
                 const int litSegments = std::clamp(
                     static_cast<int>(std::ceil(level * static_cast<float>(segmentCount))),
                     0,
@@ -431,11 +434,11 @@ private:
                     wxColour top;
                     wxColour glow;
 
-                    if (position >= 0.82f) {
+                    if (position >= 0.72f) {
                         base = lit ? wxColour(190, 30, 25, 255) : wxColour(48, 18, 20, 210);
                         top = lit ? wxColour(255, 92, 50, 255) : wxColour(72, 25, 24, 220);
                         glow = wxColour(255, 52, 28);
-                    } else if (position >= 0.62f) {
+                    } else if (position >= 0.52f) {
                         base = lit ? wxColour(205, 126, 15, 255) : wxColour(49, 38, 15, 210);
                         top = lit ? wxColour(255, 220, 48, 255) : wxColour(70, 53, 19, 220);
                         glow = wxColour(255, 190, 30);
@@ -1575,21 +1578,19 @@ void MainFrame::RefreshPlaybackStatus() {
         return;
     }
 
-    if (status.has_receiver_snr) {
-        if (status.has_spectrum_cn) {
-            receiverStatusLabel_->SetLabel(
-                wxString::Format("Receiver: locked, SNR %.1f dB, C/N %.1f dB, PRS %.3f",
-                                 status.receiver_snr_db,
-                                 status.spectrum_cn_db,
-                                 status.prs_score)
-            );
-        } else {
-            receiverStatusLabel_->SetLabel(
-                wxString::Format("Receiver: locked, SNR %.1f dB, PRS %.3f",
-                                 status.receiver_snr_db,
-                                 status.prs_score)
-            );
+    if (status.has_receiver_snr || status.has_spectrum_cn || status.has_rf_level) {
+        wxString label = "Receiver: locked";
+        if (status.has_rf_level) {
+            label += wxString::Format(", RF %.1f dBFS", status.rf_level_dbfs);
         }
+        if (status.has_receiver_snr) {
+            label += wxString::Format(", SNR %.1f dB", status.receiver_snr_db);
+        }
+        if (status.has_spectrum_cn) {
+            label += wxString::Format(", C/N %.1f dB", status.spectrum_cn_db);
+        }
+        label += wxString::Format(", PRS %.3f", status.prs_score);
+        receiverStatusLabel_->SetLabel(label);
         return;
     }
 

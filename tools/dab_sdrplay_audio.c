@@ -28,6 +28,8 @@ void dab_gui_embedded_audio_status_update(int locked,
                                           float receiver_snr_db,
                                           int has_spectrum_cn,
                                           float spectrum_cn_db,
+                                          int has_rf_level,
+                                          float rf_level_dbfs,
                                           float prs_score);
 void dab_gui_embedded_audio_process_superframe(const dab_msc_dabplus_superframe_t *superframe);
 #endif
@@ -110,61 +112,12 @@ static void publish_playback_status(const dab_sync_t *sync) {
                                          sync->state.receiver_snr_db,
                                          sync->state.spectrum_cn_valid,
                                          sync->state.spectrum_cn_db,
+                                         sync->state.rf_level_valid,
+                                         sync->state.rf_level_dbfs,
                                          sync->state.prs_score);
 #else
     (void)sync;
 #endif
-}
-
-static int estimate_spectrum_cn_db(const float *fft_i,
-                                   const float *fft_q,
-                                   float *cn_db_out) {
-    const uint32_t inactive_low_start = 772u;
-    const uint32_t inactive_low_end = 1020u;
-    const uint32_t inactive_high_start = 1028u;
-    const uint32_t inactive_high_end = 1276u;
-    double active_power = 0.0;
-    double inactive_power = 0.0;
-    uint32_t active_count = 0u;
-    uint32_t inactive_count = 0u;
-    uint32_t bin;
-
-    if (fft_i == 0 || fft_q == 0 || cn_db_out == 0) {
-        return -1;
-    }
-
-    for (bin = 0u; bin < DAB_MODE_I_FFT_SAMPLES; ++bin) {
-        const double re = (double)fft_i[bin];
-        const double im = (double)fft_q[bin];
-        const double power = (re * re) + (im * im);
-        const int is_active =
-            (bin <= DAB_MODE_I_ACTIVE_CARRIER_HALF) ||
-            (bin >= (DAB_MODE_I_FFT_SAMPLES - DAB_MODE_I_ACTIVE_CARRIER_HALF));
-
-        if (bin == 1024u) {
-            continue;
-        }
-
-        if (is_active) {
-            active_power += power;
-            active_count++;
-            continue;
-        }
-
-        if ((bin >= inactive_low_start && bin <= inactive_low_end) ||
-            (bin >= inactive_high_start && bin <= inactive_high_end)) {
-            inactive_power += power;
-            inactive_count++;
-        }
-    }
-
-    if (active_count == 0u || inactive_count == 0u || inactive_power <= 0.0) {
-        return -1;
-    }
-
-    *cn_db_out = (float)(10.0 * log10((active_power / (double)active_count) /
-                                      (inactive_power / (double)inactive_count)));
-    return 0;
 }
 
 static void print_usage(const char *argv0) {
@@ -1506,7 +1459,18 @@ int main(int argc, char **argv) {
                         continue;
                     }
                     if (receiver_metrics_enabled) {
-                        if (estimate_spectrum_cn_db(fft_i, fft_q, &sync.state.spectrum_cn_db) == 0) {
+                        if (dab_prs_estimate_rf_level_dbfs_i16(&hist_view,
+                                                              prs_fft_start_sample,
+                                                              acquire_config.fft_samples,
+                                                              &sync.state.rf_level_dbfs) == 0) {
+                            sync.state.rf_level_valid = 1;
+                        } else {
+                            sync.state.rf_level_dbfs = 0.0f;
+                            sync.state.rf_level_valid = 0;
+                        }
+                        if (dab_prs_estimate_spectrum_cn_mode_i_f32(fft_i,
+                                                                   fft_q,
+                                                                   &sync.state.spectrum_cn_db) == 0) {
                             sync.state.spectrum_cn_valid = 1;
                         } else {
                             sync.state.spectrum_cn_db = 0.0f;
@@ -1531,6 +1495,8 @@ int main(int argc, char **argv) {
                         sync.state.receiver_snr_valid = 0;
                         sync.state.spectrum_cn_db = 0.0f;
                         sync.state.spectrum_cn_valid = 0;
+                        sync.state.rf_level_dbfs = 0.0f;
+                        sync.state.rf_level_valid = 0;
                     }
                     phase_correct_prs_for_plot(&ofdm, active_i, active_q, prs_plot_i, prs_plot_q);
                     if (prs_fft_gnuplot_fp != 0 &&

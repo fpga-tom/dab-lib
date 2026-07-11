@@ -36,6 +36,8 @@ typedef struct {
     int receiver_snr_valid;
     float spectrum_cn_db;
     int spectrum_cn_valid;
+    float rf_level_dbfs;
+    int rf_level_valid;
     uint32_t good_frames;
     uint32_t bad_frames;
     dab_sync_mode_t mode;

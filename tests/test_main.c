@@ -77,6 +77,9 @@ void test_prs_reference_bins_diff_f32_recovers_integer_bin_offset(void);
 void test_prs_reference_bins_diff_f32_estimates_fine_timing_error(void);
 void test_prs_score_symbol_i16_mode_i_diff_rejects_missing_window(void);
 void test_prs_ref_matches_reference_generator(void);
+void test_prs_equalized_snr_tracks_awgn(void);
+void test_prs_spectrum_cn_subtracts_noise_floor(void);
+void test_prs_rf_level_dbfs_uses_complex_rms_and_removes_dc(void);
 void test_tframe_push_symbol_partitions_fic_and_msc_and_wraps_frame(void);
 
 int main(void) {
@@ -153,6 +156,9 @@ int main(void) {
     test_prs_reference_bins_diff_f32_estimates_fine_timing_error();
     test_prs_score_symbol_i16_mode_i_diff_rejects_missing_window();
     test_prs_ref_matches_reference_generator();
+    test_prs_equalized_snr_tracks_awgn();
+    test_prs_spectrum_cn_subtracts_noise_floor();
+    test_prs_rf_level_dbfs_uses_complex_rms_and_removes_dc();
     test_tframe_push_symbol_partitions_fic_and_msc_and_wraps_frame();
     test_prs_template_tracks_active_bins();
     test_prs_template_load_bins_populates_multiple_entries();

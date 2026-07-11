@@ -1,8 +1,23 @@
 #include "dab/core/prs_score.h"
 
 #include <math.h>
+#include <stdint.h>
 
+#include "dab/core/ofdm.h"
 #include "test_support.h"
+
+static uint32_t prs_snr_rng_state = 0x12345678u;
+
+static float prs_snr_uniform_open(void) {
+    prs_snr_rng_state = (prs_snr_rng_state * 1664525u) + 1013904223u;
+    return ((float)((prs_snr_rng_state >> 8u) + 1u)) / 16777217.0f;
+}
+
+static float prs_snr_gaussian(void) {
+    const float u1 = prs_snr_uniform_open();
+    const float u2 = prs_snr_uniform_open();
+    return sqrtf(-2.0f * logf(u1)) * cosf(6.28318530717958647692f * u2);
+}
 
 void test_prs_score_search_i16_finds_cp_aligned_fft_start(void) {
     dab_prs_score_t score;
@@ -308,4 +323,100 @@ void test_prs_reference_bins_diff_f32_estimates_fine_timing_error(void) {
     TEST_ASSERT(dab_prs_score_reference_bins_diff_f32(rx_i, rx_q, bins, 4u, 0, 0, &score) == 0);
     TEST_ASSERT(score.score > 0.99f);
     TEST_ASSERT(fabsf(score.fine_timing_error_samples - timing_error) < 0.05f);
+}
+
+void test_prs_equalized_snr_tracks_awgn(void) {
+    static const float expected_snr_db[] = {4.0f, 8.0f, 12.0f};
+    dab_ofdm_t ofdm;
+    dab_ofdm_config_t config;
+    float rx_i[DAB_MODE_I_ACTIVE_CARRIERS];
+    float rx_q[DAB_MODE_I_ACTIVE_CARRIERS];
+    uint32_t level;
+
+    dab_ofdm_default_config(&config);
+    TEST_ASSERT(dab_ofdm_init(&ofdm, &config) == 0);
+    prs_snr_rng_state = 0x12345678u;
+
+    for (level = 0u; level < (uint32_t)(sizeof(expected_snr_db) / sizeof(expected_snr_db[0])); ++level) {
+        const float snr_linear = powf(10.0f, expected_snr_db[level] / 10.0f);
+        const float noise_sigma = sqrtf(0.5f / snr_linear);
+        double measured_sum = 0.0;
+        uint32_t trial;
+
+        for (trial = 0u; trial < 32u; ++trial) {
+            dab_prs_snr_result_t measured;
+            uint32_t carrier;
+
+            for (carrier = 0u; carrier < DAB_MODE_I_ACTIVE_CARRIERS; ++carrier) {
+                rx_i[carrier] = ofdm.prs_ref_i[carrier] + (noise_sigma * prs_snr_gaussian());
+                rx_q[carrier] = ofdm.prs_ref_q[carrier] + (noise_sigma * prs_snr_gaussian());
+            }
+
+            TEST_ASSERT(dab_prs_estimate_equalized_snr_f32(rx_i,
+                                                           rx_q,
+                                                           ofdm.prs_ref_i,
+                                                           ofdm.prs_ref_q,
+                                                           DAB_MODE_I_ACTIVE_CARRIERS,
+                                                           &measured) == 0);
+            TEST_ASSERT(measured.used_carriers == DAB_MODE_I_DATA_CARRIERS);
+            measured_sum += (double)measured.snr_db;
+        }
+
+        TEST_ASSERT(fabs((measured_sum / 32.0) - (double)expected_snr_db[level]) < 0.35);
+    }
+
+    dab_ofdm_reset(&ofdm);
+}
+
+void test_prs_spectrum_cn_subtracts_noise_floor(void) {
+    float fft_i[DAB_MODE_I_FFT_SAMPLES] = {0};
+    float fft_q[DAB_MODE_I_FFT_SAMPLES] = {0};
+    const float expected_cn_db = 4.0f;
+    const float active_amplitude = sqrtf(1.0f + powf(10.0f, expected_cn_db / 10.0f));
+    float measured_cn_db = 0.0f;
+    uint32_t bin;
+
+    for (bin = 1u; bin <= DAB_MODE_I_ACTIVE_CARRIER_HALF; ++bin) {
+        fft_i[bin] = active_amplitude;
+    }
+    for (bin = DAB_MODE_I_FFT_SAMPLES - DAB_MODE_I_ACTIVE_CARRIER_HALF;
+         bin < DAB_MODE_I_FFT_SAMPLES;
+         ++bin) {
+        fft_i[bin] = active_amplitude;
+    }
+    for (bin = 772u; bin <= 1020u; ++bin) {
+        fft_i[bin] = 1.0f;
+    }
+    for (bin = 1028u; bin <= 1276u; ++bin) {
+        fft_i[bin] = 1.0f;
+    }
+
+    fft_i[0] = 100000.0f;
+    fft_i[DAB_MODE_I_FFT_SAMPLES / 2u] = 100000.0f;
+
+    TEST_ASSERT(dab_prs_estimate_spectrum_cn_mode_i_f32(fft_i, fft_q, &measured_cn_db) == 0);
+    TEST_ASSERT(fabsf(measured_cn_db - expected_cn_db) < 1.0e-4f);
+}
+
+void test_prs_rf_level_dbfs_uses_complex_rms_and_removes_dc(void) {
+    const int16_t iq[] = {
+        123, -456,
+        -789, 321,
+        17384, 500,
+        1000, 16884,
+        -15384, 500,
+        1000, -15884
+    };
+    dab_sdr_block_view_t block;
+    float measured_dbfs = 0.0f;
+
+    block.iq_interleaved = (int16_t *)iq;
+    block.sample_count = 6u;
+    block.sample_index = 100u;
+    block.timestamp_ns = 0u;
+
+    TEST_ASSERT(dab_prs_estimate_rf_level_dbfs_i16(&block, 102u, 4u, &measured_dbfs) == 0);
+    TEST_ASSERT(fabsf(measured_dbfs - (-6.0205999f)) < 1.0e-4f);
+    TEST_ASSERT(dab_prs_estimate_rf_level_dbfs_i16(&block, 99u, 4u, &measured_dbfs) != 0);
+    TEST_ASSERT(dab_prs_estimate_rf_level_dbfs_i16(&block, 104u, 4u, &measured_dbfs) != 0);
 }

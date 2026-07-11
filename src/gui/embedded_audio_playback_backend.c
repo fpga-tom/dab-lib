@@ -107,6 +107,8 @@ void dab_gui_embedded_audio_status_reset(void) {
     g_playback_status.receiver_snr_db = 0.0f;
     g_playback_status.has_spectrum_cn = 0;
     g_playback_status.spectrum_cn_db = 0.0f;
+    g_playback_status.has_rf_level = 0;
+    g_playback_status.rf_level_dbfs = 0.0f;
     g_playback_status.prs_score = 0.0f;
     g_playback_spectrum.valid = 0;
     g_playback_spectrum.sample_rate = 0u;
@@ -660,6 +662,8 @@ void dab_gui_embedded_audio_status_update(int locked,
                                           float receiver_snr_db,
                                           int has_spectrum_cn,
                                           float spectrum_cn_db,
+                                          int has_rf_level,
+                                          float rf_level_dbfs,
                                           float prs_score) {
     dab_gui_playback_ensure_mutex();
     dab_mutex_lock(&g_playback_mutex);
@@ -668,6 +672,8 @@ void dab_gui_embedded_audio_status_update(int locked,
     g_playback_status.receiver_snr_db = receiver_snr_db;
     g_playback_status.has_spectrum_cn = has_spectrum_cn;
     g_playback_status.spectrum_cn_db = spectrum_cn_db;
+    g_playback_status.has_rf_level = has_rf_level;
+    g_playback_status.rf_level_dbfs = rf_level_dbfs;
     g_playback_status.prs_score = prs_score;
     dab_mutex_unlock(&g_playback_mutex);
 }
@@ -779,6 +785,8 @@ int dab_gui_playback_start(uint64_t frequency_hz, uint32_t sid) {
             .receiver_snr_db = 0.0f,
             .has_spectrum_cn = 0,
             .spectrum_cn_db = 0.0f,
+            .has_rf_level = 0,
+            .rf_level_dbfs = 0.0f,
             .prs_score = 0.0f,
             .frequency_hz = frequency_hz,
             .sid = sid,
@@ -818,6 +826,7 @@ void dab_gui_playback_stop(void) {
         g_playback_status.locked = 0;
         g_playback_status.has_receiver_snr = 0;
         g_playback_status.has_spectrum_cn = 0;
+        g_playback_status.has_rf_level = 0;
         g_playback_spectrum.valid = 0;
         g_playback_spectrum.sample_rate = 0u;
         g_playback_spectrum.bin_count = 0u;
