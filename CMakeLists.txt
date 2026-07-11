@@ -318,6 +318,7 @@ add_executable(dab_sdrplay_sync_probe
 )
 
 target_link_libraries(dab_sdrplay_sync_probe PRIVATE dab)
+dab_set_windows_stack_size(dab_sdrplay_sync_probe 8388608)
 
 add_executable(dab_sdrplay_audio
     tools/dab_sdrplay_audio.c

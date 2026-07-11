@@ -226,7 +226,13 @@ Parses one valid 30-byte FIB payload into a `dab_fic_repo_t`, covering the curre
 Initializes MSC state.
 
 ### `dab_msc_reset`
-Clears MSC frame counters and stored sample values.
+Clears MSC frame counters, decoder runtimes, and stored sample values while preserving the configured service filter.
+
+### `dab_msc_set_service_filter`
+Restricts subsequent MSC convolutional deinterleaving and FEC decoding to the stream-audio subchannel mapped to one service ID. FIC-derived ensemble metadata and component bindings remain available for all services.
+
+### `dab_msc_clear_service_filter`
+Restores the default behavior of decoding every valid MSC subchannel.
 
 ### `dab_msc_build_layout`
 Normalizes parsed FIG0/1 and FIG0/2 data into MSC subchannel and service-component mappings, including derived CU size and bitrate for UEP/EEP profiles.

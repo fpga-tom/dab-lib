@@ -1,5 +1,6 @@
 #include "dab/core/msc.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "test_support.h"
@@ -465,6 +466,7 @@ void test_msc_decode_deinterleaved_cif_decodes_synthetic_eep_payload(void) {
 void test_msc_sync_runtimes_prepares_and_resets_decoder_state(void) {
     dab_msc_layout_t layout = {0};
     dab_msc_subchannel_runtime_t runtimes[DAB_FIC_MAX_SUBCHANNELS] = {0};
+    dab_msc_decoder_workspace_t *workspace;
 
     layout.subchannels[1].valid = 1u;
     layout.subchannels[1].subchid = 1u;
@@ -479,10 +481,13 @@ void test_msc_sync_runtimes_prepares_and_resets_decoder_state(void) {
     TEST_ASSERT(runtimes[1].config.framebits == 192u);
     TEST_ASSERT(runtimes[1].config.conv_len == (12u * DAB_MSC_SOFTBITS_PER_CU));
     TEST_ASSERT(runtimes[1].deinterleaver != 0);
+    TEST_ASSERT(runtimes[1].workspace != 0);
+    workspace = runtimes[1].workspace;
 
     runtimes[1].deinterleaver->regs[0] = 55;
     TEST_ASSERT(dab_msc_sync_runtimes(runtimes, &layout) == 0);
     TEST_ASSERT(runtimes[1].deinterleaver->regs[0] == 55);
+    TEST_ASSERT(runtimes[1].workspace == workspace);
 
     layout.subchannels[1].size_cu = 8u;
     layout.subchannels[1].bitrate_kbps = 6u;
@@ -495,10 +500,57 @@ void test_msc_sync_runtimes_prepares_and_resets_decoder_state(void) {
     TEST_ASSERT(runtimes[1].valid == 0u);
 }
 
+void test_msc_service_filter_decodes_only_selected_audio_subchannel(void) {
+    dab_msc_state_t state;
+    dab_fic_database_t db = {0};
+    int8_t msc[DAB_TFRAME_MSC_SOFTBITS] = {0};
+    uint32_t index;
+
+    for (index = 1u; index <= 2u; ++index) {
+        db.subchannels[index].valid = 1u;
+        db.subchannels[index].subchid = (uint8_t)index;
+        db.subchannels[index].start_cu = (uint16_t)(index * 12u);
+        db.subchannels[index].size_cu = 12u;
+        db.subchannels[index].protection_kind = DAB_FIC_PROTECTION_EEP;
+        db.subchannels[index].protection_option = 0u;
+        db.subchannels[index].protection_level = 0u;
+
+        db.services[index - 1u].sid = 0x4000u + index;
+        db.services[index - 1u].component_count = 1u;
+        db.services[index - 1u].components[0].used = 1u;
+        db.services[index - 1u].components[0].tmid = 0u;
+        db.services[index - 1u].components[0].sc_type = 0x3fu;
+        db.services[index - 1u].components[0].subchid = (uint8_t)index;
+        db.services[index - 1u].components[0].has_subchid = 1u;
+        db.services[index - 1u].components[0].primary = 1u;
+    }
+    db.service_count = 2u;
+
+    TEST_ASSERT(dab_msc_init(&state) == 0);
+    dab_msc_set_service_filter(&state, 0x4002u);
+    TEST_ASSERT(dab_msc_process_frame_with_fic(&state, 100u, msc, DAB_TFRAME_MSC_SOFTBITS, &db) == 0);
+    TEST_ASSERT(state.runtimes[1].valid == 0u);
+    TEST_ASSERT(state.runtimes[2].valid == 1u);
+    TEST_ASSERT(state.decoded_subchannels[1].valid == 0u);
+    TEST_ASSERT(state.decoded_subchannels[2].valid == 1u);
+
+    dab_msc_reset(&state);
+    TEST_ASSERT(state.service_filter_enabled == 1u);
+    TEST_ASSERT(state.service_filter_sid == 0x4002u);
+    dab_msc_clear_service_filter(&state);
+    TEST_ASSERT(state.service_filter_enabled == 0u);
+}
+
 void test_msc_process_frame_with_fic_tracks_decoded_component_bindings(void) {
     dab_msc_state_t state;
     dab_fic_database_t db = {0};
     int8_t msc[DAB_TFRAME_MSC_SOFTBITS] = {0};
+    dab_msc_deinterleaver_t *legacy_deinterleaver;
+    uint8_t legacy_bytes[DAB_MSC_CIFS_PER_FRAME][DAB_MSC_MAX_LOGICAL_FRAME_BYTES_PER_CIF] = {{0}};
+    uint32_t cif_index;
+
+    legacy_deinterleaver = (dab_msc_deinterleaver_t *)calloc(1u, sizeof(*legacy_deinterleaver));
+    TEST_ASSERT(legacy_deinterleaver != 0);
 
     db.subchannels[1].valid = 1u;
     db.subchannels[1].subchid = 1u;
@@ -528,6 +580,22 @@ void test_msc_process_frame_with_fic_tracks_decoded_component_bindings(void) {
     TEST_ASSERT(state.decoded_components[0].sid == 0x3456u);
     TEST_ASSERT(state.decoded_components[0].subchid == 1u);
     TEST_ASSERT(state.decoded_components[0].tmid == 0u);
+
+    for (cif_index = 0u; cif_index < DAB_MSC_CIFS_PER_FRAME; ++cif_index) {
+        TEST_ASSERT(dab_msc_decode_subchannel_cif(msc,
+                                                  DAB_TFRAME_MSC_SOFTBITS,
+                                                  &state.frame_view.subchannels[1],
+                                                  &state.runtimes[1].config,
+                                                  legacy_deinterleaver,
+                                                  cif_index,
+                                                  legacy_bytes[cif_index],
+                                                  state.decoded_subchannels[1].byte_count[cif_index]) == 0);
+        TEST_ASSERT(memcmp(legacy_bytes[cif_index],
+                           state.decoded_subchannels[1].data[cif_index],
+                           state.decoded_subchannels[1].byte_count[cif_index]) == 0);
+    }
+    free(legacy_deinterleaver);
+    dab_msc_reset(&state);
 }
 
 void test_msc_component_kind_classifies_transport_mode(void) {

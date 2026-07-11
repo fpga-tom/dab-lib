@@ -1157,6 +1157,9 @@ int main(int argc, char **argv) {
         fprintf(stderr, "fic/msc init failed\n");
         return 2;
     }
+    if (selected_audio_sid_valid != 0u) {
+        dab_msc_set_service_filter(&msc, selected_audio_sid);
+    }
 
     dab_ofdm_default_config(&ofdm_config);
     if (dab_ofdm_init(&ofdm, &ofdm_config) != 0) {
@@ -1920,12 +1923,14 @@ int main(int argc, char **argv) {
                                                     if (audio_component != 0) {
                                                         selected_audio_sid = audio_component->sid;
                                                         selected_audio_sid_valid = 1u;
+                                                        dab_msc_set_service_filter(&msc, selected_audio_sid);
                                                     }
                                                 }
                                                 if (audio_component != 0 &&
                                                     (!selected_audio_sid_valid || selected_audio_sid != audio_component->sid)) {
                                                     selected_audio_sid = audio_component->sid;
                                                     selected_audio_sid_valid = 1u;
+                                                    dab_msc_set_service_filter(&msc, selected_audio_sid);
                                                 }
                                                 if (selected_audio_sid_valid != 0) {
                                                     label = fic_repo_find_label(&fic.repo.current,

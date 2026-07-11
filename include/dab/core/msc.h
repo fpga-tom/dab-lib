@@ -85,6 +85,7 @@ typedef struct {
 } dab_msc_deinterleaver_t;
 
 typedef struct dab_msc_dabplus_stream_runtime dab_msc_dabplus_stream_runtime_t;
+typedef struct dab_msc_decoder_workspace dab_msc_decoder_workspace_t;
 
 typedef struct {
     uint8_t valid;
@@ -93,6 +94,7 @@ typedef struct {
     uint32_t reset_count;
     uint8_t last_reconfig_reason;
     dab_msc_deinterleaver_t *deinterleaver;
+    dab_msc_decoder_workspace_t *workspace;
     dab_msc_dabplus_stream_runtime_t *dabplus;
 } dab_msc_subchannel_runtime_t;
 
@@ -250,10 +252,14 @@ typedef struct {
     dab_msc_decoded_subchannel_t decoded_subchannels[DAB_FIC_MAX_SUBCHANNELS];
     dab_msc_decoded_component_t decoded_components[DAB_MSC_MAX_COMPONENT_MAPPINGS];
     uint16_t decoded_component_count;
+    uint8_t service_filter_enabled;
+    uint32_t service_filter_sid;
 } dab_msc_state_t;
 
 int dab_msc_init(dab_msc_state_t *state);
 void dab_msc_reset(dab_msc_state_t *state);
+void dab_msc_set_service_filter(dab_msc_state_t *state, uint32_t sid);
+void dab_msc_clear_service_filter(dab_msc_state_t *state);
 int dab_msc_build_layout(dab_msc_layout_t *layout, const dab_fic_database_t *db);
 int dab_msc_build_frame_view(dab_msc_frame_view_t *frame_view,
                              const dab_msc_layout_t *layout,

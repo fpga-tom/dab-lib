@@ -852,6 +852,8 @@ int main(int argc, char **argv) {
     uint32_t sample_rate = env_u32("DAB_SYNC_PROBE_SAMPLE_RATE", 2048000u);
     uint32_t audio_sid = 0u;
     int audio_sid_configured = env_u32_base0("DAB_SYNC_REPLAY_AUDIO_SID", &audio_sid) == 0;
+    uint32_t msc_filter_sid = 0u;
+    int msc_filter_sid_configured = env_u32_base0("DAB_SYNC_REPLAY_MSC_FILTER_SID", &msc_filter_sid) == 0;
     int audio_debug_enabled = env_i32("DAB_SYNC_REPLAY_AUDIO_DEBUG", 0);
     const char *dump_selected_sid_path = getenv("DAB_SYNC_REPLAY_DUMP_SID_PATH");
     const char *dump_selected_stage_path = getenv("DAB_SYNC_REPLAY_DUMP_STAGE_PATH");
@@ -951,6 +953,9 @@ int main(int argc, char **argv) {
     if (dab_fic_init(&fic) != 0 || dab_msc_init(&msc) != 0) {
         fprintf(stderr, "fic/msc init failed\n");
         return 2;
+    }
+    if (audio_sid_configured || msc_filter_sid_configured) {
+        dab_msc_set_service_filter(&msc, audio_sid_configured ? audio_sid : msc_filter_sid);
     }
 
     dab_ofdm_default_config(&ofdm_config);
