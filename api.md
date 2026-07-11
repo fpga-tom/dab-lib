@@ -272,6 +272,18 @@ Consumes one MSC frame, builds the current subchannel/service layout from parsed
 
 ## Threading And Buffer Utilities
 
+### `dab_sample_history_init`
+Allocates a mirrored circular IQ history. The mirrored storage allows wrapped samples to be exposed as one contiguous `dab_sdr_block_view_t` without shifting retained data.
+
+### `dab_sample_history_append`
+Appends one contiguous IQ block, retains the newest samples up to capacity, and automatically resets history when sample indices are discontinuous.
+
+### `dab_sample_history_view`
+Returns a contiguous chronological view over the retained IQ samples, including when the circular write position has wrapped.
+
+### `dab_sample_history_contains_range`
+Reports whether an absolute half-open sample range is currently retained.
+
 ### `dab_pc_queue_init`
 Initializes a bounded producer-consumer queue over caller-provided storage.
 

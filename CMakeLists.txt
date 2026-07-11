@@ -214,6 +214,7 @@ add_library(dab
     src/core/prs_template.c
     src/core/pc_queue.c
     src/core/receiver.c
+    src/core/sample_history.c
     src/core/sync.c
     src/core/tframe.c
     src/core/viterbi47_port.c
@@ -528,6 +529,7 @@ if(DAB_BUILD_TESTS)
         tests/test_sdrplay.c
         tests/test_rtlsdr_api.c
         tests/test_rtlsdr.c
+        tests/test_sample_history.c
         tests/test_pc_queue.c
         tests/test_simd.c
         tests/test_prs_acquire.c
