@@ -429,26 +429,52 @@ private:
                     const bool isPeak = segment == peakSegment && peak > 0.02f;
                     wxColour base;
                     wxColour top;
+                    wxColour glow;
 
                     if (position >= 0.82f) {
                         base = lit ? wxColour(190, 30, 25, 255) : wxColour(48, 18, 20, 210);
                         top = lit ? wxColour(255, 92, 50, 255) : wxColour(72, 25, 24, 220);
+                        glow = wxColour(255, 52, 28);
                     } else if (position >= 0.62f) {
                         base = lit ? wxColour(205, 126, 15, 255) : wxColour(49, 38, 15, 210);
                         top = lit ? wxColour(255, 220, 48, 255) : wxColour(70, 53, 19, 220);
+                        glow = wxColour(255, 190, 30);
                     } else {
                         base = lit ? wxColour(18, 150, 70, 255) : wxColour(15, 43, 31, 210);
                         top = lit ? wxColour(78, 245, 116, 255) : wxColour(19, 62, 40, 220);
+                        glow = wxColour(40, 255, 105);
                     }
 
                     const int y = plot.GetBottom() - ((segment + 1) * segmentStride);
+                    if (lit) {
+                        glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+                        DrawGlQuad(x - 4,
+                                   y - 3,
+                                   width + 8,
+                                   segmentHeight + 6,
+                                   wxColour(glow.Red(), glow.Green(), glow.Blue(), 14),
+                                   wxColour(glow.Red(), glow.Green(), glow.Blue(), 22));
+                        DrawGlQuad(x - 2,
+                                   y - 2,
+                                   width + 4,
+                                   segmentHeight + 4,
+                                   wxColour(glow.Red(), glow.Green(), glow.Blue(), 30),
+                                   wxColour(glow.Red(), glow.Green(), glow.Blue(), 48));
+                        DrawGlQuad(x - 1,
+                                   y - 1,
+                                   width + 2,
+                                   segmentHeight + 2,
+                                   wxColour(glow.Red(), glow.Green(), glow.Blue(), 55),
+                                   wxColour(glow.Red(), glow.Green(), glow.Blue(), 78));
+                        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                    }
                     DrawGlQuad(x, y, width, segmentHeight, base, top);
                     if (lit) {
                         DrawGlLine(x + 1,
                                    y + 1,
                                    x + width - 1,
                                    y + 1,
-                                   wxColour(235, 255, 238, 100));
+                                   wxColour(245, 255, 247, 185));
                     }
                     if (isPeak) {
                         DrawGlRectOutline(wxRect(x, y, width, segmentHeight), wxColour(255, 255, 225, 245));
