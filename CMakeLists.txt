@@ -19,7 +19,25 @@ option(DAB_BUILD_TESTS "Build unit tests" ON)
 option(DAB_BUILD_GUI "Build wxWidgets GUI prototype" ON)
 option(DAB_ENABLE_AVX2 "Enable AVX2 backend when supported" ON)
 option(DAB_ENABLE_NEON "Enable NEON backend when supported" ON)
+option(DAB_ENABLE_RELEASE_IPO "Enable interprocedural optimization in Release builds" ON)
 option(DAB_USE_BUNDLED_WINDOWS_DEPS "Use third-party libraries from libs/ on Windows" ON)
+
+if(MSVC)
+    string(REPLACE "/Ob2" "/Ob3" CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE}")
+    string(REPLACE "/Ob2" "/Ob3" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
+endif()
+
+if(DAB_ENABLE_RELEASE_IPO)
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT DAB_RELEASE_IPO_SUPPORTED
+                        OUTPUT DAB_RELEASE_IPO_ERROR
+                        LANGUAGES C CXX)
+    if(DAB_RELEASE_IPO_SUPPORTED)
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+    else()
+        message(WARNING "Release IPO is unavailable: ${DAB_RELEASE_IPO_ERROR}")
+    endif()
+endif()
 
 find_package(PkgConfig QUIET)
 
