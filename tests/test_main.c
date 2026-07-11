@@ -10,6 +10,7 @@ void test_frontend_converts_iq_and_preserves_metadata(void);
 void test_frontend_dc_removal_reduces_constant_offset(void);
 void test_fic_process_frame_decodes_valid_fibs(void);
 void test_fic_process_frame_reports_crc_errors(void);
+void test_fic_reset_reuses_decoder_workspace(void);
 void test_fic_cursor_iterates_figs_and_stops_on_padding(void);
 void test_fic_parse_payload_populates_repo(void);
 void test_fic_parse_payload_populates_packet_component_from_fig0_ext3(void);
@@ -85,6 +86,7 @@ int main(void) {
     test_frontend_dc_removal_reduces_constant_offset();
     test_fic_process_frame_decodes_valid_fibs();
     test_fic_process_frame_reports_crc_errors();
+    test_fic_reset_reuses_decoder_workspace();
     test_fic_cursor_iterates_figs_and_stops_on_padding();
     test_fic_parse_payload_populates_repo();
     test_fic_parse_payload_populates_packet_component_from_fig0_ext3();

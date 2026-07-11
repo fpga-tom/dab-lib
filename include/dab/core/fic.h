@@ -138,6 +138,8 @@ typedef struct {
     uint32_t valid_fibs;
 } dab_fic_debug_block_t;
 
+typedef struct dab_fic_decoder_workspace dab_fic_decoder_workspace_t;
+
 typedef struct {
     uint32_t frames_seen;
     uint64_t last_frame_start_sample;
@@ -148,6 +150,7 @@ typedef struct {
     dab_fic_repo_t repo;
     uint8_t decoded_fibs[DAB_FIC_TOTAL_FIBS_PER_FRAME][DAB_FIC_BYTES_PER_FIB];
     uint8_t fib_crc_ok[DAB_FIC_TOTAL_FIBS_PER_FRAME];
+    dab_fic_decoder_workspace_t *decoder_workspace;
 } dab_fic_state_t;
 
 typedef struct {
@@ -167,6 +170,7 @@ typedef struct {
 
 int dab_fic_init(dab_fic_state_t *state);
 void dab_fic_reset(dab_fic_state_t *state);
+void dab_fic_destroy(dab_fic_state_t *state);
 int dab_fic_process_frame(dab_fic_state_t *state,
                           uint64_t frame_start_sample,
                           const int8_t *fic_softbits,

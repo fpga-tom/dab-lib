@@ -738,6 +738,7 @@ static void scan_runtime_destroy(scan_runtime_t *runtime) {
     }
 
     history_destroy(&runtime->history);
+    dab_fic_destroy(&runtime->fic);
     free(runtime->fft_i);
     free(runtime->fft_q);
     free(runtime->active_i);

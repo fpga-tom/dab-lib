@@ -3,6 +3,7 @@
 #include <limits.h>
 #include <stdio.h>
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "viterbi47_port.h"
@@ -11,6 +12,11 @@
 #define DAB_FIC_TAIL_BITS 6u
 #define DAB_FIC_VITERBI_STATES 64u
 #define DAB_FIC_NEG_INF (INT_MIN / 4)
+
+struct dab_fic_decoder_workspace {
+    unsigned char metrics[DAB_FIC_UNPUNCTURED_BITS];
+    void *viterbi;
+};
 
 static uint32_t dab_fic_puncturing_code(uint32_t p) {
     switch (p) {
@@ -85,17 +91,20 @@ static int dab_fic_depuncture_block(const int16_t *punctured,
     return in_pos == DAB_FIC_DEPARTITIONED_SOFTBITS ? 0 : -1;
 }
 
-static int dab_fic_viterbi_decode(const int16_t *symbols, uint8_t *bits_out) {
-    unsigned char metrics[DAB_FIC_UNPUNCTURED_BITS];
-    void *vp;
+static int dab_fic_viterbi_decode_with_workspace(const int16_t *symbols,
+                                                  uint32_t polarity_variant,
+                                                  uint8_t *bits_out,
+                                                  unsigned char *metrics,
+                                                  void *viterbi) {
     uint32_t i;
 
-    if (symbols == 0 || bits_out == 0) {
+    if (symbols == 0 || bits_out == 0 || metrics == 0 || viterbi == 0) {
         return -1;
     }
 
     for (i = 0u; i < DAB_FIC_UNPUNCTURED_BITS; ++i) {
-        int value = (int)symbols[i] + 127;
+        const int symbol = polarity_variant == 0u ? (int)symbols[i] : -(int)symbols[i];
+        int value = symbol + 127;
         if (value < 0) {
             value = 0;
         } else if (value > 255) {
@@ -104,26 +113,42 @@ static int dab_fic_viterbi_decode(const int16_t *symbols, uint8_t *bits_out) {
         metrics[i] = (unsigned char)value;
     }
 
-    vp = create_viterbi47_port((int)DAB_FIC_INFO_BITS);
-    if (vp == 0) {
+    if (init_viterbi47_port(viterbi, 0) != 0) {
         return -1;
     }
-    if (init_viterbi47_port(vp, 0) != 0) {
-        delete_viterbi47_port(vp);
-        return -1;
-    }
-    if (update_viterbi47_blk_port(vp, metrics, (int)DAB_FIC_TRELLIS_BITS) != 0) {
-        delete_viterbi47_port(vp);
+    if (update_viterbi47_blk_port(viterbi, metrics, (int)DAB_FIC_TRELLIS_BITS) != 0) {
         return -1;
     }
     memset(bits_out, 0, DAB_FIC_BYTES_PER_BLOCK);
-    if (chainback_viterbi47_port(vp, bits_out, DAB_FIC_INFO_BITS, 0) != 0) {
-        delete_viterbi47_port(vp);
+    if (chainback_viterbi47_port(viterbi, bits_out, DAB_FIC_INFO_BITS, 0) != 0) {
         return -1;
     }
-    delete_viterbi47_port(vp);
 
     return 0;
+}
+
+static int dab_fic_viterbi_decode(const int16_t *symbols,
+                                  uint32_t polarity_variant,
+                                  uint8_t *bits_out) {
+    unsigned char metrics[DAB_FIC_UNPUNCTURED_BITS];
+    void *viterbi;
+    int rc;
+
+    if (symbols == 0 || bits_out == 0) {
+        return -1;
+    }
+
+    viterbi = create_viterbi47_port((int)DAB_FIC_INFO_BITS);
+    if (viterbi == 0) {
+        return -1;
+    }
+    rc = dab_fic_viterbi_decode_with_workspace(symbols,
+                                                polarity_variant,
+                                                bits_out,
+                                                metrics,
+                                                viterbi);
+    delete_viterbi47_port(viterbi);
+    return rc;
 }
 
 static uint8_t dab_fic_prbs_bit(int reset) {
@@ -748,21 +773,24 @@ static uint32_t dab_fic_count_valid_fibs(const uint8_t decoded_block[DAB_FIC_BYT
 static int dab_fic_decode_block_variant(const int16_t *unpunctured,
                                         uint32_t polarity_variant,
                                         uint32_t pack_variant,
-                                        uint8_t decoded_block[DAB_FIC_BYTES_PER_BLOCK]) {
-    int16_t trial_symbols[DAB_FIC_UNPUNCTURED_BITS];
+                                        uint8_t decoded_block[DAB_FIC_BYTES_PER_BLOCK],
+                                        dab_fic_decoder_workspace_t *workspace) {
     uint8_t packed_block[DAB_FIC_BYTES_PER_BLOCK];
     uint8_t scrambled_block[DAB_FIC_BYTES_PER_BLOCK];
-    uint32_t i;
 
     if (unpunctured == 0 || decoded_block == 0) {
         return -1;
     }
 
-    for (i = 0u; i < DAB_FIC_UNPUNCTURED_BITS; ++i) {
-        trial_symbols[i] = polarity_variant == 0u ? unpunctured[i] : (int16_t)-unpunctured[i];
-    }
-
-    if (dab_fic_viterbi_decode(trial_symbols, packed_block) != 0) {
+    if (workspace != 0) {
+        if (dab_fic_viterbi_decode_with_workspace(unpunctured,
+                                                   polarity_variant,
+                                                   packed_block,
+                                                   workspace->metrics,
+                                                   workspace->viterbi) != 0) {
+            return -1;
+        }
+    } else if (dab_fic_viterbi_decode(unpunctured, polarity_variant, packed_block) != 0) {
         return -1;
     }
     dab_fic_unpack_viterbi_bytes(packed_block, pack_variant, scrambled_block);
@@ -773,7 +801,8 @@ static int dab_fic_decode_block_variant(const int16_t *unpunctured,
 static int dab_fic_decode_block(const int8_t *frame_softbits,
                                 uint32_t block_index,
                                 uint8_t decoded_block[DAB_FIC_BYTES_PER_BLOCK],
-                                dab_fic_debug_block_t *debug_block) {
+                                dab_fic_debug_block_t *debug_block,
+                                dab_fic_decoder_workspace_t *workspace) {
     int16_t depunctured[DAB_FIC_DEPARTITIONED_SOFTBITS];
     int16_t unpunctured[DAB_FIC_UNPUNCTURED_BITS];
 
@@ -781,7 +810,7 @@ static int dab_fic_decode_block(const int8_t *frame_softbits,
     if (dab_fic_depuncture_block(depunctured, unpunctured) != 0) {
         return -1;
     }
-    if (dab_fic_decode_block_variant(unpunctured, 0u, 0u, decoded_block) != 0) {
+    if (dab_fic_decode_block_variant(unpunctured, 0u, 0u, decoded_block, workspace) != 0) {
         return -1;
     }
 
@@ -800,7 +829,6 @@ int dab_fic_debug_decode_block(const int8_t *fic_softbits,
                                uint32_t fic_softbit_count,
                                uint32_t block_index,
                                dab_fic_debug_block_dump_t *dump) {
-    int16_t trial_symbols[DAB_FIC_UNPUNCTURED_BITS];
     uint8_t decoded_bytes[DAB_FIC_BYTES_PER_BLOCK];
     uint32_t polarity_variant;
 
@@ -815,18 +843,12 @@ int dab_fic_debug_decode_block(const int8_t *fic_softbits,
         return -1;
     }
 
-    if (dab_fic_decode_block(fic_softbits, block_index, dump->decoded_block, &dump->info) != 0) {
+    if (dab_fic_decode_block(fic_softbits, block_index, dump->decoded_block, &dump->info, 0) != 0) {
         return -1;
     }
 
     polarity_variant = dump->info.polarity_variant;
-    {
-        uint32_t i;
-        for (i = 0u; i < DAB_FIC_UNPUNCTURED_BITS; ++i) {
-            trial_symbols[i] = polarity_variant == 0u ? dump->unpunctured[i] : (int16_t)-dump->unpunctured[i];
-        }
-    }
-    if (dab_fic_viterbi_decode(trial_symbols, decoded_bytes) != 0) {
+    if (dab_fic_viterbi_decode(dump->unpunctured, polarity_variant, decoded_bytes) != 0) {
         return -1;
     }
     memset(dump->decoded_bits, 0, sizeof(dump->decoded_bits));
@@ -837,16 +859,43 @@ int dab_fic_debug_decode_block(const int8_t *fic_softbits,
 }
 
 int dab_fic_init(dab_fic_state_t *state) {
+    dab_fic_decoder_workspace_t *workspace;
+
     if (state == 0) {
         return -1;
     }
-    dab_fic_reset(state);
+    *state = (dab_fic_state_t){0};
+    workspace = calloc(1u, sizeof(*workspace));
+    if (workspace == 0) {
+        return -1;
+    }
+    workspace->viterbi = create_viterbi47_port((int)DAB_FIC_INFO_BITS);
+    if (workspace->viterbi == 0) {
+        free(workspace);
+        return -1;
+    }
+    state->decoder_workspace = workspace;
     return 0;
 }
 
 void dab_fic_reset(dab_fic_state_t *state) {
+    dab_fic_decoder_workspace_t *workspace;
+
     if (state == 0) {
         return;
+    }
+    workspace = state->decoder_workspace;
+    *state = (dab_fic_state_t){0};
+    state->decoder_workspace = workspace;
+}
+
+void dab_fic_destroy(dab_fic_state_t *state) {
+    if (state == 0) {
+        return;
+    }
+    if (state->decoder_workspace != 0) {
+        delete_viterbi47_port(state->decoder_workspace->viterbi);
+        free(state->decoder_workspace);
     }
     *state = (dab_fic_state_t){0};
 }
@@ -857,7 +906,8 @@ int dab_fic_process_frame(dab_fic_state_t *state,
                           uint32_t fic_softbit_count) {
     uint32_t block_index;
 
-    if (state == 0 || fic_softbits == 0 || fic_softbit_count != DAB_TFRAME_FIC_SOFTBITS) {
+    if (state == 0 || state->decoder_workspace == 0 || fic_softbits == 0 ||
+        fic_softbit_count != DAB_TFRAME_FIC_SOFTBITS) {
         return -1;
     }
 
@@ -874,7 +924,11 @@ int dab_fic_process_frame(dab_fic_state_t *state,
         dab_fic_debug_block_t *block_info = &state->block_info_last_frame[block_index];
         uint32_t fib_index;
 
-        if (dab_fic_decode_block(fic_softbits, block_index, decoded_block, block_info) != 0) {
+        if (dab_fic_decode_block(fic_softbits,
+                                 block_index,
+                                 decoded_block,
+                                 block_info,
+                                 state->decoder_workspace) != 0) {
             continue;
         }
 
@@ -929,7 +983,8 @@ int dab_fic_debug_analyze_frame(const int8_t *fic_softbits,
                 const int rc = dab_fic_decode_block_variant(unpunctured,
                                                             polarity_variant,
                                                             pack_variant,
-                                                            candidate);
+                                                            candidate,
+                                                            0);
                 uint32_t valid;
 
                 if (rc != 0) {

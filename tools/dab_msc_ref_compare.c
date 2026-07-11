@@ -1404,13 +1404,19 @@ int main(int argc, char **argv) {
         fprintf(stderr, "sync init failed\n");
         return 2;
     }
-    if (dab_fic_init(&fic) != 0 || dab_msc_init(&msc) != 0) {
+    if (dab_fic_init(&fic) != 0) {
         fprintf(stderr, "fic/msc init failed\n");
+        return 2;
+    }
+    if (dab_msc_init(&msc) != 0) {
+        fprintf(stderr, "fic/msc init failed\n");
+        dab_fic_destroy(&fic);
         return 2;
     }
     dab_ofdm_default_config(&ofdm_config);
     if (dab_ofdm_init(&ofdm, &ofdm_config) != 0) {
         fprintf(stderr, "ofdm init failed\n");
+        dab_fic_destroy(&fic);
         return 2;
     }
 
@@ -2142,6 +2148,7 @@ cleanup:
     free(iq_block);
     free(sample_scratch);
     history_destroy(&history);
+    dab_fic_destroy(&fic);
     free(frame_softbits);
     free(msc_softbits);
     free(fic_softbits);

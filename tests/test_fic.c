@@ -241,6 +241,7 @@ void test_fic_process_frame_decodes_valid_fibs(void) {
                            expected[fib_index],
                            DAB_FIC_BYTES_PER_FIB) == 0);
     }
+    dab_fic_destroy(&state);
 }
 
 void test_fic_process_frame_reports_crc_errors(void) {
@@ -271,6 +272,24 @@ void test_fic_process_frame_reports_crc_errors(void) {
     TEST_ASSERT(state.frames_seen == 1u);
     TEST_ASSERT(state.fic_blocks_decoded_last_frame == DAB_FIC_BLOCKS_PER_FRAME);
     TEST_ASSERT(state.valid_fibs_last_frame < DAB_FIC_TOTAL_FIBS_PER_FRAME);
+    dab_fic_destroy(&state);
+}
+
+void test_fic_reset_reuses_decoder_workspace(void) {
+    dab_fic_state_t state;
+    dab_fic_decoder_workspace_t *workspace;
+
+    TEST_ASSERT(dab_fic_init(&state) == 0);
+    workspace = state.decoder_workspace;
+    TEST_ASSERT(workspace != 0);
+    state.frames_seen = 7u;
+
+    dab_fic_reset(&state);
+
+    TEST_ASSERT(state.decoder_workspace == workspace);
+    TEST_ASSERT(state.frames_seen == 0u);
+    dab_fic_destroy(&state);
+    TEST_ASSERT(state.decoder_workspace == 0);
 }
 
 void test_fic_cursor_iterates_figs_and_stops_on_padding(void) {
@@ -534,4 +553,5 @@ void test_fic_process_frame_populates_repo_from_valid_fibs(void) {
     TEST_ASSERT(state.repo.current.service_count == 1u);
     TEST_ASSERT(state.repo.current.labels[0].used == 1u);
     TEST_ASSERT(strcmp(state.repo.current.labels[0].text, "LIVE NAME") == 0);
+    dab_fic_destroy(&state);
 }

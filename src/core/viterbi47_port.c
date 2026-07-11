@@ -62,6 +62,9 @@ void *create_viterbi47_port(int len) {
     struct v47 *vp;
     int state;
 
+    if (len < 0) {
+        return 0;
+    }
     if (!Init) {
         for (state = 0; state < 32; state++) {
             Branchtab47[0].c[state] = dab_parity((2 * state) & V47POLYA) ? 255 : 0;
@@ -71,15 +74,11 @@ void *create_viterbi47_port(int len) {
         }
         Init++;
     }
-    vp = malloc(sizeof(struct v47));
+    vp = malloc(sizeof(struct v47) + ((size_t)(len + 6) * sizeof(decision_t)));
     if (vp == 0) {
         return 0;
     }
-    vp->decisions = malloc((size_t)(len + 6) * sizeof(decision_t));
-    if (vp->decisions == 0) {
-        free(vp);
-        return 0;
-    }
+    vp->decisions = (decision_t *)(vp + 1);
     init_viterbi47_port(vp, 0);
 
     return vp;
@@ -109,7 +108,6 @@ void delete_viterbi47_port(void *p) {
     struct v47 *vp = p;
 
     if (vp != 0) {
-        free(vp->decisions);
         free(vp);
     }
 }
