@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.21)
 
 project(dab_lib C CXX)
 
-set(DAB_APP_VERSION "0.1.2")
+set(DAB_APP_VERSION "0.1.3")
 set(DAB_CAPTURE_BLOCK_COUNT 32 CACHE STRING "Preallocated IQ blocks per open SDR stream")
 if(DAB_CAPTURE_BLOCK_COUNT LESS 2)
     message(FATAL_ERROR "DAB_CAPTURE_BLOCK_COUNT must be at least 2")

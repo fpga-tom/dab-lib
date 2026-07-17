@@ -1,0 +1,1064 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="DAB SDR GUI is a Windows DAB+ radio receiver for SDRplay and RTL-SDR devices, with station scanning, audio playback, and an OpenGL spectrum analyzer.">
+  <meta name="theme-color" content="#f5f3ec">
+  <title>DAB SDR GUI | Digital radio on your desktop</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&amp;family=Newsreader:opsz,wght@6..72,500;6..72,600&amp;display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --paper: #f5f3ec;
+      --paper-deep: #e8e5da;
+      --surface: #fffefa;
+      --ink: #122c32;
+      --muted: #5d6c6e;
+      --line: #d6d8cf;
+      --teal: #087e78;
+      --teal-dark: #075f5b;
+      --teal-soft: #d8eeea;
+      --coral: #e95e3f;
+      --lime: #d9ed75;
+      --shadow: 0 24px 70px rgba(18, 44, 50, 0.13);
+      --radius: 22px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 8% 4%, rgba(217, 237, 117, 0.32), transparent 25rem),
+        radial-gradient(circle at 96% 26%, rgba(8, 126, 120, 0.10), transparent 32rem),
+        var(--paper);
+      font-family: "DM Sans", sans-serif;
+      line-height: 1.6;
+    }
+
+    a {
+      color: inherit;
+    }
+
+    .shell {
+      width: min(1160px, calc(100% - 40px));
+      margin: 0 auto;
+    }
+
+    .site-header {
+      position: relative;
+      z-index: 5;
+      padding: 22px 0;
+    }
+
+    .nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 28px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 11px;
+      color: var(--ink);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      text-decoration: none;
+    }
+
+    .brand-mark {
+      display: grid;
+      width: 38px;
+      height: 38px;
+      grid-template-columns: repeat(4, 4px);
+      align-items: end;
+      justify-content: center;
+      gap: 3px;
+      padding-bottom: 10px;
+      border-radius: 50%;
+      background: var(--ink);
+    }
+
+    .brand-mark span {
+      display: block;
+      border-radius: 3px 3px 0 0;
+      background: var(--lime);
+    }
+
+    .brand-mark span:nth-child(1) { height: 7px; }
+    .brand-mark span:nth-child(2) { height: 12px; }
+    .brand-mark span:nth-child(3) { height: 18px; }
+    .brand-mark span:nth-child(4) { height: 10px; }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 26px;
+      font-size: 0.92rem;
+      font-weight: 600;
+    }
+
+    .nav-links a {
+      text-decoration: none;
+    }
+
+    .nav-links a:hover {
+      color: var(--teal);
+    }
+
+    .button {
+      display: inline-flex;
+      min-height: 48px;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 0 21px;
+      border: 1px solid var(--ink);
+      border-radius: 999px;
+      background: var(--ink);
+      color: #fff;
+      font-weight: 700;
+      text-decoration: none;
+      transition: transform 160ms ease, background 160ms ease, box-shadow 160ms ease;
+    }
+
+    .button:hover {
+      transform: translateY(-2px);
+      background: var(--teal-dark);
+      box-shadow: 0 10px 24px rgba(7, 95, 91, 0.18);
+    }
+
+    .button.secondary {
+      background: transparent;
+      color: var(--ink);
+    }
+
+    .button.secondary:hover {
+      background: var(--surface);
+    }
+
+    .button.small {
+      min-height: 40px;
+      padding: 0 17px;
+      font-size: 0.88rem;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 0.92fr) minmax(480px, 1.08fr);
+      align-items: center;
+      gap: 64px;
+      min-height: 690px;
+      padding: 54px 0 90px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      margin-bottom: 19px;
+      color: var(--teal-dark);
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow::before {
+      width: 27px;
+      height: 2px;
+      background: var(--coral);
+      content: "";
+    }
+
+    h1,
+    h2 {
+      margin: 0;
+      font-family: "Newsreader", serif;
+      font-weight: 600;
+      letter-spacing: -0.045em;
+      line-height: 0.98;
+    }
+
+    h1 {
+      max-width: 650px;
+      font-size: clamp(3.6rem, 7vw, 6.8rem);
+    }
+
+    h2 {
+      max-width: 680px;
+      font-size: clamp(2.5rem, 4.5vw, 4.4rem);
+    }
+
+    .hero-copy > p {
+      max-width: 580px;
+      margin: 28px 0 31px;
+      color: var(--muted);
+      font-size: 1.12rem;
+    }
+
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .compatibility {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 18px;
+      margin-top: 28px;
+      color: var(--muted);
+      font-size: 0.84rem;
+      font-weight: 600;
+    }
+
+    .compatibility span::before {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      margin-right: 8px;
+      border-radius: 50%;
+      background: var(--teal);
+      content: "";
+    }
+
+    .radio-window-wrap {
+      position: relative;
+    }
+
+    .radio-window-wrap::before {
+      position: absolute;
+      inset: -42px 12% auto -24px;
+      height: 210px;
+      border-radius: 50%;
+      background: var(--lime);
+      content: "";
+      filter: blur(1px);
+      transform: rotate(-7deg);
+    }
+
+    .radio-window {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(18, 44, 50, 0.15);
+      border-radius: 19px;
+      background: #f9fbfa;
+      box-shadow: var(--shadow);
+      transform: rotate(1.2deg);
+      animation: arrive 700ms cubic-bezier(.2,.7,.2,1) both;
+    }
+
+    @keyframes arrive {
+      from { opacity: 0; transform: translateY(20px) rotate(1.2deg); }
+      to { opacity: 1; transform: translateY(0) rotate(1.2deg); }
+    }
+
+    .window-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 45px;
+      padding: 0 16px;
+      border-bottom: 1px solid #d9dfdd;
+      background: #eef2f0;
+      font-size: 0.75rem;
+      font-weight: 700;
+    }
+
+    .window-dots {
+      display: flex;
+      gap: 6px;
+    }
+
+    .window-dots i {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #b5bfbc;
+    }
+
+    .spectrum {
+      position: relative;
+      display: flex;
+      height: 220px;
+      align-items: end;
+      gap: 6px;
+      padding: 38px 30px 25px;
+      background:
+        linear-gradient(rgba(255,255,255,.055) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.055) 1px, transparent 1px),
+        #102f34;
+      background-size: 100% 38px, 51px 100%, auto;
+    }
+
+    .spectrum::after {
+      position: absolute;
+      top: 13px;
+      left: 18px;
+      color: #c4d9d7;
+      content: "SPECTRUM ANALYZER";
+      font-size: 0.58rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+    }
+
+    .spectrum span {
+      flex: 1;
+      min-width: 5px;
+      height: var(--h);
+      border-radius: 3px 3px 0 0;
+      background: linear-gradient(to top, var(--teal), #66d0bb 70%, var(--lime));
+      animation: tune 1.8s ease-in-out infinite alternate;
+      animation-delay: var(--d);
+      transform-origin: bottom;
+    }
+
+    @keyframes tune {
+      to { transform: scaleY(0.76); opacity: 0.82; }
+    }
+
+    .equalizer {
+      display: grid;
+      grid-template-columns: repeat(10, 1fr);
+      gap: 10px;
+      padding: 22px 28px;
+      background: #f9fbfa;
+    }
+
+    .eq-band {
+      text-align: center;
+    }
+
+    .eq-track {
+      position: relative;
+      width: 4px;
+      height: 55px;
+      margin: auto;
+      border-radius: 4px;
+      background: #cbd5d2;
+    }
+
+    .eq-track::after {
+      position: absolute;
+      top: var(--p);
+      left: 50%;
+      width: 14px;
+      height: 6px;
+      border-radius: 5px;
+      background: var(--coral);
+      box-shadow: 0 2px 4px rgba(18, 44, 50, 0.2);
+      content: "";
+      transform: translate(-50%, -50%);
+    }
+
+    .eq-band small {
+      display: block;
+      margin-top: 7px;
+      color: #71807e;
+      font-size: 0.46rem;
+    }
+
+    .player {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 18px;
+      padding: 20px 25px;
+      border-top: 1px solid #e1e6e3;
+      background: #eef2f0;
+    }
+
+    .now-playing strong,
+    .now-playing span {
+      display: block;
+    }
+
+    .now-playing strong {
+      font-size: 0.92rem;
+    }
+
+    .now-playing span {
+      color: #647270;
+      font-size: 0.7rem;
+    }
+
+    .player-controls {
+      display: flex;
+      gap: 7px;
+    }
+
+    .player-controls span {
+      padding: 6px 12px;
+      border: 1px solid #bcc8c5;
+      border-radius: 8px;
+      font-size: 0.62rem;
+      font-weight: 700;
+    }
+
+    .player-controls .active {
+      border-color: var(--teal);
+      background: var(--teal);
+      color: #fff;
+    }
+
+    section {
+      padding: 100px 0;
+    }
+
+    .section-head {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 40px;
+      margin-bottom: 48px;
+    }
+
+    .section-head p {
+      max-width: 430px;
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .features {
+      border-block: 1px solid var(--line);
+    }
+
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+    }
+
+    .feature {
+      min-height: 220px;
+      padding: 32px 28px;
+      border-left: 1px solid var(--line);
+    }
+
+    .feature:last-child {
+      border-right: 1px solid var(--line);
+    }
+
+    .feature-number {
+      color: var(--coral);
+      font-family: "Newsreader", serif;
+      font-size: 1.45rem;
+    }
+
+    .feature h3 {
+      margin: 32px 0 8px;
+      font-size: 1.04rem;
+    }
+
+    .feature p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.91rem;
+    }
+
+    .guide {
+      display: grid;
+      grid-template-columns: 0.75fr 1.25fr;
+      gap: 76px;
+      align-items: start;
+    }
+
+    .guide-intro {
+      position: sticky;
+      top: 32px;
+    }
+
+    .guide-intro p {
+      max-width: 390px;
+      color: var(--muted);
+    }
+
+    .steps {
+      counter-reset: guide-step;
+    }
+
+    .step {
+      position: relative;
+      display: grid;
+      grid-template-columns: 64px 1fr;
+      gap: 20px;
+      padding: 30px 0;
+      border-top: 1px solid var(--line);
+      counter-increment: guide-step;
+    }
+
+    .step:last-child {
+      border-bottom: 1px solid var(--line);
+    }
+
+    .step::before {
+      display: grid;
+      width: 44px;
+      height: 44px;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--teal-soft);
+      color: var(--teal-dark);
+      content: counter(guide-step, decimal-leading-zero);
+      font-size: 0.72rem;
+      font-weight: 700;
+    }
+
+    .step h3 {
+      margin: 1px 0 7px;
+      font-size: 1.08rem;
+    }
+
+    .step p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.94rem;
+    }
+
+    .step a {
+      color: var(--teal-dark);
+      font-weight: 700;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+    }
+
+    code {
+      padding: 0.13em 0.42em;
+      border: 1px solid #d3dbd7;
+      border-radius: 5px;
+      background: #edf1ee;
+      color: var(--ink);
+      font-size: 0.88em;
+    }
+
+    .devices {
+      background: var(--ink);
+      color: #f9fbf7;
+    }
+
+    .devices .eyebrow {
+      color: #8ed8cf;
+    }
+
+    .devices .section-head p {
+      color: #aec0c0;
+    }
+
+    .device-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+    }
+
+    .device-card {
+      padding: 36px;
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: var(--radius);
+      background: rgba(255,255,255,.055);
+    }
+
+    .device-card .tag {
+      display: inline-block;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: var(--lime);
+      color: var(--ink);
+      font-size: 0.67rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .device-card h3 {
+      margin: 24px 0 10px;
+      font-family: "Newsreader", serif;
+      font-size: 2rem;
+      font-weight: 600;
+    }
+
+    .device-card p {
+      margin: 0;
+      color: #aec0c0;
+    }
+
+    .device-card a {
+      color: #b5eee5;
+      font-weight: 700;
+    }
+
+    .settings-path {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 9px;
+      margin-top: 36px;
+      color: #d9e4e2;
+      font-size: 0.9rem;
+    }
+
+    .settings-path span {
+      padding: 8px 13px;
+      border: 1px solid rgba(255,255,255,.2);
+      border-radius: 7px;
+      background: rgba(255,255,255,.06);
+      font-weight: 700;
+    }
+
+    .settings-path b {
+      color: #6f8d8c;
+      font-weight: 400;
+    }
+
+    .mode-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 18px;
+    }
+
+    .mode-card {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+    }
+
+    .mode-preview {
+      position: relative;
+      height: 145px;
+      overflow: hidden;
+      background:
+        linear-gradient(rgba(255,255,255,.06) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.06) 1px, transparent 1px),
+        #17363a;
+      background-size: 100% 29px, 45px 100%, auto;
+    }
+
+    .mini-bars {
+      position: absolute;
+      inset: 22px 24px 18px;
+      display: flex;
+      align-items: end;
+      gap: 7px;
+    }
+
+    .mini-bars i {
+      flex: 1;
+      height: var(--h);
+      border-radius: 3px 3px 0 0;
+      background: linear-gradient(to top, #0d8f85, #8bd9b7, var(--lime));
+    }
+
+    .curve svg {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    .leds {
+      position: absolute;
+      inset: 17px 25px;
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+    }
+
+    .led-column {
+      display: flex;
+      width: 9%;
+      flex-direction: column-reverse;
+      gap: 3px;
+    }
+
+    .led-column i {
+      height: 5px;
+      border-radius: 1px;
+      background: #65cbbb;
+      opacity: 0.22;
+    }
+
+    .led-column i:nth-child(-n+5) { opacity: 1; }
+
+    .led-column:nth-child(2) i:nth-child(-n+8),
+    .led-column:nth-child(4) i:nth-child(-n+7),
+    .led-column:nth-child(6) i:nth-child(-n+9),
+    .led-column:nth-child(8) i:nth-child(-n+6) { opacity: 1; }
+
+    .mode-copy {
+      padding: 25px;
+    }
+
+    .mode-copy h3 {
+      margin: 0 0 7px;
+      font-size: 1.05rem;
+    }
+
+    .mode-copy p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .spectrum-note {
+      margin: 32px 0 0;
+      padding: 17px 20px;
+      border-left: 4px solid var(--coral);
+      background: rgba(255,255,255,.5);
+      color: var(--muted);
+    }
+
+    .download {
+      padding-top: 40px;
+    }
+
+    .download-panel {
+      position: relative;
+      overflow: hidden;
+      display: grid;
+      grid-template-columns: 1.2fr auto;
+      align-items: center;
+      gap: 40px;
+      padding: 58px;
+      border-radius: 30px;
+      background: var(--teal-soft);
+    }
+
+    .download-panel::after {
+      position: absolute;
+      right: -90px;
+      bottom: -140px;
+      width: 300px;
+      height: 300px;
+      border: 46px solid rgba(8, 126, 120, 0.13);
+      border-radius: 50%;
+      content: "";
+    }
+
+    .download-panel h2 {
+      max-width: 710px;
+    }
+
+    .download-panel p {
+      max-width: 650px;
+      margin: 18px 0 0;
+      color: var(--muted);
+    }
+
+    .download-panel .button {
+      position: relative;
+      z-index: 1;
+    }
+
+    footer {
+      padding: 44px 0 38px;
+    }
+
+    .footer-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 25px;
+      padding-top: 28px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+
+    .footer-row a {
+      color: var(--ink);
+      font-weight: 700;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
+    }
+
+    @media (max-width: 920px) {
+      .hero {
+        grid-template-columns: 1fr;
+        gap: 70px;
+        padding-top: 70px;
+      }
+
+      .hero-copy {
+        max-width: 720px;
+      }
+
+      .feature-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .feature:nth-child(2) {
+        border-right: 1px solid var(--line);
+      }
+
+      .feature:nth-child(n+3) {
+        border-top: 1px solid var(--line);
+      }
+
+      .guide {
+        grid-template-columns: 1fr;
+        gap: 25px;
+      }
+
+      .guide-intro {
+        position: static;
+      }
+
+      .mode-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 700px) {
+      .shell {
+        width: min(100% - 28px, 1160px);
+      }
+
+      .nav-links a:not(.button) {
+        display: none;
+      }
+
+      .hero {
+        min-height: 0;
+        padding: 50px 0 76px;
+      }
+
+      h1 {
+        font-size: clamp(3.2rem, 18vw, 5.2rem);
+      }
+
+      section {
+        padding: 76px 0;
+      }
+
+      .section-head {
+        display: block;
+      }
+
+      .section-head p {
+        margin-top: 20px;
+      }
+
+      .feature-grid,
+      .device-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .feature,
+      .feature:nth-child(2) {
+        min-height: 0;
+        border-right: 1px solid var(--line);
+      }
+
+      .feature:nth-child(n+2) {
+        border-top: 1px solid var(--line);
+      }
+
+      .radio-window {
+        transform: none;
+      }
+
+      .equalizer {
+        gap: 5px;
+        padding-inline: 17px;
+      }
+
+      .player {
+        grid-template-columns: 1fr;
+      }
+
+      .download-panel {
+        grid-template-columns: 1fr;
+        padding: 39px 27px;
+      }
+
+      .download-panel .button {
+        width: fit-content;
+      }
+
+      .footer-row {
+        align-items: start;
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <nav class="nav shell" aria-label="Main navigation">
+      <a class="brand" href="#top" aria-label="DAB SDR GUI home">
+        <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+        <span>DAB SDR GUI</span>
+      </a>
+      <div class="nav-links">
+        <a href="#install">Install</a>
+        <a href="#devices">Devices</a>
+        <a href="#spectrum">Spectrum</a>
+        <a class="button small" href="https://sourceforge.net/projects/dab-sdr-gui/files/latest/download">Download</a>
+      </div>
+    </nav>
+  </header>
+
+  <main id="top">
+    <div class="hero shell">
+      <div class="hero-copy">
+        <span class="eyebrow">Freeware digital radio</span>
+        <h1>Turn radio waves into radio.</h1>
+        <p>DAB SDR GUI is a Windows receiver for DAB+ broadcasts. Connect an SDRplay or RTL-SDR device, scan Band III, choose a station, and listen from one focused desktop app.</p>
+        <div class="hero-actions">
+          <a class="button" href="https://sourceforge.net/projects/dab-sdr-gui/files/latest/download">Download for Windows <span aria-hidden="true">&darr;</span></a>
+          <a class="button secondary" href="#install">Installation guide</a>
+        </div>
+        <div class="compatibility" aria-label="Compatibility">
+          <span>Windows 10 / 11, 64-bit</span>
+          <span>SDRplay</span>
+          <span>RTL-SDR</span>
+        </div>
+      </div>
+
+      <div class="radio-window-wrap" aria-label="Stylized preview of the DAB SDR GUI">
+        <div class="radio-window">
+          <div class="window-bar">
+            <span>dab-lib GUI v0.1.3</span>
+            <span class="window-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+          </div>
+          <div class="spectrum" aria-hidden="true">
+            <span style="--h: 21%; --d: -.2s"></span><span style="--h: 35%; --d: -.7s"></span>
+            <span style="--h: 48%; --d: -1s"></span><span style="--h: 31%; --d: -.4s"></span>
+            <span style="--h: 65%; --d: -1.3s"></span><span style="--h: 86%; --d: -.9s"></span>
+            <span style="--h: 72%; --d: -.1s"></span><span style="--h: 43%; --d: -1.5s"></span>
+            <span style="--h: 58%; --d: -.6s"></span><span style="--h: 91%; --d: -1.1s"></span>
+            <span style="--h: 75%; --d: -.3s"></span><span style="--h: 39%; --d: -1.6s"></span>
+            <span style="--h: 50%; --d: -.8s"></span><span style="--h: 29%; --d: -1.2s"></span>
+          </div>
+          <div class="equalizer" aria-hidden="true">
+            <div class="eq-band"><div class="eq-track" style="--p:65%"></div><small>60</small></div>
+            <div class="eq-band"><div class="eq-track" style="--p:52%"></div><small>170</small></div>
+            <div class="eq-band"><div class="eq-track" style="--p:38%"></div><small>310</small></div>
+            <div class="eq-band"><div class="eq-track" style="--p:45%"></div><small>600</small></div>
+            <div class="eq-band"><div class="eq-track" style="--p:57%"></div><small>1k</small></div>
+            <div class="eq-band"><div class="eq-track" style="--p:42%"></div><small>3k</small></div>
+            <div class="eq-band"><div class="eq-track" style="--p:29%"></div><small>6k</small></div>
+            <div class="eq-band"><div class="eq-track" style="--p:37%"></div><small>10k</small></div>
+            <div class="eq-band"><div class="eq-track" style="--p:53%"></div><small>12k</small></div>
+            <div class="eq-band"><div class="eq-track" style="--p:61%"></div><small>16k</small></div>
+          </div>
+          <div class="player">
+            <div class="now-playing"><strong>Your station</strong><span>SDRplay &middot; AGC on &middot; Playing</span></div>
+            <div class="player-controls" aria-hidden="true"><span class="active">Start</span><span>Stop</span><span>Scan</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <section class="features" aria-label="Features">
+      <div class="feature-grid shell">
+        <article class="feature"><span class="feature-number">01</span><h3>Find local stations</h3><p>Scan the DAB Band III channels and keep the discovered station list ready for your next session.</p></article>
+        <article class="feature"><span class="feature-number">02</span><h3>Listen to DAB+</h3><p>Select a discovered service and play decoded digital radio through your Windows audio output.</p></article>
+        <article class="feature"><span class="feature-number">03</span><h3>Watch the audio</h3><p>A smooth OpenGL spectrum analyzer visualizes the program audio in three distinct display styles.</p></article>
+        <article class="feature"><span class="feature-number">04</span><h3>Shape the sound</h3><p>Use the built-in 10-band equalizer and presets to tailor playback to your speakers and taste.</p></article>
+      </div>
+    </section>
+
+    <section id="install">
+      <div class="guide shell">
+        <div class="guide-intro">
+          <span class="eyebrow">First-time setup</span>
+          <h2>On air in four steps.</h2>
+          <p>The Windows installer includes the application and its audio and GUI runtime libraries. Your radio hardware driver must be installed separately.</p>
+        </div>
+        <div class="steps">
+          <article class="step">
+            <div><h3>Prepare your receiver</h3><p>For SDRplay hardware, install the latest Windows driver and API from the <a href="https://www.sdrplay.com/downloads/">official SDRplay downloads page</a>, then connect the device. For RTL-SDR, make sure a compatible Windows driver is installed.</p></div>
+          </article>
+          <article class="step">
+            <div><h3>Install DAB SDR GUI</h3><p>Download the latest setup file from SourceForge, run it, and follow the installer. Windows may ask you to confirm that you want to run a newly downloaded application.</p></div>
+          </article>
+          <article class="step">
+            <div><h3>Select and scan</h3><p>Open <code>Settings &gt; SDR Settings...</code>, select your hardware backend, and press <code>OK</code>. Press <code>Scan</code> and wait while the available DAB channels are checked.</p></div>
+          </article>
+          <article class="step">
+            <div><h3>Start listening</h3><p>Choose a station from the <code>Station</code> list and press <code>Start</code>. Use <code>Stop</code> before disconnecting the receiver or changing devices.</p></div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="devices" id="devices">
+      <div class="shell">
+        <div class="section-head">
+          <div><span class="eyebrow">Receiver settings</span><h2>Choose the hardware you have.</h2></div>
+          <p>The selected backend, automatic gain control, and manual gain are saved for the next time you launch the app.</p>
+        </div>
+        <div class="device-grid">
+          <article class="device-card">
+            <span class="tag">Default backend</span>
+            <h3>SDRplay</h3>
+            <p>Select <strong>SDRplay</strong> for supported RSP receivers. Install the vendor software first from <a href="https://www.sdrplay.com/downloads/">sdrplay.com</a>.</p>
+          </article>
+          <article class="device-card">
+            <span class="tag">Alternative backend</span>
+            <h3>RTL-SDR</h3>
+            <p>Select <strong>RTL-SDR</strong> for compatible USB dongles. Confirm that Windows sees the receiver through the correct driver before scanning.</p>
+          </article>
+        </div>
+        <div class="settings-path" aria-label="Path to device settings">
+          <span>Settings</span><b aria-hidden="true">/</b><span>SDR Settings...</span><b aria-hidden="true">/</b><span>HAL backend</span><b aria-hidden="true">/</b><span>OK</span>
+        </div>
+        <p style="margin: 22px 0 0; color: #aec0c0; max-width: 780px;">Leave <strong>Automatic gain control</strong> enabled for a simple first setup. If you disable it, set the manual gain in dB. Stop and restart playback after changing SDR settings, and scan again when switching hardware.</p>
+      </div>
+    </section>
+
+    <section id="spectrum">
+      <div class="shell">
+        <div class="section-head">
+          <div><span class="eyebrow">OpenGL display</span><h2>See the signal your way.</h2></div>
+          <p>Open <code>Settings &gt; Spectrum Settings...</code>, choose a display mode, and press <code>OK</code>. The change appears immediately and is remembered.</p>
+        </div>
+        <div class="mode-grid">
+          <article class="mode-card">
+            <div class="mode-preview"><div class="mini-bars" aria-hidden="true"><i style="--h:28%"></i><i style="--h:51%"></i><i style="--h:74%"></i><i style="--h:45%"></i><i style="--h:88%"></i><i style="--h:63%"></i><i style="--h:35%"></i><i style="--h:56%"></i><i style="--h:79%"></i><i style="--h:42%"></i></div></div>
+            <div class="mode-copy"><h3>RTA bars</h3><p>The default real-time analyzer view, ideal for reading the overall balance of the audio spectrum.</p></div>
+          </article>
+          <article class="mode-card">
+            <div class="mode-preview curve" aria-hidden="true"><svg viewBox="0 0 400 145" preserveAspectRatio="none"><defs><linearGradient id="fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d9ed75" stop-opacity=".55"/><stop offset="1" stop-color="#087e78" stop-opacity=".03"/></linearGradient></defs><path d="M0 118 C28 112 35 91 62 97 S101 62 125 76 S158 113 183 75 S218 34 241 60 S278 102 302 70 S345 39 400 48 L400 145 L0 145Z" fill="url(#fill)"/><path d="M0 118 C28 112 35 91 62 97 S101 62 125 76 S158 113 183 75 S218 34 241 60 S278 102 302 70 S345 39 400 48" fill="none" stroke="#d9ed75" stroke-width="3"/></svg></div>
+            <div class="mode-copy"><h3>FFT curve</h3><p>A continuous frequency curve for a more detailed view of peaks and valleys in the program audio.</p></div>
+          </article>
+          <article class="mode-card">
+            <div class="mode-preview"><div class="leds" aria-hidden="true"><span class="led-column"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="led-column"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="led-column"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="led-column"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="led-column"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="led-column"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="led-column"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="led-column"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></div></div>
+            <div class="mode-copy"><h3>LED bars</h3><p>A segmented meter display inspired by classic hardware analyzers and studio equipment.</p></div>
+          </article>
+        </div>
+        <p class="spectrum-note"><strong>Tip:</strong> The spectrum shows decoded audio, so it becomes active after a station starts playing. Display mode does not affect reception or sound quality.</p>
+      </div>
+    </section>
+
+    <section class="download" aria-label="Download">
+      <div class="download-panel shell">
+        <div><span class="eyebrow">Ready to tune in?</span><h2>Bring DAB radio to your Windows desktop.</h2><p>Download the latest installer, connect your receiver, and scan for stations in your area.</p></div>
+        <a class="button" href="https://sourceforge.net/projects/dab-sdr-gui/files/latest/download">Get DAB SDR GUI <span aria-hidden="true">&darr;</span></a>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="footer-row shell">
+      <span>DAB SDR GUI &middot; Freeware for digital radio enthusiasts</span>
+      <span><a href="https://sourceforge.net/projects/dab-sdr-gui/files/">Downloads</a></span>
+    </div>
+  </footer>
+</body>
+</html>
