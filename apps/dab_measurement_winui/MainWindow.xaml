@@ -746,7 +746,261 @@
                     </ScrollViewer>
                 </TabViewItem>
                 <TabViewItem Header="Spectrum" IsClosable="False">
-                    <TextBlock Text="Spectrum workspace integration is the next RF page." HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" />
+                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  Padding="12">
+                        <StackPanel x:Name="RfSpectrumCaptureRoot"
+                                    Spacing="10"
+                                    Loaded="RfSpectrum_Loaded">
+                            <Border Style="{StaticResource PanelCardStyle}" Padding="14,10">
+                                <StackPanel Spacing="9">
+                                    <TextBlock Text="Spectrum controls" FontSize="15" FontWeight="SemiBold" />
+                                    <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                                                  VerticalScrollBarVisibility="Disabled">
+                                        <StackPanel Orientation="Horizontal" Spacing="10" MinWidth="1040">
+                                            <NumberBox x:Name="RfSpectrumCenterNumberBox"
+                                                       Header="CENTER (MHz)"
+                                                       Width="126"
+                                                       Minimum="100"
+                                                       Maximum="300"
+                                                       SmallChange="0.001"
+                                                       Value="213.360"
+                                                       SpinButtonPlacementMode="Compact"
+                                                       ValueChanged="RfSpectrumCenter_ValueChanged" />
+                                            <ComboBox x:Name="RfSpectrumSpanComboBox"
+                                                      Header="SPAN"
+                                                      Width="114"
+                                                      SelectedIndex="0"
+                                                      SelectionChanged="RfSpectrumControls_SelectionChanged">
+                                                <ComboBoxItem Content="2.048 MHz" Tag="2048000" />
+                                                <ComboBoxItem Content="1.000 MHz" Tag="1000000" />
+                                                <ComboBoxItem Content="500 kHz" Tag="500000" />
+                                                <ComboBoxItem Content="200 kHz" Tag="200000" />
+                                                <ComboBoxItem Content="100 kHz" Tag="100000" />
+                                                <ComboBoxItem x:Name="RfSpectrumCustomSpanItem" Content="Custom" Tag="0" IsEnabled="False" />
+                                            </ComboBox>
+                                            <ComboBox x:Name="RfSpectrumFftComboBox"
+                                                      Header="FFT SIZE"
+                                                      Width="92"
+                                                      SelectedIndex="0"
+                                                      IsEnabled="False"
+                                                      ToolTipService.ToolTip="The receiver measurement stream supplies a native 2048-bin FFT">
+                                                <ComboBoxItem Content="2048" />
+                                            </ComboBox>
+                                            <StackPanel Width="104">
+                                                <TextBlock Text="RBW" Style="{StaticResource SectionTitleStyle}" />
+                                                <TextBlock x:Name="RfSpectrumRbwText"
+                                                           Text="1.000 kHz"
+                                                           FontFamily="Consolas"
+                                                           Margin="0,9,0,0" />
+                                            </StackPanel>
+                                            <ComboBox x:Name="RfSpectrumWindowComboBox"
+                                                      Header="WINDOW"
+                                                      Width="132"
+                                                      SelectedIndex="0"
+                                                      IsEnabled="False"
+                                                      ToolTipService.ToolTip="Bins are supplied directly by the synchronized receiver FFT; no additional display window is applied">
+                                                <ComboBoxItem Content="Receiver FFT" />
+                                            </ComboBox>
+                                            <ComboBox x:Name="RfSpectrumAverageComboBox"
+                                                      Header="AVERAGING"
+                                                      Width="90"
+                                                      SelectedIndex="3"
+                                                      SelectionChanged="RfSpectrumControls_SelectionChanged">
+                                                <ComboBoxItem Content="1" Tag="1" />
+                                                <ComboBoxItem Content="2" Tag="2" />
+                                                <ComboBoxItem Content="4" Tag="4" />
+                                                <ComboBoxItem Content="8" Tag="8" />
+                                                <ComboBoxItem Content="16" Tag="16" />
+                                                <ComboBoxItem Content="32" Tag="32" />
+                                            </ComboBox>
+                                            <NumberBox x:Name="RfSpectrumReferenceNumberBox"
+                                                       Header="REFERENCE"
+                                                       Width="104"
+                                                       Minimum="-80"
+                                                       Maximum="10"
+                                                       SmallChange="5"
+                                                       Value="-20"
+                                                       SpinButtonPlacementMode="Compact"
+                                                       ValueChanged="RfSpectrumReference_ValueChanged" />
+                                            <ComboBox x:Name="RfSpectrumScaleComboBox"
+                                                      Header="SCALE"
+                                                      Width="96"
+                                                      SelectedIndex="1"
+                                                      SelectionChanged="RfSpectrumControls_SelectionChanged">
+                                                <ComboBoxItem Content="5 dB/div" Tag="5" />
+                                                <ComboBoxItem Content="10 dB/div" Tag="10" />
+                                                <ComboBoxItem Content="20 dB/div" Tag="20" />
+                                            </ComboBox>
+                                        </StackPanel>
+                                    </ScrollViewer>
+
+                                    <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                                                  VerticalScrollBarVisibility="Disabled">
+                                        <StackPanel Orientation="Horizontal" Spacing="8" MinWidth="1040">
+                                            <ToggleButton x:Name="RfSpectrumMarker1Button"
+                                                          Content="Marker 1"
+                                                          IsChecked="True"
+                                                          Click="RfSpectrumMarker_Click" />
+                                            <ToggleButton x:Name="RfSpectrumMarker2Button"
+                                                          Content="Marker 2"
+                                                          Click="RfSpectrumMarker_Click" />
+                                            <ToggleButton x:Name="RfSpectrumPeakHoldButton"
+                                                          Content="Peak hold"
+                                                          IsChecked="True"
+                                                          Click="RfSpectrumPeakHold_Click" />
+                                            <Button Content="Clear peaks" Click="RfSpectrumClearPeaks_Click" />
+                                            <ToggleButton x:Name="RfSpectrumFreezeButton"
+                                                          Content="Freeze"
+                                                          Click="RfSpectrumFreeze_Click" />
+                                            <Button Content="Save screenshot" Click="RfSpectrumSaveScreenshot_Click" />
+                                            <ComboBox x:Name="RfSpectrumTriggerComboBox"
+                                                      Width="128"
+                                                      SelectedIndex="0"
+                                                      ToolTipService.ToolTip="Trigger selection for a future raw-IQ recorder">
+                                                <ComboBoxItem Content="Manual trigger" />
+                                                <ComboBoxItem Content="Level rising" />
+                                                <ComboBoxItem Content="Sync loss" />
+                                            </ComboBox>
+                                            <Button Content="Capture IQ"
+                                                    IsEnabled="False"
+                                                    ToolTipService.ToolTip="Raw IQ is not exposed by the current receiver pipeline yet" />
+                                            <TextBlock x:Name="RfSpectrumInteractionHintText"
+                                                       Text="Wheel zoom · drag pan · double-click reset · click/drag marker"
+                                                       Foreground="{StaticResource MutedTextBrush}"
+                                                       VerticalAlignment="Center"
+                                                       Margin="8,0,0,0" />
+                                        </StackPanel>
+                                    </ScrollViewer>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource PanelCardStyle}" Padding="12,10">
+                                <Grid RowSpacing="6">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="300" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Grid ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="Spectrum" FontSize="15" FontWeight="SemiBold" />
+                                        <TextBlock Grid.Column="1"
+                                                   x:Name="RfSpectrumViewText"
+                                                   Text="213.360 MHz · 2.048 MHz span"
+                                                   Foreground="{StaticResource MutedTextBrush}"
+                                                   FontFamily="Consolas" />
+                                    </Grid>
+                                    <Grid Grid.Row="1" ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="58" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Viewbox Stretch="Fill">
+                                            <Canvas Width="58" Height="300">
+                                                <TextBlock x:Name="RfSpectrumYAxisTopText" Text="-20" FontFamily="Consolas" FontSize="11" Width="58" TextAlignment="Right" Canvas.Top="0" />
+                                                <TextBlock x:Name="RfSpectrumYAxis1Text" Text="-40" FontFamily="Consolas" FontSize="11" Width="58" TextAlignment="Right" Canvas.Top="92" />
+                                                <TextBlock x:Name="RfSpectrumYAxis2Text" Text="-60" FontFamily="Consolas" FontSize="11" Width="58" TextAlignment="Right" Canvas.Top="192" />
+                                                <TextBlock x:Name="RfSpectrumYAxisBottomText" Text="-80 dBFS" FontFamily="Consolas" FontSize="11" Width="58" TextAlignment="Right" Canvas.Top="282" />
+                                            </Canvas>
+                                        </Viewbox>
+                                        <Border Grid.Column="1" BorderBrush="{StaticResource PanelStrokeBrush}" BorderThickness="1" Background="#FF07101B">
+                                            <Viewbox Stretch="Fill">
+                                                <Canvas x:Name="RfSpectrumCanvas"
+                                                        Width="1000"
+                                                        Height="300"
+                                                        Background="#FF07101B"
+                                                        PointerWheelChanged="RfSpectrumCanvas_PointerWheelChanged"
+                                                        PointerPressed="RfSpectrumCanvas_PointerPressed"
+                                                        PointerMoved="RfSpectrumCanvas_PointerMoved"
+                                                        PointerReleased="RfSpectrumCanvas_PointerReleased"
+                                                        PointerExited="RfSpectrumCanvas_PointerExited"
+                                                        PointerCaptureLost="RfSpectrumCanvas_PointerCaptureLost"
+                                                        DoubleTapped="RfSpectrumCanvas_DoubleTapped">
+                                                    <Canvas.ContextFlyout>
+                                                        <MenuFlyout>
+                                                            <MenuFlyoutItem Text="Tune receiver to selected frequency" Click="RfSpectrumTuneToCursor_Click" />
+                                                            <MenuFlyoutItem Text="Reset spectrum view" Click="RfSpectrumResetView_Click" />
+                                                        </MenuFlyout>
+                                                    </Canvas.ContextFlyout>
+                                                    <Line X1="0" Y1="50" X2="1000" Y2="50" Stroke="#253D556E" StrokeThickness="1" />
+                                                    <Line X1="0" Y1="100" X2="1000" Y2="100" Stroke="#253D556E" StrokeThickness="1" />
+                                                    <Line X1="0" Y1="150" X2="1000" Y2="150" Stroke="#253D556E" StrokeThickness="1" />
+                                                    <Line X1="0" Y1="200" X2="1000" Y2="200" Stroke="#253D556E" StrokeThickness="1" />
+                                                    <Line X1="0" Y1="250" X2="1000" Y2="250" Stroke="#253D556E" StrokeThickness="1" />
+                                                    <Line X1="250" Y1="0" X2="250" Y2="300" Stroke="#183D556E" StrokeThickness="1" />
+                                                    <Line X1="500" Y1="0" X2="500" Y2="300" Stroke="#253D556E" StrokeThickness="1" />
+                                                    <Line X1="750" Y1="0" X2="750" Y2="300" Stroke="#183D556E" StrokeThickness="1" />
+                                                    <Polyline x:Name="RfSpectrumPeakTrace"
+                                                              Stroke="#66FFC857"
+                                                              StrokeThickness="1"
+                                                              Points="0,300 1000,300" />
+                                                    <Polyline x:Name="RfSpectrumLiveTrace"
+                                                              Stroke="{StaticResource SpectrumBrush}"
+                                                              StrokeThickness="2"
+                                                              Points="0,300 1000,300" />
+                                                    <Line x:Name="RfSpectrumMarker1Line" X1="0" Y1="0" X2="0" Y2="300" Stroke="#FFFFC857" StrokeThickness="1.5" Visibility="Collapsed" />
+                                                    <Line x:Name="RfSpectrumMarker2Line" X1="0" Y1="0" X2="0" Y2="300" Stroke="#FFFF6B9A" StrokeThickness="1.5" Visibility="Collapsed" />
+                                                    <Border x:Name="RfSpectrumTooltipBorder"
+                                                            Canvas.Left="0"
+                                                            Canvas.Top="0"
+                                                            Padding="7,4"
+                                                            CornerRadius="4"
+                                                            Background="#E6233447"
+                                                            BorderBrush="#FF5A718A"
+                                                            BorderThickness="1"
+                                                            Visibility="Collapsed">
+                                                        <TextBlock x:Name="RfSpectrumTooltipText" Text="— MHz · — dBFS" FontFamily="Consolas" FontSize="11" />
+                                                    </Border>
+                                                </Canvas>
+                                            </Viewbox>
+                                        </Border>
+                                    </Grid>
+                                    <Grid Grid.Row="2" Margin="66,0,0,0">
+                                        <TextBlock x:Name="RfSpectrumAxisLeftText" Text="212.336 MHz" FontFamily="Consolas" FontSize="11" Foreground="{StaticResource MutedTextBrush}" HorizontalAlignment="Left" />
+                                        <TextBlock x:Name="RfSpectrumAxisCenterText" Text="213.360 MHz" FontFamily="Consolas" FontSize="11" Foreground="{StaticResource MutedTextBrush}" HorizontalAlignment="Center" />
+                                        <TextBlock x:Name="RfSpectrumAxisRightText" Text="214.384 MHz" FontFamily="Consolas" FontSize="11" Foreground="{StaticResource MutedTextBrush}" HorizontalAlignment="Right" />
+                                    </Grid>
+                                </Grid>
+                            </Border>
+
+                            <Border Style="{StaticResource PanelCardStyle}" Padding="12,10">
+                                <Grid RowSpacing="6">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="150" />
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Text="Waterfall" FontSize="15" FontWeight="SemiBold" />
+                                    <Border Grid.Row="1" BorderBrush="{StaticResource PanelStrokeBrush}" BorderThickness="1" Background="#FF07101B">
+                                        <Viewbox Stretch="Fill">
+                                            <Canvas x:Name="RfSpectrumWaterfallCanvas" Width="1000" Height="150" Background="#FF07101B" />
+                                        </Viewbox>
+                                    </Border>
+                                </Grid>
+                            </Border>
+
+                            <Border Style="{StaticResource PanelCardStyle}" Padding="12,8">
+                                <Grid ColumnSpacing="18">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock x:Name="RfSpectrumMarkerStatusText"
+                                               Text="Marker 1: click the spectrum to place"
+                                               FontFamily="Consolas"
+                                               TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Grid.Column="1"
+                                               x:Name="RfSpectrumNoiseFloorText"
+                                               Text="Noise floor: — dBFS"
+                                               FontFamily="Consolas"
+                                               Foreground="{StaticResource MutedTextBrush}" />
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
                 </TabViewItem>
                 <TabViewItem Header="RF Input" IsClosable="False">
                     <TextBlock Text="RF input controls and calibration will be added here." HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" />

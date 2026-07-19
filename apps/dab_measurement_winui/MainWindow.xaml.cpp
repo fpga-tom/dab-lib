@@ -12,6 +12,8 @@ using namespace Windows::Foundation;
 using namespace Windows::UI;
 using namespace Microsoft::UI::Xaml;
 using namespace Microsoft::UI::Xaml::Controls;
+using namespace Microsoft::UI::Xaml::Controls::Primitives;
+using namespace Microsoft::UI::Xaml::Input;
 using namespace Microsoft::UI::Xaml::Media;
 using namespace Microsoft::UI::Xaml::Shapes;
 
@@ -215,6 +217,378 @@ namespace winrt::DabMeasurementWinUI::implementation
         if (RfOverviewContent() && args.NewSize().Width > 48.0f)
         {
             RfOverviewContent().Width(static_cast<double>(args.NewSize().Width) - 36.0);
+        }
+    }
+
+    void MainWindow::RfSpectrum_Loaded(IInspectable const&, RoutedEventArgs const&)
+    {
+        if (m_rf_spectrum_controls_ready)
+        {
+            return;
+        }
+
+        if (auto const selected_channel = ChannelComboBox().SelectedItem().try_as<ComboBoxItem>())
+        {
+            auto const tag = unbox_value<hstring>(selected_channel.Tag());
+            double const selected_mhz = std::wcstod(tag.c_str(), nullptr);
+            if (std::isfinite(selected_mhz) && selected_mhz > 0.0)
+            {
+                m_rf_spectrum_source_center_hz = selected_mhz * 1000000.0;
+                m_rf_spectrum_source_start_hz = m_rf_spectrum_source_center_hz - 1024000.0;
+                m_rf_spectrum_view_center_hz = m_rf_spectrum_source_center_hz;
+            }
+        }
+        m_rf_spectrum_controls_ready = true;
+        UpdateRfSpectrumReadouts();
+        RenderRfSpectrum();
+    }
+
+    void MainWindow::RfSpectrumControls_SelectionChanged(IInspectable const& sender,
+                                                          SelectionChangedEventArgs const&)
+    {
+        if (!m_rf_spectrum_controls_ready || m_rf_spectrum_updating_controls)
+        {
+            return;
+        }
+
+        auto const element = sender.try_as<FrameworkElement>();
+        if (!element)
+        {
+            return;
+        }
+
+        auto read_selected_tag = [](ComboBox const& combo, double fallback)
+        {
+            auto const item = combo.SelectedItem().try_as<ComboBoxItem>();
+            if (!item || !item.Tag())
+            {
+                return fallback;
+            }
+            auto const value = unbox_value<hstring>(item.Tag());
+            wchar_t* end = nullptr;
+            double const parsed = std::wcstod(value.c_str(), &end);
+            return end != value.c_str() && std::isfinite(parsed) ? parsed : fallback;
+        };
+
+        if (element.Name() == L"RfSpectrumSpanComboBox")
+        {
+            m_rf_spectrum_view_span_hz = read_selected_tag(RfSpectrumSpanComboBox(),
+                                                           m_rf_spectrum_view_span_hz);
+            ClampRfSpectrumView();
+            RfSpectrumWaterfallCanvas().Children().Clear();
+        }
+        else if (element.Name() == L"RfSpectrumAverageComboBox")
+        {
+            m_rf_spectrum_average_factor = static_cast<uint32_t>(read_selected_tag(
+                RfSpectrumAverageComboBox(),
+                static_cast<double>(m_rf_spectrum_average_factor)));
+            m_rf_spectrum_average_initialized = false;
+        }
+        else if (element.Name() == L"RfSpectrumScaleComboBox")
+        {
+            m_rf_spectrum_scale_db = read_selected_tag(RfSpectrumScaleComboBox(),
+                                                       m_rf_spectrum_scale_db);
+        }
+
+        UpdateRfSpectrumReadouts();
+        RenderRfSpectrum();
+    }
+
+    void MainWindow::RfSpectrumCenter_ValueChanged(IInspectable const&,
+                                                    NumberBoxValueChangedEventArgs const& args)
+    {
+        if (!m_rf_spectrum_controls_ready || m_rf_spectrum_updating_controls ||
+            !std::isfinite(args.NewValue()))
+        {
+            return;
+        }
+        m_rf_spectrum_view_center_hz = args.NewValue() * 1000000.0;
+        ClampRfSpectrumView();
+        RfSpectrumWaterfallCanvas().Children().Clear();
+        UpdateRfSpectrumReadouts();
+        RenderRfSpectrum();
+    }
+
+    void MainWindow::RfSpectrumReference_ValueChanged(IInspectable const&,
+                                                       NumberBoxValueChangedEventArgs const& args)
+    {
+        if (!m_rf_spectrum_controls_ready || m_rf_spectrum_updating_controls ||
+            !std::isfinite(args.NewValue()))
+        {
+            return;
+        }
+        m_rf_spectrum_reference_dbfs = args.NewValue();
+        UpdateRfSpectrumReadouts();
+        RenderRfSpectrum();
+    }
+
+    void MainWindow::RfSpectrumMarker_Click(IInspectable const& sender, RoutedEventArgs const&)
+    {
+        auto const button = sender.try_as<ToggleButton>();
+        if (!button)
+        {
+            return;
+        }
+        m_rf_spectrum_active_marker = button.Name() == L"RfSpectrumMarker2Button" ? 1u : 0u;
+        RfSpectrumMarker1Button().IsChecked(m_rf_spectrum_active_marker == 0u);
+        RfSpectrumMarker2Button().IsChecked(m_rf_spectrum_active_marker == 1u);
+        UpdateRfSpectrumReadouts();
+    }
+
+    void MainWindow::RfSpectrumClearPeaks_Click(IInspectable const&, RoutedEventArgs const&)
+    {
+        if (m_rf_spectrum_count != 0u)
+        {
+            std::copy_n(m_rf_spectrum_average.begin(),
+                        m_rf_spectrum_count,
+                        m_rf_spectrum_peak.begin());
+        }
+        RenderRfSpectrum();
+        AddTimelineEvent(L"Spectrum peak hold cleared");
+    }
+
+    void MainWindow::RfSpectrumPeakHold_Click(IInspectable const&, RoutedEventArgs const&)
+    {
+        auto const checked = RfSpectrumPeakHoldButton().IsChecked();
+        m_rf_spectrum_peak_hold = checked && checked.Value();
+        if (!m_rf_spectrum_peak_hold && m_rf_spectrum_count != 0u)
+        {
+            std::copy_n(m_rf_spectrum_average.begin(),
+                        m_rf_spectrum_count,
+                        m_rf_spectrum_peak.begin());
+        }
+        RenderRfSpectrum();
+    }
+
+    void MainWindow::RfSpectrumFreeze_Click(IInspectable const&, RoutedEventArgs const&)
+    {
+        auto const checked = RfSpectrumFreezeButton().IsChecked();
+        m_rf_spectrum_frozen = checked && checked.Value();
+        RfSpectrumInteractionHintText().Text(m_rf_spectrum_frozen
+            ? L"Display frozen · interaction remains available"
+            : L"Wheel zoom · drag pan · double-click reset · click/drag marker");
+        AddTimelineEvent(m_rf_spectrum_frozen
+            ? hstring{ L"Spectrum display frozen" }
+            : hstring{ L"Spectrum display resumed" });
+    }
+
+    void MainWindow::RfSpectrumCanvas_PointerWheelChanged(IInspectable const&,
+                                                           PointerRoutedEventArgs const& args)
+    {
+        auto const point = args.GetCurrentPoint(RfSpectrumCanvas());
+        auto const position = point.Position();
+        m_rf_spectrum_cursor_frequency_hz = RfSpectrumFrequencyFromX(position.X);
+        double const anchor = m_rf_spectrum_cursor_frequency_hz;
+        double const ratio = std::clamp(static_cast<double>(position.X) / 1000.0, 0.0, 1.0);
+        double const old_span = m_rf_spectrum_view_span_hz;
+        double const zoom = point.Properties().MouseWheelDelta() > 0 ? 0.80 : 1.25;
+        double const maximum_span = m_rf_spectrum_sample_rate_hz != 0u
+            ? static_cast<double>(m_rf_spectrum_sample_rate_hz)
+            : 2048000.0;
+        m_rf_spectrum_view_span_hz = std::clamp(old_span * zoom, 20000.0, maximum_span);
+        m_rf_spectrum_view_center_hz = anchor - (ratio - 0.5) * m_rf_spectrum_view_span_hz;
+        ClampRfSpectrumView();
+        RfSpectrumWaterfallCanvas().Children().Clear();
+        UpdateRfSpectrumReadouts();
+        RenderRfSpectrum();
+        UpdateRfSpectrumHover(position);
+        args.Handled(true);
+    }
+
+    void MainWindow::RfSpectrumCanvas_PointerPressed(IInspectable const&,
+                                                      PointerRoutedEventArgs const& args)
+    {
+        auto const point = args.GetCurrentPoint(RfSpectrumCanvas());
+        if (!point.Properties().IsLeftButtonPressed())
+        {
+            m_rf_spectrum_cursor_frequency_hz = RfSpectrumFrequencyFromX(point.Position().X);
+            UpdateRfSpectrumHover(point.Position());
+            return;
+        }
+
+        m_rf_spectrum_pointer_pressed = true;
+        m_rf_spectrum_pointer_moved = false;
+        m_rf_spectrum_pointer_start = point.Position();
+        m_rf_spectrum_pan_start_center_hz = m_rf_spectrum_view_center_hz;
+        m_rf_spectrum_drag_marker = -1;
+        for (uint32_t marker = 0u; marker < 2u; ++marker)
+        {
+            if (m_rf_spectrum_marker_valid[marker] &&
+                std::abs(RfSpectrumXFromFrequency(m_rf_spectrum_marker_frequency_hz[marker]) -
+                         point.Position().X) <= 10.0)
+            {
+                m_rf_spectrum_drag_marker = static_cast<int32_t>(marker);
+                m_rf_spectrum_active_marker = marker;
+                break;
+            }
+        }
+        RfSpectrumCanvas().CapturePointer(args.Pointer());
+        args.Handled(true);
+    }
+
+    void MainWindow::RfSpectrumCanvas_PointerMoved(IInspectable const&,
+                                                    PointerRoutedEventArgs const& args)
+    {
+        auto const position = args.GetCurrentPoint(RfSpectrumCanvas()).Position();
+        if (m_rf_spectrum_pointer_pressed)
+        {
+            double const delta_x = static_cast<double>(position.X - m_rf_spectrum_pointer_start.X);
+            if (std::abs(delta_x) > 3.0)
+            {
+                m_rf_spectrum_pointer_moved = true;
+            }
+            if (m_rf_spectrum_drag_marker >= 0)
+            {
+                SetRfSpectrumMarker(static_cast<uint32_t>(m_rf_spectrum_drag_marker),
+                                    RfSpectrumFrequencyFromX(position.X));
+            }
+            else if (m_rf_spectrum_pointer_moved)
+            {
+                m_rf_spectrum_view_center_hz = m_rf_spectrum_pan_start_center_hz -
+                    delta_x * m_rf_spectrum_view_span_hz / 1000.0;
+                ClampRfSpectrumView();
+                UpdateRfSpectrumReadouts();
+                RenderRfSpectrum();
+            }
+        }
+        UpdateRfSpectrumHover(position);
+        args.Handled(true);
+    }
+
+    void MainWindow::RfSpectrumCanvas_PointerReleased(IInspectable const&,
+                                                       PointerRoutedEventArgs const& args)
+    {
+        auto const position = args.GetCurrentPoint(RfSpectrumCanvas()).Position();
+        if (m_rf_spectrum_pointer_pressed && !m_rf_spectrum_pointer_moved)
+        {
+            SetRfSpectrumMarker(m_rf_spectrum_active_marker,
+                                RfSpectrumFrequencyFromX(position.X));
+        }
+        if (m_rf_spectrum_pointer_moved && m_rf_spectrum_drag_marker < 0)
+        {
+            RfSpectrumWaterfallCanvas().Children().Clear();
+        }
+        RfSpectrumCanvas().ReleasePointerCapture(args.Pointer());
+        m_rf_spectrum_pointer_pressed = false;
+        m_rf_spectrum_pointer_moved = false;
+        m_rf_spectrum_drag_marker = -1;
+        args.Handled(true);
+    }
+
+    void MainWindow::RfSpectrumCanvas_PointerExited(IInspectable const&,
+                                                     PointerRoutedEventArgs const&)
+    {
+        if (!m_rf_spectrum_pointer_pressed)
+        {
+            RfSpectrumTooltipBorder().Visibility(Visibility::Collapsed);
+        }
+    }
+
+    void MainWindow::RfSpectrumCanvas_PointerCaptureLost(IInspectable const&,
+                                                          PointerRoutedEventArgs const&)
+    {
+        m_rf_spectrum_pointer_pressed = false;
+        m_rf_spectrum_pointer_moved = false;
+        m_rf_spectrum_drag_marker = -1;
+    }
+
+    void MainWindow::RfSpectrumCanvas_DoubleTapped(IInspectable const&,
+                                                    DoubleTappedRoutedEventArgs const& args)
+    {
+        ResetRfSpectrumView();
+        args.Handled(true);
+    }
+
+    void MainWindow::RfSpectrumResetView_Click(IInspectable const&, RoutedEventArgs const&)
+    {
+        ResetRfSpectrumView();
+    }
+
+    void MainWindow::RfSpectrumTuneToCursor_Click(IInspectable const&, RoutedEventArgs const&)
+    {
+        double const frequency_hz = std::clamp(
+            m_rf_spectrum_cursor_frequency_hz,
+            m_rf_spectrum_source_start_hz,
+            m_rf_spectrum_source_start_hz +
+                static_cast<double>((std::max)(m_rf_spectrum_count, 1u) - 1u) * m_rf_spectrum_bin_hz);
+        wchar_t frequency_text[48]{};
+        swprintf_s(frequency_text, L"%.6f MHz", frequency_hz / 1000000.0);
+        FrequencyTextBox().Text(frequency_text);
+        ChannelComboBox().SelectedIndex(-1);
+        StatusChannelText().Text(L"custom");
+        m_selected_service_id = 0u;
+        UpdateRfContext();
+
+        if (!m_receiver.IsActive())
+        {
+            AddTimelineEvent(hstring{ L"Spectrum tune selected " } + frequency_text +
+                             L" — press Start to receive");
+            return;
+        }
+
+        auto settings = ReadReceiverSettings();
+        if (!settings)
+        {
+            return;
+        }
+        settings->service_id = 0u;
+        m_pending_receiver_restart = *settings;
+        ClearCatalogView();
+        m_receiver.RequestStop();
+        StartButton().IsEnabled(false);
+        StartButtonLabel().Text(L"Retuning...");
+        DataSeamText().Text(hstring{ L"retuning to " } + frequency_text);
+        AddTimelineEvent(hstring{ L"Retuning receiver from spectrum to " } + frequency_text);
+    }
+
+    winrt::fire_and_forget MainWindow::RfSpectrumSaveScreenshot_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        auto lifetime = get_strong();
+        try
+        {
+            using namespace Windows::Graphics::Imaging;
+            using namespace Windows::Storage;
+            using namespace Windows::Storage::Streams;
+            using namespace Microsoft::UI::Xaml::Media::Imaging;
+
+            RenderTargetBitmap bitmap;
+            co_await bitmap.RenderAsync(RfSpectrumCaptureRoot());
+            auto const pixel_buffer = co_await bitmap.GetPixelsAsync();
+            DataReader reader = DataReader::FromBuffer(pixel_buffer);
+            std::vector<uint8_t> pixels(pixel_buffer.Length());
+            reader.ReadBytes(pixels);
+
+            SYSTEMTIME now{};
+            GetLocalTime(&now);
+            wchar_t filename[80]{};
+            swprintf_s(filename,
+                       L"DAB_Spectrum_%04u%02u%02u_%02u%02u%02u.png",
+                       now.wYear,
+                       now.wMonth,
+                       now.wDay,
+                       now.wHour,
+                       now.wMinute,
+                       now.wSecond);
+            auto const file = co_await KnownFolders::PicturesLibrary().CreateFileAsync(
+                filename,
+                CreationCollisionOption::GenerateUniqueName);
+            auto const stream = co_await file.OpenAsync(FileAccessMode::ReadWrite);
+            auto const encoder = co_await BitmapEncoder::CreateAsync(BitmapEncoder::PngEncoderId(), stream);
+            encoder.SetPixelData(BitmapPixelFormat::Bgra8,
+                                 BitmapAlphaMode::Premultiplied,
+                                 static_cast<uint32_t>(bitmap.PixelWidth()),
+                                 static_cast<uint32_t>(bitmap.PixelHeight()),
+                                 96.0,
+                                 96.0,
+                                 pixels);
+            co_await encoder.FlushAsync();
+            AddTimelineEvent(L"Spectrum screenshot saved to " + file.Path());
+        }
+        catch (hresult_error const& error)
+        {
+            AddTimelineEvent(L"Spectrum screenshot failed: " + error.message());
         }
     }
 
@@ -1040,6 +1414,450 @@ namespace winrt::DabMeasurementWinUI::implementation
         ApplySelectedServiceComponents();
     }
 
+    void MainWindow::UpdateRfSpectrum(dab::measurement::MeasurementFrame const& frame)
+    {
+        if (m_rf_spectrum_frozen || frame.spectrum_bin_count == 0u)
+        {
+            return;
+        }
+
+        uint32_t const count = (std::min)(frame.spectrum_bin_count,
+                                          static_cast<uint32_t>(DAB_RECEIVE_SPECTRUM_BIN_COUNT));
+        double const bin_hz = frame.spectrum_bin_hz > 0.0f
+            ? static_cast<double>(frame.spectrum_bin_hz)
+            : static_cast<double>(frame.sample_rate_hz) / static_cast<double>(count);
+        double const center_hz = static_cast<double>(frame.frequency_hz);
+        double const source_start_hz = center_hz + static_cast<double>(frame.spectrum_start_hz);
+        bool const source_changed = m_rf_spectrum_count != count ||
+            m_rf_spectrum_sample_rate_hz != frame.sample_rate_hz ||
+            std::abs(m_rf_spectrum_source_center_hz - center_hz) > (std::max)(bin_hz, 1.0);
+
+        if (source_changed)
+        {
+            m_rf_spectrum_average_initialized = false;
+        }
+        m_rf_spectrum_count = count;
+        m_rf_spectrum_sample_rate_hz = frame.sample_rate_hz;
+        m_rf_spectrum_source_center_hz = center_hz;
+        m_rf_spectrum_source_start_hz = source_start_hz;
+        m_rf_spectrum_bin_hz = bin_hz;
+
+        float const alpha = 1.0f / static_cast<float>((std::max)(m_rf_spectrum_average_factor, 1u));
+        for (uint32_t bin = 0u; bin < count; ++bin)
+        {
+            float const sample = std::isfinite(frame.spectrum_dbfs[bin])
+                ? frame.spectrum_dbfs[bin]
+                : -120.0f;
+            if (!m_rf_spectrum_average_initialized)
+            {
+                m_rf_spectrum_average[bin] = sample;
+                m_rf_spectrum_peak[bin] = sample;
+            }
+            else
+            {
+                m_rf_spectrum_average[bin] += alpha * (sample - m_rf_spectrum_average[bin]);
+                m_rf_spectrum_peak[bin] = m_rf_spectrum_peak_hold
+                    ? (std::max)(m_rf_spectrum_peak[bin], m_rf_spectrum_average[bin])
+                    : m_rf_spectrum_average[bin];
+            }
+        }
+        m_rf_spectrum_average_initialized = true;
+
+        if (source_changed)
+        {
+            ResetRfSpectrumView();
+        }
+        else
+        {
+            RenderRfSpectrum();
+            AppendRfSpectrumWaterfall();
+        }
+    }
+
+    void MainWindow::ResetRfSpectrumView()
+    {
+        m_rf_spectrum_view_center_hz = m_rf_spectrum_source_center_hz;
+        m_rf_spectrum_view_span_hz = m_rf_spectrum_sample_rate_hz != 0u
+            ? static_cast<double>(m_rf_spectrum_sample_rate_hz)
+            : 2048000.0;
+        ClampRfSpectrumView();
+        if (m_rf_spectrum_controls_ready)
+        {
+            RfSpectrumWaterfallCanvas().Children().Clear();
+            UpdateRfSpectrumReadouts();
+            RenderRfSpectrum();
+            AppendRfSpectrumWaterfall();
+        }
+    }
+
+    void MainWindow::ClampRfSpectrumView()
+    {
+        double const source_span = m_rf_spectrum_sample_rate_hz != 0u
+            ? static_cast<double>(m_rf_spectrum_sample_rate_hz)
+            : 2048000.0;
+        m_rf_spectrum_view_span_hz = std::clamp(m_rf_spectrum_view_span_hz,
+                                                20000.0,
+                                                source_span);
+        double const source_left = m_rf_spectrum_source_center_hz - source_span * 0.5;
+        double const source_right = m_rf_spectrum_source_center_hz + source_span * 0.5;
+        double const half_span = m_rf_spectrum_view_span_hz * 0.5;
+        m_rf_spectrum_view_center_hz = std::clamp(m_rf_spectrum_view_center_hz,
+                                                  source_left + half_span,
+                                                  source_right - half_span);
+    }
+
+    double MainWindow::RfSpectrumFrequencyFromX(double x) const noexcept
+    {
+        double const ratio = std::clamp(x / 1000.0, 0.0, 1.0);
+        return m_rf_spectrum_view_center_hz + (ratio - 0.5) * m_rf_spectrum_view_span_hz;
+    }
+
+    double MainWindow::RfSpectrumXFromFrequency(double frequency_hz) const noexcept
+    {
+        if (m_rf_spectrum_view_span_hz <= 0.0)
+        {
+            return 0.0;
+        }
+        return 1000.0 * (frequency_hz -
+            (m_rf_spectrum_view_center_hz - m_rf_spectrum_view_span_hz * 0.5)) /
+            m_rf_spectrum_view_span_hz;
+    }
+
+    float MainWindow::RfSpectrumPowerAtFrequency(double frequency_hz) const noexcept
+    {
+        if (m_rf_spectrum_count == 0u || m_rf_spectrum_bin_hz <= 0.0)
+        {
+            return -120.0f;
+        }
+        double const fractional = std::clamp(
+            (frequency_hz - m_rf_spectrum_source_start_hz) / m_rf_spectrum_bin_hz,
+            0.0,
+            static_cast<double>(m_rf_spectrum_count - 1u));
+        uint32_t const lower = static_cast<uint32_t>(std::floor(fractional));
+        uint32_t const upper = (std::min)(lower + 1u, m_rf_spectrum_count - 1u);
+        float const blend = static_cast<float>(fractional - static_cast<double>(lower));
+        return m_rf_spectrum_average[lower] +
+            blend * (m_rf_spectrum_average[upper] - m_rf_spectrum_average[lower]);
+    }
+
+    void MainWindow::SetRfSpectrumMarker(uint32_t marker, double frequency_hz)
+    {
+        if (marker >= 2u)
+        {
+            return;
+        }
+        double const source_span = m_rf_spectrum_sample_rate_hz != 0u
+            ? static_cast<double>(m_rf_spectrum_sample_rate_hz)
+            : 2048000.0;
+        m_rf_spectrum_marker_frequency_hz[marker] = std::clamp(
+            frequency_hz,
+            m_rf_spectrum_source_center_hz - source_span * 0.5,
+            m_rf_spectrum_source_center_hz + source_span * 0.5);
+        m_rf_spectrum_marker_power_dbfs[marker] = RfSpectrumPowerAtFrequency(
+            m_rf_spectrum_marker_frequency_hz[marker]);
+        m_rf_spectrum_marker_valid[marker] = true;
+        m_rf_spectrum_active_marker = marker;
+        RenderRfSpectrum();
+        UpdateRfSpectrumReadouts();
+    }
+
+    void MainWindow::UpdateRfSpectrumHover(Point const& position)
+    {
+        if (!m_rf_spectrum_controls_ready)
+        {
+            return;
+        }
+        m_rf_spectrum_cursor_frequency_hz = RfSpectrumFrequencyFromX(position.X);
+        float const power = RfSpectrumPowerAtFrequency(m_rf_spectrum_cursor_frequency_hz);
+        wchar_t text[80]{};
+        swprintf_s(text,
+                   L"%.6f MHz · %.1f dBFS",
+                   m_rf_spectrum_cursor_frequency_hz / 1000000.0,
+                   static_cast<double>(power));
+        RfSpectrumTooltipText().Text(text);
+        RfSpectrumTooltipBorder().Visibility(Visibility::Visible);
+        Canvas::SetLeft(RfSpectrumTooltipBorder(),
+                        std::clamp(static_cast<double>(position.X) + 12.0, 0.0, 830.0));
+        Canvas::SetTop(RfSpectrumTooltipBorder(),
+                       std::clamp(static_cast<double>(position.Y) - 34.0, 0.0, 270.0));
+    }
+
+    void MainWindow::UpdateRfSpectrumReadouts()
+    {
+        if (!m_rf_spectrum_controls_ready)
+        {
+            return;
+        }
+
+        m_rf_spectrum_updating_controls = true;
+        RfSpectrumCenterNumberBox().Value(m_rf_spectrum_view_center_hz / 1000000.0);
+        RfSpectrumReferenceNumberBox().Value(m_rf_spectrum_reference_dbfs);
+
+        std::array<double, 5> const spans{ 2048000.0, 1000000.0, 500000.0, 200000.0, 100000.0 };
+        int32_t span_index = -1;
+        for (uint32_t index = 0u; index < spans.size(); ++index)
+        {
+            if (std::abs(m_rf_spectrum_view_span_hz - spans[index]) < 1.0)
+            {
+                span_index = static_cast<int32_t>(index);
+                break;
+            }
+        }
+        if (span_index >= 0)
+        {
+            RfSpectrumSpanComboBox().SelectedIndex(span_index);
+        }
+        else
+        {
+            wchar_t custom_span[32]{};
+            if (m_rf_spectrum_view_span_hz >= 1000000.0)
+            {
+                swprintf_s(custom_span, L"%.3f MHz", m_rf_spectrum_view_span_hz / 1000000.0);
+            }
+            else
+            {
+                swprintf_s(custom_span, L"%.0f kHz", m_rf_spectrum_view_span_hz / 1000.0);
+            }
+            RfSpectrumCustomSpanItem().Content(box_value(hstring{ custom_span }));
+            RfSpectrumSpanComboBox().SelectedIndex(5);
+        }
+        m_rf_spectrum_updating_controls = false;
+
+        wchar_t rbw[40]{};
+        swprintf_s(rbw, L"%.3f kHz", m_rf_spectrum_bin_hz / 1000.0);
+        RfSpectrumRbwText().Text(rbw);
+
+        wchar_t view[80]{};
+        if (m_rf_spectrum_view_span_hz >= 1000000.0)
+        {
+            swprintf_s(view,
+                       L"%.6f MHz · %.3f MHz span",
+                       m_rf_spectrum_view_center_hz / 1000000.0,
+                       m_rf_spectrum_view_span_hz / 1000000.0);
+        }
+        else
+        {
+            swprintf_s(view,
+                       L"%.6f MHz · %.0f kHz span",
+                       m_rf_spectrum_view_center_hz / 1000000.0,
+                       m_rf_spectrum_view_span_hz / 1000.0);
+        }
+        RfSpectrumViewText().Text(view);
+
+        auto set_frequency_text = [](TextBlock const& target, double frequency_hz)
+        {
+            wchar_t value[32]{};
+            swprintf_s(value, L"%.6f MHz", frequency_hz / 1000000.0);
+            target.Text(value);
+        };
+        set_frequency_text(RfSpectrumAxisLeftText(),
+                           m_rf_spectrum_view_center_hz - m_rf_spectrum_view_span_hz * 0.5);
+        set_frequency_text(RfSpectrumAxisCenterText(), m_rf_spectrum_view_center_hz);
+        set_frequency_text(RfSpectrumAxisRightText(),
+                           m_rf_spectrum_view_center_hz + m_rf_spectrum_view_span_hz * 0.5);
+
+        auto set_db_text = [](TextBlock const& target, double value, bool suffix)
+        {
+            wchar_t text[32]{};
+            if (suffix)
+            {
+                swprintf_s(text, L"%.0f dBFS", value);
+            }
+            else
+            {
+                swprintf_s(text, L"%.0f", value);
+            }
+            target.Text(text);
+        };
+        set_db_text(RfSpectrumYAxisTopText(), m_rf_spectrum_reference_dbfs, false);
+        set_db_text(RfSpectrumYAxis1Text(), m_rf_spectrum_reference_dbfs - 2.0 * m_rf_spectrum_scale_db, false);
+        set_db_text(RfSpectrumYAxis2Text(), m_rf_spectrum_reference_dbfs - 4.0 * m_rf_spectrum_scale_db, false);
+        set_db_text(RfSpectrumYAxisBottomText(), m_rf_spectrum_reference_dbfs - 6.0 * m_rf_spectrum_scale_db, true);
+
+        for (uint32_t marker = 0u; marker < 2u; ++marker)
+        {
+            if (m_rf_spectrum_marker_valid[marker])
+            {
+                m_rf_spectrum_marker_power_dbfs[marker] = RfSpectrumPowerAtFrequency(
+                    m_rf_spectrum_marker_frequency_hz[marker]);
+            }
+        }
+        wchar_t marker_text[220]{};
+        if (m_rf_spectrum_marker_valid[0] && m_rf_spectrum_marker_valid[1])
+        {
+            swprintf_s(marker_text,
+                       L"M1 %.6f MHz  %.1f dBFS  ·  M2 %.6f MHz  %.1f dBFS  ·  Δ %.3f kHz  %+.1f dB",
+                       m_rf_spectrum_marker_frequency_hz[0] / 1000000.0,
+                       static_cast<double>(m_rf_spectrum_marker_power_dbfs[0]),
+                       m_rf_spectrum_marker_frequency_hz[1] / 1000000.0,
+                       static_cast<double>(m_rf_spectrum_marker_power_dbfs[1]),
+                       (m_rf_spectrum_marker_frequency_hz[1] - m_rf_spectrum_marker_frequency_hz[0]) / 1000.0,
+                       static_cast<double>(m_rf_spectrum_marker_power_dbfs[1] -
+                                           m_rf_spectrum_marker_power_dbfs[0]));
+        }
+        else if (m_rf_spectrum_marker_valid[m_rf_spectrum_active_marker])
+        {
+            uint32_t const marker = m_rf_spectrum_active_marker;
+            swprintf_s(marker_text,
+                       L"Marker %u: %.6f MHz  %.1f dBFS",
+                       marker + 1u,
+                       m_rf_spectrum_marker_frequency_hz[marker] / 1000000.0,
+                       static_cast<double>(m_rf_spectrum_marker_power_dbfs[marker]));
+        }
+        else
+        {
+            swprintf_s(marker_text,
+                       L"Marker %u: click the spectrum to place",
+                       m_rf_spectrum_active_marker + 1u);
+        }
+        RfSpectrumMarkerStatusText().Text(marker_text);
+        RfSpectrumMarker1Button().IsChecked(m_rf_spectrum_active_marker == 0u);
+        RfSpectrumMarker2Button().IsChecked(m_rf_spectrum_active_marker == 1u);
+        RfSpectrumPeakTrace().Visibility(m_rf_spectrum_peak_hold
+            ? Visibility::Visible
+            : Visibility::Collapsed);
+    }
+
+    void MainWindow::RenderRfSpectrum()
+    {
+        if (!m_rf_spectrum_controls_ready || m_rf_spectrum_count == 0u)
+        {
+            return;
+        }
+
+        double const vertical_range = 6.0 * m_rf_spectrum_scale_db;
+        auto power_y = [&](float level)
+        {
+            return static_cast<float>(std::clamp(
+                (m_rf_spectrum_reference_dbfs - static_cast<double>(level)) /
+                    vertical_range * 300.0,
+                0.0,
+                300.0));
+        };
+        auto peak_at = [&](double frequency_hz)
+        {
+            double const fractional = std::clamp(
+                (frequency_hz - m_rf_spectrum_source_start_hz) / m_rf_spectrum_bin_hz,
+                0.0,
+                static_cast<double>(m_rf_spectrum_count - 1u));
+            uint32_t const lower = static_cast<uint32_t>(std::floor(fractional));
+            uint32_t const upper = (std::min)(lower + 1u, m_rf_spectrum_count - 1u);
+            float const blend = static_cast<float>(fractional - static_cast<double>(lower));
+            return m_rf_spectrum_peak[lower] +
+                blend * (m_rf_spectrum_peak[upper] - m_rf_spectrum_peak[lower]);
+        };
+
+        constexpr uint32_t display_points = 501u;
+        PointCollection live_points;
+        PointCollection peak_points;
+        for (uint32_t point = 0u; point < display_points; ++point)
+        {
+            float const x = 1000.0f * static_cast<float>(point) /
+                static_cast<float>(display_points - 1u);
+            double const frequency_hz = RfSpectrumFrequencyFromX(x);
+            live_points.Append(Point{ x, power_y(RfSpectrumPowerAtFrequency(frequency_hz)) });
+            peak_points.Append(Point{ x, power_y(peak_at(frequency_hz)) });
+        }
+        RfSpectrumLiveTrace().Points(live_points);
+        RfSpectrumPeakTrace().Points(peak_points);
+
+        std::array<Line, 2> marker_lines{ RfSpectrumMarker1Line(), RfSpectrumMarker2Line() };
+        for (uint32_t marker = 0u; marker < 2u; ++marker)
+        {
+            double const x = RfSpectrumXFromFrequency(m_rf_spectrum_marker_frequency_hz[marker]);
+            bool const visible = m_rf_spectrum_marker_valid[marker] && x >= 0.0 && x <= 1000.0;
+            marker_lines[marker].Visibility(visible ? Visibility::Visible : Visibility::Collapsed);
+            if (visible)
+            {
+                marker_lines[marker].X1(x);
+                marker_lines[marker].X2(x);
+            }
+        }
+
+        std::vector<float> visible_levels;
+        uint32_t const first = static_cast<uint32_t>(std::clamp(
+            std::floor((RfSpectrumFrequencyFromX(0.0) - m_rf_spectrum_source_start_hz) /
+                       m_rf_spectrum_bin_hz),
+            0.0,
+            static_cast<double>(m_rf_spectrum_count - 1u)));
+        uint32_t const last = static_cast<uint32_t>(std::clamp(
+            std::ceil((RfSpectrumFrequencyFromX(1000.0) - m_rf_spectrum_source_start_hz) /
+                      m_rf_spectrum_bin_hz),
+            0.0,
+            static_cast<double>(m_rf_spectrum_count - 1u)));
+        visible_levels.reserve(last >= first ? last - first + 1u : 0u);
+        for (uint32_t bin = first; bin <= last && bin < m_rf_spectrum_count; ++bin)
+        {
+            visible_levels.push_back(m_rf_spectrum_average[bin]);
+        }
+        if (!visible_levels.empty())
+        {
+            size_t const percentile = visible_levels.size() / 5u;
+            std::nth_element(visible_levels.begin(),
+                             visible_levels.begin() + percentile,
+                             visible_levels.end());
+            wchar_t noise[48]{};
+            swprintf_s(noise,
+                       L"Noise floor (p20): %.1f dBFS",
+                       static_cast<double>(visible_levels[percentile]));
+            RfSpectrumNoiseFloorText().Text(noise);
+        }
+        UpdateRfSpectrumReadouts();
+    }
+
+    void MainWindow::AppendRfSpectrumWaterfall()
+    {
+        if (!m_rf_spectrum_controls_ready || m_rf_spectrum_count == 0u ||
+            !m_rf_workspace_active)
+        {
+            return;
+        }
+
+        auto waterfall = RfSpectrumWaterfallCanvas().Children();
+        constexpr uint32_t columns = 128u;
+        constexpr uint32_t rows = 50u;
+        constexpr double row_height = 3.0;
+        while (waterfall.Size() >= columns * rows)
+        {
+            for (uint32_t column = 0u; column < columns; ++column)
+            {
+                waterfall.RemoveAt(0u);
+            }
+        }
+        for (uint32_t index = 0u; index < waterfall.Size(); ++index)
+        {
+            auto const element = waterfall.GetAt(index);
+            Canvas::SetTop(element, Canvas::GetTop(element) + row_height);
+        }
+
+        double const lower = m_rf_spectrum_reference_dbfs - 6.0 * m_rf_spectrum_scale_db;
+        double const range = (std::max)(m_rf_spectrum_reference_dbfs - lower, 1.0);
+        for (uint32_t column = 0u; column < columns; ++column)
+        {
+            double const x = 1000.0 * (static_cast<double>(column) + 0.5) /
+                static_cast<double>(columns);
+            float const level = RfSpectrumPowerAtFrequency(RfSpectrumFrequencyFromX(x));
+            float const intensity = static_cast<float>(std::clamp(
+                (static_cast<double>(level) - lower) / range,
+                0.0,
+                1.0));
+            uint8_t red = intensity > 0.70f
+                ? static_cast<uint8_t>(255.0f * (intensity - 0.70f) / 0.30f)
+                : 0u;
+            uint8_t green = static_cast<uint8_t>(24.0f + 220.0f * intensity);
+            uint8_t blue = static_cast<uint8_t>(42.0f +
+                205.0f * (std::min)(intensity * 1.8f, 1.0f));
+            Microsoft::UI::Xaml::Shapes::Rectangle cell;
+            cell.Width((1000.0 / static_cast<double>(columns)) + 0.5);
+            cell.Height(row_height + 0.2);
+            cell.Fill(SolidColorBrush(ColorHelper::FromArgb(255u, red, green, blue)));
+            Canvas::SetLeft(cell, 1000.0 * static_cast<double>(column) /
+                                  static_cast<double>(columns));
+            Canvas::SetTop(cell, 0.0);
+            waterfall.Append(cell);
+        }
+    }
+
     void MainWindow::UpdatePlots(dab::measurement::MeasurementFrame const& frame)
     {
         DataModeText().Text(L"HIGH-RATE MEASUREMENTS");
@@ -1048,6 +1866,7 @@ namespace winrt::DabMeasurementWinUI::implementation
 
         if (frame.spectrum_bin_count != 0u)
         {
+            UpdateRfSpectrum(frame);
             PointCollection spectrum_points;
             constexpr uint32_t display_points = 181u;
             for (uint32_t point = 0u; point < display_points; ++point)
