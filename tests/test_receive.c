@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "receive_audio_internal.h"
 #include "receive_catalog_internal.h"
 #include "receive_measurement_internal.h"
 #include "receive_snapshot_internal.h"
@@ -133,6 +134,48 @@ void test_receive_snapshot_maps_receiver_measurements_and_counters(void) {
     TEST_ASSERT(snapshot.msc_last_decode_ok == 1);
     TEST_ASSERT(snapshot.msc_runtime_reset_count == 3u);
     TEST_ASSERT(snapshot.msc_last_reconfig_reason == 0x42u);
+}
+
+void test_receive_audio_format_update_reports_only_real_changes(void) {
+    dab_receive_audio_format_state_t state = {0};
+    const uint8_t asc_a[] = {0x12u, 0x10u};
+    const uint8_t asc_b[] = {0x12u, 0x11u};
+
+    TEST_ASSERT(dab_receive_audio_format_update(&state,
+                                                0x5201u,
+                                                213360000u,
+                                                48000u,
+                                                2u,
+                                                asc_a,
+                                                sizeof(asc_a)) == 1);
+    TEST_ASSERT(dab_receive_audio_format_update(&state,
+                                                0x5201u,
+                                                213360000u,
+                                                48000u,
+                                                2u,
+                                                asc_a,
+                                                sizeof(asc_a)) == 0);
+    TEST_ASSERT(dab_receive_audio_format_update(&state,
+                                                0x5201u,
+                                                213360000u,
+                                                32000u,
+                                                2u,
+                                                asc_a,
+                                                sizeof(asc_a)) == 1);
+    TEST_ASSERT(dab_receive_audio_format_update(&state,
+                                                0x5201u,
+                                                213360000u,
+                                                32000u,
+                                                2u,
+                                                asc_b,
+                                                sizeof(asc_b)) == 1);
+    TEST_ASSERT(dab_receive_audio_format_update(&state,
+                                                0x5202u,
+                                                213360000u,
+                                                32000u,
+                                                2u,
+                                                asc_b,
+                                                sizeof(asc_b)) == 1);
 }
 
 void test_receive_catalog_copies_fic_ensemble_services_and_components(void) {

@@ -127,12 +127,24 @@ namespace winrt::DabMeasurementWinUI::implementation
         {
             status_channel.Text(channel);
         }
+        m_selected_service_id = 0u;
     }
 
     void MainWindow::ServicesListView_SelectionChanged(IInspectable const&,
                                                         SelectionChangedEventArgs const&)
     {
         ApplySelectedServiceComponents();
+    }
+
+    void MainWindow::ServicesListView_ItemClick(IInspectable const&,
+                                                ItemClickEventArgs const& args)
+    {
+        auto const item = args.ClickedItem().try_as<FrameworkElement>();
+        if (!item || !item.Tag())
+        {
+            return;
+        }
+        SelectAudioService(unbox_value<uint32_t>(item.Tag()));
     }
 
     void MainWindow::StartButton_Click(IInspectable const&, RoutedEventArgs const&)
@@ -152,20 +164,7 @@ namespace winrt::DabMeasurementWinUI::implementation
             return;
         }
 
-        ClearCatalogView();
-        if (!m_receiver.Start(*settings))
-        {
-            AddTimelineEvent(L"Receiver worker is already active");
-            return;
-        }
-
-        SetReceiverControlsEnabled(false);
-        StartButton().IsEnabled(true);
-        StartButtonLabel().Text(L"Stop");
-        StatusSyncText().Text(L"opening");
-        DataModeText().Text(L"LIVE METRICS");
-        DataSeamText().Text(L"awaiting receiver snapshots");
-        AddTimelineEvent(L"Opening real receiver worker");
+        StartReceiver(*settings, true, L"Opening real receiver worker");
     }
 
     void MainWindow::RecordButton_Click(IInspectable const&, RoutedEventArgs const&)
@@ -181,6 +180,7 @@ namespace winrt::DabMeasurementWinUI::implementation
     void MainWindow::Window_Closed(IInspectable const&, WindowEventArgs const&)
     {
         m_timer.Stop();
+        m_pending_receiver_restart.reset();
         m_receiver.RequestStop();
     }
 
@@ -196,6 +196,7 @@ namespace winrt::DabMeasurementWinUI::implementation
             HandleReceiverStatus(receiver_status);
         }
         m_receiver.JoinFinished();
+        StartPendingServiceRestart();
 
         dab_receive_snapshot_t snapshot{};
         uint64_t snapshot_version = 0;
@@ -246,7 +247,7 @@ namespace winrt::DabMeasurementWinUI::implementation
         dab::measurement::ReceiverSettings settings;
         settings.driver = DeviceComboBox().SelectedIndex() == 1 ? "rtlsdr" : "sdrplay";
         settings.frequency_hz = static_cast<uint64_t>(std::llround(frequency_mhz * 1000000.0));
-        settings.service_id = 0u;
+        settings.service_id = m_selected_service_id;
         settings.gain_db = static_cast<int>(std::clamp(std::lround(gain_value), 0l, 100l));
         settings.agc_enabled = false;
         settings.use_real_device = true;
@@ -258,6 +259,110 @@ namespace winrt::DabMeasurementWinUI::implementation
             StatusChannelText().Text(unbox_value<hstring>(selected_channel.Content()));
         }
         return settings;
+    }
+
+    bool MainWindow::StartReceiver(dab::measurement::ReceiverSettings const& settings,
+                                   bool clear_catalog,
+                                   hstring const& timeline_message)
+    {
+        if (!m_receiver.Start(settings))
+        {
+            AddTimelineEvent(L"Receiver worker is already active");
+            return false;
+        }
+
+        if (clear_catalog)
+        {
+            ClearCatalogView();
+        }
+        m_active_service_id = settings.service_id;
+        SetReceiverControlsEnabled(false);
+        StartButton().IsEnabled(true);
+        StartButtonLabel().Text(L"Stop");
+        StatusSyncText().Text(L"opening");
+        DataModeText().Text(L"LIVE METRICS");
+        DataSeamText().Text(L"awaiting receiver snapshots");
+        AddTimelineEvent(timeline_message);
+        return true;
+    }
+
+    void MainWindow::SelectAudioService(uint32_t service_id)
+    {
+        dab_receive_service_info_t const* selected_service = nullptr;
+        for (uint32_t index = 0u; m_have_catalog && index < m_latest_catalog.service_count; ++index)
+        {
+            if (m_latest_catalog.services[index].service_id == service_id)
+            {
+                selected_service = &m_latest_catalog.services[index];
+                break;
+            }
+        }
+        if (selected_service == nullptr)
+        {
+            return;
+        }
+
+        bool has_audio = false;
+        for (uint32_t index = 0u; index < selected_service->component_count; ++index)
+        {
+            if (selected_service->components[index].kind == DAB_RECEIVE_COMPONENT_STREAM_AUDIO)
+            {
+                has_audio = true;
+                break;
+            }
+        }
+
+        hstring service_name = fic_label_text(selected_service->label);
+        if (service_name.empty())
+        {
+            wchar_t fallback[48]{};
+            swprintf_s(fallback, L"SID 0x%08X", service_id);
+            service_name = fallback;
+        }
+        if (!has_audio)
+        {
+            AddTimelineEvent(L"Cannot play " + service_name + L" — no stream-audio component");
+            return;
+        }
+
+        m_selected_service_id = service_id;
+        if (!m_receiver.IsActive())
+        {
+            AddTimelineEvent(L"Selected " + service_name + L" — press Start to play");
+            DataSeamText().Text(L"selected " + service_name);
+            return;
+        }
+        if (!m_pending_receiver_restart && m_active_service_id == service_id)
+        {
+            return;
+        }
+
+        auto settings = ReadReceiverSettings();
+        if (!settings)
+        {
+            return;
+        }
+        settings->service_id = service_id;
+        m_pending_receiver_restart = *settings;
+        m_receiver.RequestStop();
+        StartButton().IsEnabled(false);
+        StartButtonLabel().Text(L"Switching...");
+        DataSeamText().Text(L"switching to " + service_name);
+        AddTimelineEvent(L"Switching audio service to " + service_name);
+    }
+
+    void MainWindow::StartPendingServiceRestart()
+    {
+        if (!m_pending_receiver_restart || m_receiver.IsActive())
+        {
+            return;
+        }
+
+        auto const settings = *m_pending_receiver_restart;
+        m_pending_receiver_restart.reset();
+        wchar_t message[80]{};
+        swprintf_s(message, L"Starting selected service SID 0x%08X", settings.service_id);
+        StartReceiver(settings, false, message);
     }
 
     void MainWindow::HandleReceiverStatus(dab::measurement::ReceiverStatus const& status)
@@ -290,12 +395,14 @@ namespace winrt::DabMeasurementWinUI::implementation
             StatusSyncText().Text(L"stopping");
             break;
         case ReceiverState::stopped:
+            m_active_service_id = 0u;
             SetReceiverControlsEnabled(true);
             StartButton().IsEnabled(true);
             StartButtonLabel().Text(L"Start");
             StatusSyncText().Text(L"idle");
             break;
         case ReceiverState::failed:
+            m_active_service_id = 0u;
             SetReceiverControlsEnabled(true);
             StartButton().IsEnabled(true);
             StartButtonLabel().Text(L"Start");
@@ -440,6 +547,7 @@ namespace winrt::DabMeasurementWinUI::implementation
 
                 StackPanel panel;
                 panel.Spacing(1.0);
+                panel.Tag(box_value(service.service_id));
                 TextBlock title;
                 title.Text(label);
                 title.TextTrimming(TextTrimming::CharacterEllipsis);

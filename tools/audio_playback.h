@@ -20,6 +20,10 @@
 #include "dab/os/os_thread.h"
 #include <portaudio.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 enum {
     DAB_AUDIO_DECODER_NONE = 0,
     DAB_AUDIO_DECODER_FAAD = 1,
@@ -61,6 +65,9 @@ typedef struct {
     uint32_t missing_superframe_reports;
     uint32_t consecutive_decode_failures;
     uint32_t total_decode_failures;
+    uint32_t service_id;
+    uint8_t asc[8];
+    uint32_t asc_length;
     dab_audio_eq_t eq;
     int16_t *eq_pcm;
     uint32_t eq_pcm_frames;
@@ -77,6 +84,16 @@ void dab_audio_playback_set_spectrum_callback(dab_audio_playback_spectrum_callba
                                               void *user);
 void dab_audio_playback_set_equalizer_gains(const float *gains_db, uint32_t count);
 void dab_audio_playback_close(dab_audio_playback_t *audio);
+int dab_audio_playback_set_format(dab_audio_playback_t *audio,
+                                  uint32_t service_id,
+                                  uint32_t sample_rate,
+                                  uint32_t channels,
+                                  const uint8_t *asc,
+                                  uint32_t asc_length);
+int dab_audio_playback_consume_au(dab_audio_playback_t *audio,
+                                  const uint8_t *au_data,
+                                  uint32_t au_length,
+                                  uint64_t generation);
 int dab_audio_playback_consume_superframe(dab_audio_playback_t *audio,
                                           const dab_msc_dabplus_superframe_t *superframe);
 void dab_audio_playback_note_missing_superframe(dab_audio_playback_t *audio,
@@ -85,6 +102,10 @@ void dab_audio_playback_note_missing_superframe(dab_audio_playback_t *audio,
 void dab_audio_playback_report_dabplus_debug(dab_audio_playback_t *audio,
                                              uint32_t sid,
                                              const dab_msc_dabplus_debug_t *debug);
+
+#ifdef __cplusplus
+}
+#endif
 #endif
 
 #endif

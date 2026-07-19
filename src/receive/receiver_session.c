@@ -22,6 +22,7 @@
 #include "dab/hal/sdrplay_device.h"
 #if defined(DAB_RECEIVE_NO_MAIN)
 #include "dab/receive.h"
+#include "receive_audio_internal.h"
 #include "receive_catalog_internal.h"
 #include "receive_measurement_internal.h"
 #include "receive_snapshot_internal.h"
@@ -170,12 +171,15 @@ static int receive_emit_superframe(dab_receive_callback_t callback,
                                    void *user,
                                    uint32_t service_id,
                                    uint64_t frequency_hz,
-                                   const dab_msc_dabplus_superframe_t *superframe) {
+                                   const dab_msc_dabplus_superframe_t *superframe,
+                                   dab_receive_audio_format_state_t *format_state) {
     dab_receive_event_t event = {0};
     uint8_t asc[8] = {0};
+    int format_changed;
     uint32_t au_index;
 
-    if (callback == 0 || superframe == 0 || superframe->superframe_data == 0) {
+    if (callback == 0 || superframe == 0 || superframe->superframe_data == 0 ||
+        format_state == 0) {
         return 0;
     }
 
@@ -187,7 +191,14 @@ static int receive_emit_superframe(dab_receive_callback_t callback,
     event.asc = asc;
     event.asc_length = receive_build_asc(superframe, asc, sizeof(asc));
     event.generation = superframe->generation;
-    if (event.asc_length == 0u || callback(&event, user) != 0) {
+    format_changed = dab_receive_audio_format_update(format_state,
+                                                     service_id,
+                                                     frequency_hz,
+                                                     event.sample_rate,
+                                                     event.channels,
+                                                     asc,
+                                                     event.asc_length);
+    if (format_changed < 0 || (format_changed > 0 && callback(&event, user) != 0)) {
         return -1;
     }
 
@@ -1101,6 +1112,7 @@ int dab_receiver_session_run(int argc, char **argv) {
 #endif
 #if defined(DAB_RECEIVE_NO_MAIN)
     uint64_t last_receive_generation = 0u;
+    dab_receive_audio_format_state_t audio_format_state = {0};
     uint64_t snapshot_sequence = 0u;
     uint8_t selected_sid_fallback_reported = 0u;
     uint8_t lock_reported = 0u;
@@ -2353,7 +2365,8 @@ int dab_receiver_session_run(int argc, char **argv) {
                                                                                 receive_user,
                                                                                 selected_audio_sid,
                                                                                 stream_config.center_freq_hz,
-                                                                                &superframe) != 0) {
+                                                                                &superframe,
+                                                                                &audio_format_state) != 0) {
                                                         rc = -2;
                                                         goto cleanup;
                                                     }

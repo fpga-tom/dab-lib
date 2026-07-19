@@ -565,21 +565,19 @@ static int dab_audio_playback_write_stream(dab_audio_playback_t *audio,
     return 0;
 }
 
-static int dab_audio_playback_configure(dab_audio_playback_t *audio,
-                                        const dab_msc_dabplus_superframe_t *superframe) {
-    uint8_t asc[7];
-    uint32_t asc_length;
+static int dab_audio_playback_configure_asc(dab_audio_playback_t *audio,
+                                            uint32_t service_id,
+                                            const uint8_t *asc,
+                                            uint32_t asc_length) {
     PaError pa_err;
+    int portaudio_initialized_here = 0;
+    uint8_t decoder_asc[8];
 
-    if (audio == 0 || superframe == 0) {
+    if (audio == 0 || asc == 0 || asc_length == 0u ||
+        asc_length > (uint32_t)sizeof(audio->asc)) {
         return -1;
     }
-
-    asc_length = dab_audio_playback_build_asc(superframe, asc, sizeof(asc));
-    if (asc_length == 0u) {
-        fprintf(stderr, "audio playback: failed to build ASC\n");
-        return -1;
-    }
+    memcpy(decoder_asc, asc, asc_length);
 
     if (audio->configured == 0u) {
         pa_err = Pa_Initialize();
@@ -587,6 +585,7 @@ static int dab_audio_playback_configure(dab_audio_playback_t *audio,
             fprintf(stderr, "audio playback: Pa_Initialize failed (%s)\n", Pa_GetErrorText(pa_err));
             return -1;
         }
+        portaudio_initialized_here = 1;
     }
 
 #if defined(DAB_HAVE_FAAD2)
@@ -601,7 +600,7 @@ static int dab_audio_playback_configure(dab_audio_playback_t *audio,
                 config->outputFormat = FAAD_FMT_16BIT;
                 config->dontUpSampleImplicitSBR = 0u;
                 if (NeAACDecSetConfiguration(decoder, config) != 0u &&
-                    NeAACDecInit2(decoder, asc, (unsigned long)asc_length, &sr, &ch) == 0) {
+                    NeAACDecInit2(decoder, decoder_asc, (unsigned long)asc_length, &sr, &ch) == 0) {
                     audio->faad_decoder = decoder;
                     audio->decoder_backend = DAB_AUDIO_DECODER_FAAD;
                     audio->sample_rate = (uint32_t)sr;
@@ -619,7 +618,7 @@ static int dab_audio_playback_configure(dab_audio_playback_t *audio,
     if (audio->decoder_backend == DAB_AUDIO_DECODER_NONE) {
         HANDLE_AACDECODER decoder = aacDecoder_Open(TT_MP4_RAW, 1u);
         if (decoder != 0) {
-            UCHAR *asc_ptr = asc;
+            UCHAR *asc_ptr = decoder_asc;
             UINT asc_size = (UINT)asc_length;
             AAC_DECODER_ERROR err = aacDecoder_ConfigRaw(decoder, &asc_ptr, &asc_size);
 
@@ -639,7 +638,7 @@ static int dab_audio_playback_configure(dab_audio_playback_t *audio,
 #endif
     if (audio->decoder_backend == DAB_AUDIO_DECODER_NONE) {
         fprintf(stderr, "audio playback: no usable AAC decoder backend\n");
-        if (audio->configured != 0u) {
+        if (portaudio_initialized_here != 0) {
             Pa_Terminate();
         }
         audio->configured = 0u;
@@ -647,6 +646,33 @@ static int dab_audio_playback_configure(dab_audio_playback_t *audio,
     }
 
     audio->configured = 1u;
+    audio->service_id = service_id;
+    memcpy(audio->asc, asc, asc_length);
+    audio->asc_length = asc_length;
+    return 0;
+}
+
+static int dab_audio_playback_configure(dab_audio_playback_t *audio,
+                                        const dab_msc_dabplus_superframe_t *superframe) {
+    uint8_t asc[7];
+    uint32_t asc_length;
+
+    if (audio == 0 || superframe == 0) {
+        return -1;
+    }
+
+    asc_length = dab_audio_playback_build_asc(superframe, asc, sizeof(asc));
+    if (asc_length == 0u) {
+        fprintf(stderr, "audio playback: failed to build ASC\n");
+        return -1;
+    }
+    if (dab_audio_playback_configure_asc(audio,
+                                         superframe->sid,
+                                         asc,
+                                         asc_length) != 0) {
+        return -1;
+    }
+
     audio->dac_rate = superframe->dac_rate;
     audio->sbr_flag = superframe->sbr_flag;
     audio->aac_channel_mode = superframe->aac_channel_mode;
@@ -669,6 +695,41 @@ static int dab_audio_playback_configure(dab_audio_playback_t *audio,
                superframe->mpeg_surround_config);
         dab_audio_playback_print_hex("audio playback ASC", asc, asc_length, asc_length);
     }
+    return 0;
+}
+
+int dab_audio_playback_set_format(dab_audio_playback_t *audio,
+                                  uint32_t service_id,
+                                  uint32_t sample_rate,
+                                  uint32_t channels,
+                                  const uint8_t *asc,
+                                  uint32_t asc_length) {
+    (void)sample_rate;
+    (void)channels;
+
+    if (audio == 0 || asc == 0 || asc_length == 0u ||
+        asc_length > (uint32_t)sizeof(audio->asc)) {
+        return -1;
+    }
+    if (audio->decoder_backend != DAB_AUDIO_DECODER_NONE &&
+        audio->service_id == service_id &&
+        audio->asc_length == asc_length &&
+        memcmp(audio->asc, asc, asc_length) == 0) {
+        return 0;
+    }
+    if (audio->decoder_backend != DAB_AUDIO_DECODER_NONE) {
+        dab_audio_playback_reset_decoder(audio);
+    }
+    if (dab_audio_playback_configure_asc(audio,
+                                         service_id,
+                                         asc,
+                                         asc_length) != 0) {
+        return -1;
+    }
+    printf("audio playback decoder configured sid=0x%08x backend=%s\n",
+           service_id,
+           audio->decoder_backend == DAB_AUDIO_DECODER_FAAD ? "faad" :
+           (audio->decoder_backend == DAB_AUDIO_DECODER_FDK ? "fdk" : "none"));
     return 0;
 }
 
@@ -790,6 +851,36 @@ static const char *dab_audio_playback_error_string(const dab_audio_playback_t *a
     (void)audio;
     (void)error_code;
     return "";
+}
+
+int dab_audio_playback_consume_au(dab_audio_playback_t *audio,
+                                  const uint8_t *au_data,
+                                  uint32_t au_length,
+                                  uint64_t generation) {
+    int decode_rc;
+
+    if (audio == 0 || audio->decoder_backend == DAB_AUDIO_DECODER_NONE) {
+        return -1;
+    }
+    decode_rc = dab_audio_playback_decode_au(audio, au_data, au_length);
+    if (decode_rc < 0) {
+        return -1;
+    }
+    if (decode_rc > 0) {
+        audio->total_decode_failures++;
+        audio->consecutive_decode_failures++;
+        fprintf(stderr,
+                "audio playback: AU decode failure sid=0x%08x generation=%llu consecutive=%u total=%u msg=%s\n",
+                audio->service_id,
+                (unsigned long long)generation,
+                audio->consecutive_decode_failures,
+                audio->total_decode_failures,
+                dab_audio_playback_error_string(audio, decode_rc));
+        return 1;
+    }
+    audio->consecutive_decode_failures = 0u;
+    audio->last_generation = generation;
+    return 0;
 }
 
 int dab_audio_playback_consume_superframe(dab_audio_playback_t *audio,

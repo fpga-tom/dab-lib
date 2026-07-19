@@ -67,11 +67,14 @@
       <PrecompiledHeaderOutputFile>$(IntDir)pch.pch</PrecompiledHeaderOutputFile>
       <WarningLevel>Level4</WarningLevel>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\..\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\..\include;$(ProjectDir)..\..\tools;$(ProjectDir)..\..\libs\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>DAB_HAVE_AUDIO_PLAYBACK=1;DAB_HAVE_FAAD2=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalOptions>%(AdditionalOptions) /bigobj /utf-8</AdditionalOptions>
     </ClCompile>
     <Link>
       <StackReserveSize>8388608</StackReserveSize>
+      <AdditionalLibraryDirectories>$(ProjectDir)..\..\libs;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>portaudio_x64.lib;libfaad2_dll.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
@@ -141,5 +144,10 @@
     <PackageReference Include="Microsoft.Windows.CppWinRT" Version="2.0.250303.1" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <Target Name="CopyAudioRuntime" AfterTargets="Build">
+    <Copy SourceFiles="$(ProjectDir)..\..\libs\portaudio_x64.dll;$(ProjectDir)..\..\libs\libfaad2_dll.dll"
+          DestinationFolder="$(OutDir)"
+          SkipUnchangedFiles="true" />
+  </Target>
   <ImportGroup Label="ExtensionTargets" />
 </Project>

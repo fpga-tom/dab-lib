@@ -197,6 +197,8 @@
                         <ListView x:Name="ServicesListView"
                                   Grid.Row="1"
                                   SelectionMode="Single"
+                                  IsItemClickEnabled="True"
+                                  ItemClick="ServicesListView_ItemClick"
                                   SelectionChanged="ServicesListView_SelectionChanged">
                             <ListViewItem Content="Awaiting decoded services..." IsEnabled="False" />
                         </ListView>

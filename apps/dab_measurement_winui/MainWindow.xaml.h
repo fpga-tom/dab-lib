@@ -16,6 +16,7 @@ namespace winrt::DabMeasurementWinUI::implementation
         void StartButton_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void ChannelComboBox_SelectionChanged(IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
         void ServicesListView_SelectionChanged(IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
+        void ServicesListView_ItemClick(IInspectable const&, Microsoft::UI::Xaml::Controls::ItemClickEventArgs const&);
         void RecordButton_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void MarkerButton_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void Window_Closed(IInspectable const&, Microsoft::UI::Xaml::WindowEventArgs const&);
@@ -28,6 +29,11 @@ namespace winrt::DabMeasurementWinUI::implementation
         void ApplySnapshot(dab_receive_snapshot_t const& snapshot);
         void ApplyCatalog(dab_receive_catalog_t const& catalog);
         void ApplySelectedServiceComponents();
+        void SelectAudioService(uint32_t service_id);
+        bool StartReceiver(dab::measurement::ReceiverSettings const& settings,
+                           bool clear_catalog,
+                           winrt::hstring const& timeline_message);
+        void StartPendingServiceRestart();
         void ClearCatalogView();
         void UpdatePlots(dab::measurement::MeasurementFrame const& frame);
         void AddTimelineEvent(winrt::hstring const& message);
@@ -48,6 +54,9 @@ namespace winrt::DabMeasurementWinUI::implementation
         uint64_t m_catalog_mailbox_version{ 0 };
         uint64_t m_receiver_status_version{ 0 };
         uint64_t m_tick{ 0 };
+        uint32_t m_selected_service_id{ 0u };
+        uint32_t m_active_service_id{ 0u };
+        std::optional<dab::measurement::ReceiverSettings> m_pending_receiver_restart;
     };
 }
 

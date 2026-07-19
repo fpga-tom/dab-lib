@@ -113,6 +113,10 @@
     <ClCompile Include="..\..\src\simd\simd.c" />
     <ClCompile Include="..\..\src\simd\simd_avx2.c" />
     <ClCompile Include="..\..\src\simd\simd_scalar.c" />
+    <ClCompile Include="..\..\tools\audio_playback.c">
+      <AdditionalIncludeDirectories>$(ProjectDir)..\..\libs\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>DAB_HAVE_AUDIO_PLAYBACK=1;DAB_HAVE_FAAD2=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

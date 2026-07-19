@@ -3,7 +3,9 @@
 #include "CatalogMailbox.h"
 #include "MeasurementMailbox.h"
 #include "SnapshotMailbox.h"
+#include "audio_playback.h"
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <mutex>
@@ -85,5 +87,14 @@ namespace dab::measurement
         mutable std::mutex m_status_mutex;
         ReceiverStatus m_latest_status{};
         uint64_t m_status_version{ 0 };
+        bool m_audio_format_status_valid{ false };
+        uint32_t m_audio_format_service_id{ 0u };
+        uint64_t m_audio_format_frequency_hz{ 0u };
+        uint32_t m_audio_format_sample_rate{ 0u };
+        uint32_t m_audio_format_channels{ 0u };
+        std::array<uint8_t, 8> m_audio_format_asc{};
+        uint32_t m_audio_format_asc_length{ 0u };
+        dab_audio_playback_t m_audio_playback{};
+        bool m_audio_playback_failed{ false };
     };
 }

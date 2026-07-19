@@ -3,6 +3,7 @@
 #include <math.h>
 #include <string.h>
 
+#include "receive_audio_internal.h"
 #include "receive_catalog_internal.h"
 #include "receive_measurement_internal.h"
 #include "receive_snapshot_internal.h"
@@ -19,6 +20,42 @@ void dab_receive_default_config(dab_receive_config_t *config) {
     config->android_usb_fd = -1;
     config->use_real_device = 1;
     config->measurement_decimation = 1u;
+}
+
+int dab_receive_audio_format_update(dab_receive_audio_format_state_t *state,
+                                    uint32_t service_id,
+                                    uint64_t frequency_hz,
+                                    uint32_t sample_rate,
+                                    uint32_t channels,
+                                    const uint8_t *asc,
+                                    uint32_t asc_length) {
+    int changed;
+
+    if (state == 0 || asc == 0 || asc_length == 0u ||
+        asc_length > DAB_RECEIVE_AUDIO_ASC_CAPACITY) {
+        return -1;
+    }
+
+    changed = state->valid == 0u ||
+              state->service_id != service_id ||
+              state->frequency_hz != frequency_hz ||
+              state->sample_rate != sample_rate ||
+              state->channels != channels ||
+              state->asc_length != asc_length ||
+              memcmp(state->asc, asc, asc_length) != 0;
+    if (!changed) {
+        return 0;
+    }
+
+    memset(state, 0, sizeof(*state));
+    state->valid = 1u;
+    state->service_id = service_id;
+    state->frequency_hz = frequency_hz;
+    state->sample_rate = sample_rate;
+    state->channels = channels;
+    memcpy(state->asc, asc, asc_length);
+    state->asc_length = asc_length;
+    return 1;
 }
 
 static const dab_fic_label_t *receive_catalog_find_label(
