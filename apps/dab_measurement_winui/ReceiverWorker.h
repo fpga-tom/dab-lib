@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CatalogMailbox.h"
 #include "MeasurementMailbox.h"
 #include "SnapshotMailbox.h"
 
@@ -44,7 +45,9 @@ namespace dab::measurement
     class ReceiverWorker final
     {
     public:
-        ReceiverWorker(SnapshotMailbox& mailbox, MeasurementMailbox& measurement_mailbox) noexcept;
+        ReceiverWorker(SnapshotMailbox& mailbox,
+                       MeasurementMailbox& measurement_mailbox,
+                       CatalogMailbox& catalog_mailbox) noexcept;
         ~ReceiverWorker();
 
         ReceiverWorker(ReceiverWorker const&) = delete;
@@ -74,6 +77,7 @@ namespace dab::measurement
 
         SnapshotMailbox& m_mailbox;
         MeasurementMailbox& m_measurement_mailbox;
+        CatalogMailbox& m_catalog_mailbox;
         std::atomic<bool> m_cancel_requested{ false };
         std::atomic<ReceiverState> m_state{ ReceiverState::stopped };
         std::thread m_thread;

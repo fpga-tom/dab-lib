@@ -127,6 +127,76 @@ typedef int (*dab_receive_measurement_callback_t)(
     const dab_receive_measurement_frame_t *frame,
     void *user);
 
+enum {
+    DAB_RECEIVE_CATALOG_LABEL_CAPACITY = 17u,
+    DAB_RECEIVE_CATALOG_MAX_SERVICES = 64u,
+    DAB_RECEIVE_CATALOG_MAX_COMPONENTS_PER_SERVICE = 12u
+};
+
+typedef enum {
+    DAB_RECEIVE_COMPONENT_UNKNOWN = 0,
+    DAB_RECEIVE_COMPONENT_STREAM_AUDIO = 1,
+    DAB_RECEIVE_COMPONENT_STREAM_DATA = 2,
+    DAB_RECEIVE_COMPONENT_PACKET_MODE = 3
+} dab_receive_component_kind_t;
+
+typedef struct {
+    uint8_t component_index;
+    dab_receive_component_kind_t kind;
+    uint8_t transport_mode_id;
+    uint8_t service_component_type;
+    uint8_t primary;
+    uint8_t conditional_access;
+
+    uint8_t has_subchannel;
+    uint8_t subchannel_id;
+    uint8_t subchannel_valid;
+    uint16_t subchannel_start_cu;
+    uint16_t subchannel_size_cu;
+    uint8_t protection_kind;
+    uint8_t protection_table_switch;
+    uint8_t protection_index;
+    uint8_t protection_option;
+    uint8_t protection_level;
+
+    uint16_t service_component_id;
+    uint8_t has_packet_address;
+    uint16_t packet_address;
+    uint8_t data_group;
+} dab_receive_component_info_t;
+
+typedef struct {
+    uint32_t service_id;
+    uint8_t is_programme;
+    uint8_t conditional_access_id;
+    uint8_t label_charset;
+    char label[DAB_RECEIVE_CATALOG_LABEL_CAPACITY];
+    uint32_t component_count;
+    dab_receive_component_info_t
+        components[DAB_RECEIVE_CATALOG_MAX_COMPONENTS_PER_SERVICE];
+} dab_receive_service_info_t;
+
+/*
+ * The catalog is a complete owned copy of the currently decoded FIC database.
+ * It remains valid only for the duration of the callback, but may be copied as
+ * a value by consumers that cross threads. A callback is made only when its
+ * ensemble, services, labels, or components change.
+ */
+typedef struct {
+    uint64_t sequence;
+    uint64_t timestamp_ns;
+    uint64_t frequency_hz;
+    uint16_t ensemble_id;
+    uint8_t ensemble_label_charset;
+    char ensemble_label[DAB_RECEIVE_CATALOG_LABEL_CAPACITY];
+    uint32_t service_count;
+    dab_receive_service_info_t services[DAB_RECEIVE_CATALOG_MAX_SERVICES];
+} dab_receive_catalog_t;
+
+typedef int (*dab_receive_catalog_callback_t)(
+    const dab_receive_catalog_t *catalog,
+    void *user);
+
 typedef struct {
     const char *driver;
     uint64_t frequency_hz;
@@ -144,6 +214,8 @@ typedef struct {
     dab_receive_measurement_callback_t measurement;
     void *measurement_user;
     uint32_t measurement_decimation;
+    dab_receive_catalog_callback_t catalog;
+    void *catalog_user;
 } dab_receive_config_t;
 
 void dab_receive_default_config(dab_receive_config_t *config);

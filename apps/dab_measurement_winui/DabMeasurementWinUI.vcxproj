@@ -99,6 +99,7 @@
     <ClInclude Include="MainWindow.xaml.h">
       <DependentUpon>MainWindow.xaml</DependentUpon>
     </ClInclude>
+    <ClInclude Include="CatalogMailbox.h" />
     <ClInclude Include="MeasurementMailbox.h" />
     <ClInclude Include="ReceiverWorker.h" />
     <ClInclude Include="SnapshotMailbox.h" />
@@ -117,6 +118,7 @@
     <ClCompile Include="MainWindow.xaml.cpp">
       <DependentUpon>MainWindow.xaml</DependentUpon>
     </ClCompile>
+    <ClCompile Include="CatalogMailbox.cpp" />
     <ClCompile Include="MeasurementMailbox.cpp" />
     <ClCompile Include="ReceiverWorker.cpp" />
     <ClCompile Include="SnapshotMailbox.cpp" />

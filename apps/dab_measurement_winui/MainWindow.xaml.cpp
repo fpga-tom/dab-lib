@@ -40,6 +40,54 @@ namespace
     {
         return winrt::to_hstring(value);
     }
+
+    hstring fic_label_text(char const label[DAB_RECEIVE_CATALOG_LABEL_CAPACITY])
+    {
+        int length = 0;
+        while (length < 16 && label[length] != '\0')
+        {
+            ++length;
+        }
+        if (length == 0)
+        {
+            return {};
+        }
+
+        wchar_t wide[32]{};
+        int wide_length = MultiByteToWideChar(CP_UTF8,
+                                               MB_ERR_INVALID_CHARS,
+                                               label,
+                                               length,
+                                               wide,
+                                               static_cast<int>(sizeof(wide) / sizeof(wide[0])));
+        if (wide_length == 0)
+        {
+            wide_length = MultiByteToWideChar(1252,
+                                              0,
+                                              label,
+                                              length,
+                                              wide,
+                                              static_cast<int>(sizeof(wide) / sizeof(wide[0])));
+        }
+        return wide_length > 0
+            ? hstring{ std::wstring{ wide, static_cast<size_t>(wide_length) } }
+            : hstring{};
+    }
+
+    hstring component_kind_text(dab_receive_component_kind_t kind)
+    {
+        switch (kind)
+        {
+        case DAB_RECEIVE_COMPONENT_STREAM_AUDIO:
+            return L"Stream audio";
+        case DAB_RECEIVE_COMPONENT_STREAM_DATA:
+            return L"Stream data";
+        case DAB_RECEIVE_COMPONENT_PACKET_MODE:
+            return L"Packet data";
+        default:
+            return L"Unknown transport";
+        }
+    }
 }
 
 namespace winrt::DabMeasurementWinUI::implementation
@@ -81,6 +129,12 @@ namespace winrt::DabMeasurementWinUI::implementation
         }
     }
 
+    void MainWindow::ServicesListView_SelectionChanged(IInspectable const&,
+                                                        SelectionChangedEventArgs const&)
+    {
+        ApplySelectedServiceComponents();
+    }
+
     void MainWindow::StartButton_Click(IInspectable const&, RoutedEventArgs const&)
     {
         if (m_receiver.IsActive())
@@ -98,6 +152,7 @@ namespace winrt::DabMeasurementWinUI::implementation
             return;
         }
 
+        ClearCatalogView();
         if (!m_receiver.Start(*settings))
         {
             AddTimelineEvent(L"Receiver worker is already active");
@@ -158,6 +213,16 @@ namespace winrt::DabMeasurementWinUI::implementation
         {
             m_measurement_mailbox_version = measurement_version;
             UpdatePlots(measurement_frame);
+        }
+
+        dab_receive_catalog_t catalog{};
+        uint64_t catalog_version = 0;
+        if (m_catalog_mailbox.TryReadLatest(m_catalog_mailbox_version,
+                                            catalog,
+                                            catalog_version))
+        {
+            m_catalog_mailbox_version = catalog_version;
+            ApplyCatalog(catalog);
         }
     }
 
@@ -296,6 +361,218 @@ namespace winrt::DabMeasurementWinUI::implementation
         FicProgress().Value(crc_ratio);
         BerValueText().Text(fib_total == 0u ? L"—" : (crc_ratio >= 1.0 ? L"FIC clean" : L"CRC loss"));
         SampleCounterText().Text(L"frame " + to_hstring(snapshot.sequence));
+    }
+
+    void MainWindow::ApplyCatalog(dab_receive_catalog_t const& catalog)
+    {
+        uint32_t selected_service_id = 0u;
+        bool preserve_selection = false;
+        int32_t const old_selected_index = ServicesListView().SelectedIndex();
+        if (m_have_catalog && old_selected_index >= 0 &&
+            static_cast<uint32_t>(old_selected_index) < m_latest_catalog.service_count)
+        {
+            selected_service_id =
+                m_latest_catalog.services[static_cast<uint32_t>(old_selected_index)].service_id;
+            preserve_selection = true;
+        }
+
+        m_latest_catalog = catalog;
+        m_have_catalog = true;
+
+        hstring const ensemble_label = fic_label_text(catalog.ensemble_label);
+        if (ensemble_label.empty())
+        {
+            wchar_t fallback[48]{};
+            swprintf_s(fallback, L"Ensemble 0x%04X", catalog.ensemble_id);
+            EnsembleNameText().Text(fallback);
+        }
+        else
+        {
+            EnsembleNameText().Text(ensemble_label);
+        }
+
+        wchar_t ensemble_detail[112]{};
+        hstring const channel = StatusChannelText().Text();
+        swprintf_s(ensemble_detail,
+                   L"EId 0x%04X · %s · %u service%s",
+                   catalog.ensemble_id,
+                   channel.c_str(),
+                   catalog.service_count,
+                   catalog.service_count == 1u ? L"" : L"s");
+        EnsembleDetailText().Text(ensemble_detail);
+
+        auto service_items = ServicesListView().Items();
+        service_items.Clear();
+        if (catalog.service_count == 0u)
+        {
+            ListViewItem empty_item;
+            empty_item.Content(box_value(L"FIC ensemble decoded; awaiting services..."));
+            empty_item.IsEnabled(false);
+            service_items.Append(empty_item);
+            ServicesListView().SelectedIndex(-1);
+            ApplySelectedServiceComponents();
+        }
+        else
+        {
+            int32_t selected_index = 0;
+            for (uint32_t index = 0u; index < catalog.service_count; ++index)
+            {
+                dab_receive_service_info_t const& service = catalog.services[index];
+                hstring label = fic_label_text(service.label);
+                if (label.empty())
+                {
+                    label = L"Unnamed service";
+                }
+
+                StackPanel panel;
+                panel.Spacing(1.0);
+                TextBlock title;
+                title.Text(label);
+                title.TextTrimming(TextTrimming::CharacterEllipsis);
+                panel.Children().Append(title);
+
+                wchar_t detail[72]{};
+                swprintf_s(detail,
+                           L"SID 0x%08X · %u component%s",
+                           service.service_id,
+                           service.component_count,
+                           service.component_count == 1u ? L"" : L"s");
+                TextBlock detail_text;
+                detail_text.Text(detail);
+                detail_text.FontSize(11.0);
+                detail_text.Opacity(0.65);
+                panel.Children().Append(detail_text);
+                service_items.Append(panel);
+
+                if (preserve_selection && service.service_id == selected_service_id)
+                {
+                    selected_index = static_cast<int32_t>(index);
+                }
+            }
+            ServicesListView().SelectedIndex(selected_index);
+            ApplySelectedServiceComponents();
+        }
+
+        hstring const timeline_name = EnsembleNameText().Text();
+        AddTimelineEvent(L"FIC catalog · " + timeline_name + L" · " +
+                         to_hstring(catalog.service_count) + L" services");
+    }
+
+    void MainWindow::ApplySelectedServiceComponents()
+    {
+        auto component_items = ComponentsListView().Items();
+        component_items.Clear();
+        int32_t const selected_index = ServicesListView().SelectedIndex();
+        if (!m_have_catalog || selected_index < 0 ||
+            static_cast<uint32_t>(selected_index) >= m_latest_catalog.service_count)
+        {
+            ListViewItem empty_item;
+            empty_item.Content(box_value(L"Select a decoded service"));
+            empty_item.IsEnabled(false);
+            component_items.Append(empty_item);
+            return;
+        }
+
+        dab_receive_service_info_t const& service =
+            m_latest_catalog.services[static_cast<uint32_t>(selected_index)];
+        if (service.component_count == 0u)
+        {
+            ListViewItem empty_item;
+            empty_item.Content(box_value(L"No FIC components decoded yet"));
+            empty_item.IsEnabled(false);
+            component_items.Append(empty_item);
+            return;
+        }
+
+        for (uint32_t index = 0u; index < service.component_count; ++index)
+        {
+            dab_receive_component_info_t const& component = service.components[index];
+            StackPanel panel;
+            panel.Spacing(1.0);
+
+            TextBlock title;
+            hstring title_text = component_kind_text(component.kind);
+            if (component.primary != 0u)
+            {
+                title_text = title_text + L" · primary";
+            }
+            title.Text(title_text);
+            panel.Children().Append(title);
+
+            wchar_t detail[160]{};
+            if (component.has_subchannel != 0u)
+            {
+                if (component.subchannel_valid != 0u)
+                {
+                    if (component.protection_kind == 0u)
+                    {
+                        swprintf_s(detail,
+                                   L"SubCh %u · SC type %u · UEP table %u index %u",
+                                   component.subchannel_id,
+                                   component.service_component_type,
+                                   component.protection_table_switch,
+                                   component.protection_index);
+                    }
+                    else
+                    {
+                        swprintf_s(detail,
+                                   L"SubCh %u · SC type %u · %u CU · EEP option %u level %u",
+                                   component.subchannel_id,
+                                   component.service_component_type,
+                                   component.subchannel_size_cu,
+                                   component.protection_option,
+                                   component.protection_level);
+                    }
+                }
+                else
+                {
+                    swprintf_s(detail,
+                               L"SubCh %u · SC type %u · allocation pending",
+                               component.subchannel_id,
+                               component.service_component_type);
+                }
+            }
+            else if (component.has_packet_address != 0u)
+            {
+                swprintf_s(detail,
+                           L"SCId 0x%03X · packet 0x%03X · SC type %u",
+                           component.service_component_id,
+                           component.packet_address,
+                           component.service_component_type);
+            }
+            else
+            {
+                swprintf_s(detail,
+                           L"TMId %u · SC type %u · component %u",
+                           component.transport_mode_id,
+                           component.service_component_type,
+                           component.component_index);
+            }
+            TextBlock detail_text;
+            detail_text.Text(detail);
+            detail_text.TextWrapping(TextWrapping::Wrap);
+            detail_text.FontSize(11.0);
+            detail_text.Opacity(0.65);
+            panel.Children().Append(detail_text);
+            component_items.Append(panel);
+        }
+    }
+
+    void MainWindow::ClearCatalogView()
+    {
+        m_have_catalog = false;
+        m_latest_catalog = {};
+        EnsembleNameText().Text(L"Awaiting FIC ensemble");
+        EnsembleDetailText().Text(L"Decoding ensemble metadata from the signal");
+
+        auto service_items = ServicesListView().Items();
+        service_items.Clear();
+        ListViewItem service_placeholder;
+        service_placeholder.Content(box_value(L"Awaiting decoded services..."));
+        service_placeholder.IsEnabled(false);
+        service_items.Append(service_placeholder);
+        ServicesListView().SelectedIndex(-1);
+        ApplySelectedServiceComponents();
     }
 
     void MainWindow::UpdatePlots(dab::measurement::MeasurementFrame const& frame)

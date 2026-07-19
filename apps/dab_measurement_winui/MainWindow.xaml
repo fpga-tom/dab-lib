@@ -183,8 +183,8 @@
                     <TextBlock Grid.Row="0" Text="ENSEMBLES" Style="{StaticResource SectionTitleStyle}" />
                     <Border Grid.Row="1" Padding="10" CornerRadius="6" Background="#2535D0BA" BorderBrush="{StaticResource MeasurementAccentBrush}" BorderThickness="1">
                         <StackPanel>
-                            <TextBlock Text="DAB SLOVAKIA" FontWeight="SemiBold" />
-                            <TextBlock Text="EId 0xE001 · 11C" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                            <TextBlock x:Name="EnsembleNameText" Text="Awaiting FIC ensemble" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                            <TextBlock x:Name="EnsembleDetailText" Text="Tune and start the receiver" Foreground="{StaticResource MutedTextBrush}" FontSize="11" TextTrimming="CharacterEllipsis" />
                         </StackPanel>
                     </Border>
 
@@ -194,40 +194,19 @@
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
                         <TextBlock Text="SERVICES" Style="{StaticResource SectionTitleStyle}" />
-                        <ListView Grid.Row="1" SelectionMode="Single" SelectedIndex="0">
-                            <ListViewItem Content="Radio Slovensko" />
-                            <ListViewItem Content="Rádio FM" />
-                            <ListViewItem Content="Rádio Devín" />
-                            <ListViewItem Content="Rádio_FM AAC+" />
+                        <ListView x:Name="ServicesListView"
+                                  Grid.Row="1"
+                                  SelectionMode="Single"
+                                  SelectionChanged="ServicesListView_SelectionChanged">
+                            <ListViewItem Content="Awaiting decoded services..." IsEnabled="False" />
                         </ListView>
                     </Grid>
 
                     <Rectangle Grid.Row="3" Height="1" Fill="{StaticResource PanelStrokeBrush}" />
                     <TextBlock Grid.Row="4" Text="COMPONENTS" Style="{StaticResource SectionTitleStyle}" />
-                    <StackPanel Grid.Row="5" Spacing="6">
-                        <Grid ColumnSpacing="8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <FontIcon Glyph="&#xE8D6;" FontSize="13" Foreground="{StaticResource MeasurementAccentBrush}" />
-                            <StackPanel Grid.Column="1">
-                                <TextBlock Text="DAB+ audio" />
-                                <TextBlock Text="SubCh 4 · 96 kbit/s" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
-                            </StackPanel>
-                        </Grid>
-                        <Grid ColumnSpacing="8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <FontIcon Glyph="&#xE8A5;" FontSize="13" Foreground="{StaticResource SpectrumBrush}" />
-                            <StackPanel Grid.Column="1">
-                                <TextBlock Text="MOT slideshow" />
-                                <TextBlock Text="packet data" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
-                            </StackPanel>
-                        </Grid>
-                    </StackPanel>
+                    <ListView x:Name="ComponentsListView" Grid.Row="5" SelectionMode="None" MaxHeight="180">
+                        <ListViewItem Content="Select a decoded service" IsEnabled="False" />
+                    </ListView>
 
                 </Grid>
             </Border>

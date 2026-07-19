@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "receive_catalog_internal.h"
 #include "receive_measurement_internal.h"
 #include "receive_snapshot_internal.h"
 #include "test_support.h"
@@ -25,6 +26,8 @@ void test_receive_default_config_uses_rtlsdr_playback_defaults(void) {
     TEST_ASSERT(config.measurement == 0);
     TEST_ASSERT(config.measurement_user == 0);
     TEST_ASSERT(config.measurement_decimation == 1u);
+    TEST_ASSERT(config.catalog == 0);
+    TEST_ASSERT(config.catalog_user == 0);
 }
 
 void test_receive_service_rejects_incomplete_config_before_opening_device(void) {
@@ -132,6 +135,102 @@ void test_receive_snapshot_maps_receiver_measurements_and_counters(void) {
     TEST_ASSERT(snapshot.msc_last_decode_ok == 1);
     TEST_ASSERT(snapshot.msc_runtime_reset_count == 3u);
     TEST_ASSERT(snapshot.msc_last_reconfig_reason == 0x42u);
+}
+
+void test_receive_catalog_copies_fic_ensemble_services_and_components(void) {
+    dab_fic_database_t database = {0};
+    dab_receive_catalog_t catalog;
+    dab_receive_catalog_t same_content;
+    dab_fic_service_t *audio_service = &database.services[0];
+    dab_fic_service_t *data_service = &database.services[1];
+    dab_fic_service_component_t *audio_component = &audio_service->components[0];
+    dab_fic_service_component_t *packet_component = &data_service->components[0];
+
+    database.eid = 0xE0C1u;
+    database.service_count = 2u;
+    database.subchannels[4].valid = 1u;
+    database.subchannels[4].subchid = 4u;
+    database.subchannels[4].start_cu = 120u;
+    database.subchannels[4].size_cu = 84u;
+    database.subchannels[4].protection_kind = DAB_FIC_PROTECTION_EEP;
+    database.subchannels[4].protection_option = 1u;
+    database.subchannels[4].protection_level = 3u;
+
+    audio_service->is_programme = 1u;
+    audio_service->sid = 0x1001u;
+    audio_service->component_count = 1u;
+    audio_component->used = 1u;
+    audio_component->tmid = 0u;
+    audio_component->sc_type = 63u;
+    audio_component->primary = 1u;
+    audio_component->has_subchid = 1u;
+    audio_component->subchid = 4u;
+
+    data_service->sid = 0x10203040u;
+    data_service->component_count = 1u;
+    packet_component->used = 1u;
+    packet_component->tmid = 3u;
+    packet_component->sc_type = 12u;
+    packet_component->scid = 0x321u;
+    packet_component->has_packet_addr = 1u;
+    packet_component->packet_addr = 0x155u;
+    packet_component->dg_flag = 1u;
+
+    database.label_count = 3u;
+    database.labels[0].used = 1u;
+    database.labels[0].scope = DAB_FIC_LABEL_SCOPE_ENSEMBLE;
+    database.labels[0].eid = database.eid;
+    database.labels[0].charset = 0u;
+    strcpy(database.labels[0].text, "TEST ENSEMBLE");
+    database.labels[1].used = 1u;
+    database.labels[1].scope = DAB_FIC_LABEL_SCOPE_SERVICE;
+    database.labels[1].is_programme = 1u;
+    database.labels[1].sid = audio_service->sid;
+    strcpy(database.labels[1].text, "TEST AUDIO");
+    database.labels[2].used = 1u;
+    database.labels[2].scope = DAB_FIC_LABEL_SCOPE_SERVICE;
+    database.labels[2].sid = data_service->sid;
+    strcpy(database.labels[2].text, "TEST DATA");
+
+    dab_receive_catalog_build(&catalog,
+                              7u,
+                              123456789u,
+                              213360000u,
+                              &database);
+
+    TEST_ASSERT(catalog.sequence == 7u);
+    TEST_ASSERT(catalog.timestamp_ns == 123456789u);
+    TEST_ASSERT(catalog.frequency_hz == 213360000u);
+    TEST_ASSERT(catalog.ensemble_id == 0xE0C1u);
+    TEST_ASSERT(strcmp(catalog.ensemble_label, "TEST ENSEMBLE") == 0);
+    TEST_ASSERT(catalog.service_count == 2u);
+    TEST_ASSERT(catalog.services[0].service_id == 0x1001u);
+    TEST_ASSERT(strcmp(catalog.services[0].label, "TEST AUDIO") == 0);
+    TEST_ASSERT(catalog.services[0].component_count == 1u);
+    TEST_ASSERT(catalog.services[0].components[0].kind == DAB_RECEIVE_COMPONENT_STREAM_AUDIO);
+    TEST_ASSERT(catalog.services[0].components[0].primary == 1u);
+    TEST_ASSERT(catalog.services[0].components[0].subchannel_valid == 1u);
+    TEST_ASSERT(catalog.services[0].components[0].subchannel_id == 4u);
+    TEST_ASSERT(catalog.services[0].components[0].subchannel_start_cu == 120u);
+    TEST_ASSERT(catalog.services[0].components[0].subchannel_size_cu == 84u);
+    TEST_ASSERT(catalog.services[0].components[0].protection_kind == DAB_FIC_PROTECTION_EEP);
+    TEST_ASSERT(catalog.services[0].components[0].protection_option == 1u);
+    TEST_ASSERT(catalog.services[0].components[0].protection_level == 3u);
+    TEST_ASSERT(catalog.services[1].service_id == 0x10203040u);
+    TEST_ASSERT(strcmp(catalog.services[1].label, "TEST DATA") == 0);
+    TEST_ASSERT(catalog.services[1].components[0].kind == DAB_RECEIVE_COMPONENT_PACKET_MODE);
+    TEST_ASSERT(catalog.services[1].components[0].service_component_id == 0x321u);
+    TEST_ASSERT(catalog.services[1].components[0].has_packet_address == 1u);
+    TEST_ASSERT(catalog.services[1].components[0].packet_address == 0x155u);
+
+    dab_receive_catalog_build(&same_content,
+                              8u,
+                              987654321u,
+                              213360000u,
+                              &database);
+    TEST_ASSERT(dab_receive_catalog_content_equal(&catalog, &same_content) != 0);
+    same_content.services[0].component_count = 0u;
+    TEST_ASSERT(dab_receive_catalog_content_equal(&catalog, &same_content) == 0);
 }
 
 void test_receive_measurement_builds_bounded_signal_payloads(void) {

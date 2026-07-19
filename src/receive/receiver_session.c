@@ -22,6 +22,7 @@
 #include "dab/hal/sdrplay_device.h"
 #if defined(DAB_RECEIVE_NO_MAIN)
 #include "dab/receive.h"
+#include "receive_catalog_internal.h"
 #include "receive_measurement_internal.h"
 #include "receive_snapshot_internal.h"
 #endif
@@ -272,6 +273,39 @@ static int receive_emit_snapshot(const dab_receive_config_t *config,
                                msc,
                                msc_audio_ptr);
     return config->snapshot(&snapshot, config->snapshot_user);
+}
+
+static int receive_emit_catalog(const dab_receive_config_t *config,
+                                dab_receive_catalog_t *current,
+                                dab_receive_catalog_t *candidate,
+                                uint64_t *sequence,
+                                uint64_t timestamp_ns,
+                                uint64_t frequency_hz,
+                                const dab_fic_database_t *database) {
+    if (config == 0 || config->catalog == 0 || current == 0 || candidate == 0 ||
+        sequence == 0 || database == 0) {
+        return 0;
+    }
+
+    dab_receive_catalog_build(candidate,
+                              *sequence + 1u,
+                              timestamp_ns,
+                              frequency_hz,
+                              database);
+    if (candidate->ensemble_id == 0u && candidate->service_count == 0u &&
+        candidate->ensemble_label[0] == '\0') {
+        return 0;
+    }
+    if (dab_receive_catalog_content_equal(current, candidate)) {
+        return 0;
+    }
+    if (config->catalog(candidate, config->catalog_user) != 0) {
+        return -1;
+    }
+
+    *sequence = candidate->sequence;
+    memcpy(current, candidate, sizeof(*current));
+    return 0;
 }
 #endif
 
@@ -1068,6 +1102,9 @@ int dab_receiver_session_run(int argc, char **argv) {
     uint64_t measurement_sequence = 0u;
     uint64_t measurement_frame_start_sample = 0u;
     uint8_t measurement_pending = 0u;
+    dab_receive_catalog_t *catalog_current = 0;
+    dab_receive_catalog_t *catalog_candidate = 0;
+    uint64_t catalog_sequence = 0u;
 #endif
     uint64_t audio_timeout_samples = 0u;
     uint64_t samples_since_audio = 0u;
@@ -1309,6 +1346,10 @@ int dab_receiver_session_run(int argc, char **argv) {
     if (receive_config->measurement != 0) {
         measurement_state = (dab_receive_measurement_state_t *)calloc(1u, sizeof(*measurement_state));
     }
+    if (receive_config->catalog != 0) {
+        catalog_current = (dab_receive_catalog_t *)calloc(1u, sizeof(*catalog_current));
+        catalog_candidate = (dab_receive_catalog_t *)calloc(1u, sizeof(*catalog_candidate));
+    }
 #endif
     if (fft_i == 0 || fft_q == 0 || active_i == 0 || active_q == 0 ||
         raw_active_i == 0 || raw_active_q == 0 ||
@@ -1317,6 +1358,8 @@ int dab_receiver_session_run(int argc, char **argv) {
         fic_softbits == 0 || msc_softbits == 0 || frame_softbits == 0
 #if defined(DAB_RECEIVE_NO_MAIN)
         || (receive_config->measurement != 0 && measurement_state == 0)
+        || (receive_config->catalog != 0 &&
+            (catalog_current == 0 || catalog_candidate == 0))
 #endif
         ) {
         fprintf(stderr, "alloc failed\n");
@@ -2129,15 +2172,34 @@ int dab_receiver_session_run(int argc, char **argv) {
                                                     tframe_result.frame_start_sample;
                                             }
 #endif
-                                            if (dab_fic_process_frame(&fic,
-                                                                      tframe_result.frame_start_sample,
-                                                                      fic_softbits,
-                                                                      DAB_TFRAME_FIC_SOFTBITS) == 0 &&
-                                                dab_msc_process_frame_with_fic(&msc,
-                                                                               tframe_result.frame_start_sample,
-                                                                               msc_softbits,
-                                                                               DAB_TFRAME_MSC_SOFTBITS,
-                                                                               &fic.repo.current) == 0) {
+                                            {
+                                                const int fic_result = dab_fic_process_frame(
+                                                    &fic,
+                                                    tframe_result.frame_start_sample,
+                                                    fic_softbits,
+                                                    DAB_TFRAME_FIC_SOFTBITS);
+                                                const int msc_result = fic_result == 0
+                                                    ? dab_msc_process_frame_with_fic(
+                                                          &msc,
+                                                          tframe_result.frame_start_sample,
+                                                          msc_softbits,
+                                                          DAB_TFRAME_MSC_SOFTBITS,
+                                                          &fic.repo.current)
+                                                    : -1;
+#if defined(DAB_RECEIVE_NO_MAIN)
+                                                if (fic_result == 0 &&
+                                                    receive_emit_catalog(receive_config,
+                                                                         catalog_current,
+                                                                         catalog_candidate,
+                                                                         &catalog_sequence,
+                                                                         src_block.timestamp_ns,
+                                                                         stream_config.center_freq_hz,
+                                                                         &fic.repo.current) != 0) {
+                                                    rc = -2;
+                                                    goto cleanup;
+                                                }
+#endif
+                                                if (fic_result == 0 && msc_result == 0) {
                                                 const dab_msc_decoded_component_t *audio_component = 0;
                                                 const dab_fic_label_t *label = 0;
 #if defined(DAB_HAVE_AUDIO_PLAYBACK) || defined(DAB_RECEIVE_NO_MAIN)
@@ -2279,7 +2341,7 @@ int dab_receiver_session_run(int argc, char **argv) {
                                                     last_audio_msc_frames_seen = msc.frames_seen;
                                                     last_audio_tframe_symbol_index = tframe.symbol_index;
                                                     if (playing_reported == 0u) {
-                                                        const dab_fic_label_t *label =
+                                                        const dab_fic_label_t *playing_label =
                                                             fic_repo_find_label(&fic.repo.current,
                                                                                 DAB_FIC_LABEL_SCOPE_SERVICE,
                                                                                 1u,
@@ -2288,8 +2350,8 @@ int dab_receiver_session_run(int argc, char **argv) {
                                                                                 0u);
 
                                                         printf("playing sid=0x%08x", selected_audio_sid);
-                                                        if (label != 0 && label->text[0] != '\0') {
-                                                            printf(" label=\"%s\"", label->text);
+                                                        if (playing_label != 0 && playing_label->text[0] != '\0') {
+                                                            printf(" label=\"%s\"", playing_label->text);
                                                         }
                                                         printf("\n");
                                                         playing_reported = 1u;
@@ -2373,6 +2435,7 @@ int dab_receiver_session_run(int argc, char **argv) {
                                                     fic_raw_active_dump_written = 1;
                                                     DAB_DEBUG_LOG(" fic_raw_active_dump=%s", dump_fic_raw_active_path);
                                                 }
+                                                }
                                             }
                                         }
                                     }
@@ -2452,6 +2515,8 @@ cleanup:
     }
     free(ref_samples_scratch);
 #if defined(DAB_RECEIVE_NO_MAIN)
+    free(catalog_candidate);
+    free(catalog_current);
     free(measurement_state);
 #endif
     if (stream != 0) {

@@ -3,6 +3,7 @@
 #include <math.h>
 #include <string.h>
 
+#include "receive_catalog_internal.h"
 #include "receive_measurement_internal.h"
 #include "receive_snapshot_internal.h"
 
@@ -18,6 +19,160 @@ void dab_receive_default_config(dab_receive_config_t *config) {
     config->android_usb_fd = -1;
     config->use_real_device = 1;
     config->measurement_decimation = 1u;
+}
+
+static const dab_fic_label_t *receive_catalog_find_label(
+    const dab_fic_database_t *database,
+    dab_fic_label_scope_t scope,
+    uint8_t is_programme,
+    uint32_t sid,
+    uint16_t eid) {
+    uint16_t index;
+
+    if (database == 0) {
+        return 0;
+    }
+    for (index = 0u; index < database->label_count; ++index) {
+        const dab_fic_label_t *label = &database->labels[index];
+        if (label->used == 0u || label->scope != scope) {
+            continue;
+        }
+        if (scope == DAB_FIC_LABEL_SCOPE_ENSEMBLE && label->eid == eid) {
+            return label;
+        }
+        if (scope == DAB_FIC_LABEL_SCOPE_SERVICE &&
+            label->is_programme == is_programme && label->sid == sid) {
+            return label;
+        }
+    }
+    return 0;
+}
+
+static dab_receive_component_kind_t receive_catalog_component_kind(uint8_t transport_mode_id) {
+    switch (transport_mode_id) {
+        case 0u:
+            return DAB_RECEIVE_COMPONENT_STREAM_AUDIO;
+        case 1u:
+            return DAB_RECEIVE_COMPONENT_STREAM_DATA;
+        case 3u:
+            return DAB_RECEIVE_COMPONENT_PACKET_MODE;
+        default:
+            return DAB_RECEIVE_COMPONENT_UNKNOWN;
+    }
+}
+
+void dab_receive_catalog_build(dab_receive_catalog_t *catalog,
+                               uint64_t sequence,
+                               uint64_t timestamp_ns,
+                               uint64_t frequency_hz,
+                               const dab_fic_database_t *database) {
+    const dab_fic_label_t *ensemble_label;
+    uint32_t service_index;
+
+    if (catalog == 0) {
+        return;
+    }
+    memset(catalog, 0, sizeof(*catalog));
+    catalog->sequence = sequence;
+    catalog->timestamp_ns = timestamp_ns;
+    catalog->frequency_hz = frequency_hz;
+    if (database == 0) {
+        return;
+    }
+
+    catalog->ensemble_id = database->eid;
+    ensemble_label = receive_catalog_find_label(database,
+                                                  DAB_FIC_LABEL_SCOPE_ENSEMBLE,
+                                                  0u,
+                                                  0u,
+                                                  database->eid);
+    if (ensemble_label != 0) {
+        catalog->ensemble_label_charset = ensemble_label->charset;
+        memcpy(catalog->ensemble_label,
+               ensemble_label->text,
+               sizeof(catalog->ensemble_label));
+    }
+
+    for (service_index = 0u;
+         service_index < database->service_count &&
+         catalog->service_count < DAB_RECEIVE_CATALOG_MAX_SERVICES;
+         ++service_index) {
+        const dab_fic_service_t *source_service = &database->services[service_index];
+        dab_receive_service_info_t *service = &catalog->services[catalog->service_count];
+        const dab_fic_label_t *service_label;
+        uint32_t component_index;
+
+        service->service_id = source_service->sid;
+        service->is_programme = source_service->is_programme;
+        service->conditional_access_id = source_service->caid;
+        service_label = receive_catalog_find_label(database,
+                                                     DAB_FIC_LABEL_SCOPE_SERVICE,
+                                                     source_service->is_programme,
+                                                     source_service->sid,
+                                                     0u);
+        if (service_label != 0) {
+            service->label_charset = service_label->charset;
+            memcpy(service->label, service_label->text, sizeof(service->label));
+        }
+
+        for (component_index = 0u;
+             component_index < source_service->component_count &&
+             service->component_count < DAB_RECEIVE_CATALOG_MAX_COMPONENTS_PER_SERVICE;
+             ++component_index) {
+            const dab_fic_service_component_t *source_component =
+                &source_service->components[component_index];
+            dab_receive_component_info_t *component;
+
+            if (source_component->used == 0u) {
+                continue;
+            }
+            component = &service->components[service->component_count++];
+            component->component_index = (uint8_t)component_index;
+            component->kind = receive_catalog_component_kind(source_component->tmid);
+            component->transport_mode_id = source_component->tmid;
+            component->service_component_type = source_component->sc_type;
+            component->primary = source_component->primary;
+            component->conditional_access = source_component->ca_flag;
+            component->has_subchannel = source_component->has_subchid;
+            component->subchannel_id = source_component->subchid;
+            component->service_component_id = source_component->scid;
+            component->has_packet_address = source_component->has_packet_addr;
+            component->packet_address = source_component->packet_addr;
+            component->data_group = source_component->dg_flag;
+
+            if (source_component->has_subchid != 0u &&
+                source_component->subchid < DAB_FIC_MAX_SUBCHANNELS) {
+                const dab_fic_subchannel_t *subchannel =
+                    &database->subchannels[source_component->subchid];
+                if (subchannel->valid != 0u) {
+                    component->subchannel_valid = 1u;
+                    component->subchannel_start_cu = subchannel->start_cu;
+                    component->subchannel_size_cu = subchannel->size_cu;
+                    component->protection_kind = (uint8_t)subchannel->protection_kind;
+                    component->protection_table_switch = subchannel->table_switch;
+                    component->protection_index = subchannel->protection_index;
+                    component->protection_option = subchannel->protection_option;
+                    component->protection_level = subchannel->protection_level;
+                }
+            }
+        }
+        catalog->service_count++;
+    }
+}
+
+int dab_receive_catalog_content_equal(const dab_receive_catalog_t *left,
+                                      const dab_receive_catalog_t *right) {
+    if (left == 0 || right == 0) {
+        return 0;
+    }
+    return left->frequency_hz == right->frequency_hz &&
+           left->ensemble_id == right->ensemble_id &&
+           left->ensemble_label_charset == right->ensemble_label_charset &&
+           memcmp(left->ensemble_label,
+                  right->ensemble_label,
+                  sizeof(left->ensemble_label)) == 0 &&
+           left->service_count == right->service_count &&
+           memcmp(left->services, right->services, sizeof(left->services)) == 0;
 }
 
 void dab_receive_snapshot_build(dab_receive_snapshot_t *snapshot,
