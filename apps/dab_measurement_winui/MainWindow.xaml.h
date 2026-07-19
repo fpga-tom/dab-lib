@@ -1,6 +1,7 @@
 #pragma once
 
 #include "MainWindow.g.h"
+#include "MeasurementMailbox.h"
 #include "ReceiverWorker.h"
 #include "SnapshotMailbox.h"
 
@@ -23,13 +24,15 @@ namespace winrt::DabMeasurementWinUI::implementation
         void HandleReceiverStatus(dab::measurement::ReceiverStatus const& status);
         void SetReceiverControlsEnabled(bool enabled);
         void ApplySnapshot(dab_receive_snapshot_t const& snapshot);
-        void UpdatePlots(dab_receive_snapshot_t const& snapshot);
+        void UpdatePlots(dab::measurement::MeasurementFrame const& frame);
         void AddTimelineEvent(winrt::hstring const& message);
 
         Microsoft::UI::Xaml::DispatcherTimer m_timer;
         dab::measurement::SnapshotMailbox m_mailbox;
-        dab::measurement::ReceiverWorker m_receiver{ m_mailbox };
+        dab::measurement::MeasurementMailbox m_measurement_mailbox;
+        dab::measurement::ReceiverWorker m_receiver{ m_mailbox, m_measurement_mailbox };
         uint64_t m_mailbox_version{ 0 };
+        uint64_t m_measurement_mailbox_version{ 0 };
         uint64_t m_receiver_status_version{ 0 };
         uint64_t m_tick{ 0 };
     };

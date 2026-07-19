@@ -277,7 +277,7 @@
                                     <Polyline x:Name="SpectrumTrace"
                                               Stroke="{StaticResource SpectrumBrush}"
                                               StrokeThickness="2"
-                                              Points="0,225 40,223 80,220 120,206 160,198 200,185 240,172 280,148 320,130 360,116 400,110 440,108 480,109 520,113 560,120 600,138 640,162 680,178 720,190 760,205 800,216 850,222 900,225" />
+                                              Points="0,240 900,240" />
                                     <Line X1="450" Y1="8" X2="450" Y2="250" Stroke="{StaticResource WarningBrush}" StrokeThickness="1" StrokeDashArray="4,4" />
                                     <TextBlock Canvas.Left="458" Canvas.Top="12" x:Name="SpectrumFrequencyText" Text="213.360 MHz" Foreground="{StaticResource WarningBrush}" FontFamily="Consolas" FontSize="11" />
                                 </Canvas>
@@ -286,26 +286,7 @@
 
                         <Border Grid.Row="2" Margin="10,0,10,10" CornerRadius="4" BorderBrush="#FF203249" BorderThickness="1">
                             <Viewbox Stretch="Fill">
-                                <Canvas Width="900" Height="125" Background="#FF07101B">
-                                    <Rectangle Width="900" Height="125">
-                                        <Rectangle.Fill>
-                                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-                                                <GradientStop Color="#FF07101B" Offset="0" />
-                                                <GradientStop Color="#FF153448" Offset="0.14" />
-                                                <GradientStop Color="#FF087B79" Offset="0.32" />
-                                                <GradientStop Color="#FF22C8A8" Offset="0.5" />
-                                                <GradientStop Color="#FF087B79" Offset="0.68" />
-                                                <GradientStop Color="#FF153448" Offset="0.86" />
-                                                <GradientStop Color="#FF07101B" Offset="1" />
-                                            </LinearGradientBrush>
-                                        </Rectangle.Fill>
-                                    </Rectangle>
-                                    <Line X1="0" Y1="25" X2="900" Y2="25" Stroke="#30000000" StrokeThickness="3" />
-                                    <Line X1="0" Y1="52" X2="900" Y2="52" Stroke="#30000000" StrokeThickness="3" />
-                                    <Line X1="0" Y1="79" X2="900" Y2="79" Stroke="#30000000" StrokeThickness="3" />
-                                    <Line X1="0" Y1="106" X2="900" Y2="106" Stroke="#30000000" StrokeThickness="3" />
-                                    <Line x:Name="WaterfallCursor" X1="0" Y1="4" X2="900" Y2="4" Stroke="#AAFFFFFF" StrokeThickness="1" />
-                                </Canvas>
+                                <Canvas x:Name="WaterfallCanvas" Width="900" Height="125" Background="#FF07101B" />
                             </Viewbox>
                         </Border>
                     </Grid>
@@ -331,8 +312,8 @@
                             <Viewbox Margin="10" Stretch="Fill">
                                 <Canvas Width="800" Height="210" Background="#FF07101B">
                                     <Line X1="0" Y1="170" X2="800" Y2="170" Stroke="#334B6178" />
-                                    <Polyline Stroke="{StaticResource MeasurementAccentBrush}" StrokeThickness="2" Points="0,180 45,178 80,174 110,70 125,168 180,175 260,160 275,110 290,170 390,178 520,176 610,150 620,178 800,180" />
-                                    <TextBlock Canvas.Left="112" Canvas.Top="45" Text="main path" Foreground="{StaticResource MeasurementAccentBrush}" FontSize="11" />
+                                    <Polyline x:Name="CirTrace" Stroke="{StaticResource MeasurementAccentBrush}" StrokeThickness="2" Points="0,180 800,180" />
+                                    <TextBlock x:Name="CirStatusText" Canvas.Left="12" Canvas.Top="12" Text="awaiting channel estimate" Foreground="{StaticResource MeasurementAccentBrush}" FontSize="11" />
                                 </Canvas>
                             </Viewbox>
                         </TabViewItem>
@@ -344,11 +325,11 @@
                                 </Grid.RowDefinitions>
                                 <Viewbox Stretch="Fill">
                                     <Canvas Width="800" Height="190" Background="#FF07101B">
-                                        <Polyline Stroke="{StaticResource MeasurementAccentBrush}" StrokeThickness="2" Points="0,98 40,85 80,90 120,72 160,84 200,68 240,75 280,62 320,70 360,58 400,67 440,61 480,74 520,68 560,82 600,76 640,91 680,84 720,102 760,94 800,108" />
+                                        <Polyline x:Name="CarrierMerTrace" Stroke="{StaticResource MeasurementAccentBrush}" StrokeThickness="2" Points="0,130 800,130" />
                                         <Line X1="0" Y1="130" X2="800" Y2="130" Stroke="{StaticResource WarningBrush}" StrokeDashArray="4,4" />
                                     </Canvas>
                                 </Viewbox>
-                                <TextBlock Grid.Row="1" Text="Carrier index −768 … +768 · threshold 18 dB" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                <TextBlock Grid.Row="1" x:Name="CarrierMerStatusText" Text="Carrier index −768 … +768 · awaiting MER" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                             </Grid>
                         </TabViewItem>
                     </TabView>
@@ -374,7 +355,7 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel>
-                                    <TextBlock Text="MER (C/N proxy)" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                    <TextBlock Text="MER" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                                     <TextBlock x:Name="MerValueText" Text="— dB" Style="{StaticResource KpiValueStyle}" />
                                 </StackPanel>
                                 <FontIcon Grid.Column="1" Glyph="&#xE9D2;" Foreground="{StaticResource MeasurementAccentBrush}" />

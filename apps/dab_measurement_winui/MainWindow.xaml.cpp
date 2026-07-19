@@ -148,7 +148,16 @@ namespace winrt::DabMeasurementWinUI::implementation
         {
             m_mailbox_version = snapshot_version;
             ApplySnapshot(snapshot);
-            UpdatePlots(snapshot);
+        }
+
+        dab::measurement::MeasurementFrame measurement_frame;
+        uint64_t measurement_version = 0;
+        if (m_measurement_mailbox.TryReadLatest(m_measurement_mailbox_version,
+                                                measurement_frame,
+                                                measurement_version))
+        {
+            m_measurement_mailbox_version = measurement_version;
+            UpdatePlots(measurement_frame);
         }
     }
 
@@ -256,9 +265,6 @@ namespace winrt::DabMeasurementWinUI::implementation
             ? format_float(static_cast<float>(snapshot.sample_rate_hz) / 1000000.0f, L" MS/s", 3)
             : hstring{ L"— MS/s" });
 
-        MerValueText().Text(snapshot.cn_valid
-            ? format_float(snapshot.cn_db - 1.1f, L" dB")
-            : hstring{ L"— dB" });
         SnrValueText().Text(snapshot.snr_valid
             ? format_float(snapshot.snr_db, L" dB")
             : hstring{ L"— dB" });
@@ -292,46 +298,183 @@ namespace winrt::DabMeasurementWinUI::implementation
         SampleCounterText().Text(L"frame " + to_hstring(snapshot.sequence));
     }
 
-    void MainWindow::UpdatePlots(dab_receive_snapshot_t const& snapshot)
+    void MainWindow::UpdatePlots(dab::measurement::MeasurementFrame const& frame)
     {
-        PointCollection spectrum_points;
-        constexpr uint32_t point_count = 91u;
-        double const phase = static_cast<double>(snapshot.sequence) * 0.12;
+        DataModeText().Text(L"HIGH-RATE MEASUREMENTS");
+        DataSeamText().Text(L"measurement " + to_hstring(frame.sequence));
+        SampleCounterText().Text(L"measurement " + to_hstring(frame.sequence));
 
-        for (uint32_t i = 0u; i < point_count; ++i)
+        if (frame.spectrum_bin_count != 0u)
         {
-            double const x = 900.0 * static_cast<double>(i) / static_cast<double>(point_count - 1u);
-            double const offset = (x - 450.0) / 310.0;
-            double const envelope = std::exp(-(offset * offset) * 1.7);
-            double const ripple = (7.0 * std::sin((x * 0.045) + phase)) +
-                                  (3.0 * std::sin((x * 0.13) - (phase * 0.7)));
-            double const y = std::clamp(225.0 - (118.0 * envelope) - ripple, 18.0, 242.0);
-            spectrum_points.Append(Point{ static_cast<float>(x), static_cast<float>(y) });
+            PointCollection spectrum_points;
+            constexpr uint32_t display_points = 181u;
+            for (uint32_t point = 0u; point < display_points; ++point)
+            {
+                uint32_t const begin = (point * frame.spectrum_bin_count) / display_points;
+                uint32_t const end = (std::max)(begin + 1u,
+                    ((point + 1u) * frame.spectrum_bin_count) / display_points);
+                float level = -120.0f;
+                for (uint32_t bin = begin; bin < (std::min)(end, frame.spectrum_bin_count); ++bin)
+                {
+                    level = (std::max)(level, frame.spectrum_dbfs[bin]);
+                }
+                float const x = 900.0f * static_cast<float>(point) /
+                                static_cast<float>(display_points - 1u);
+                float const y = std::clamp(240.0f - ((level + 120.0f) * 1.85f), 12.0f, 245.0f);
+                spectrum_points.Append(Point{ x, y });
+            }
+            SpectrumTrace().Points(spectrum_points);
+
+            auto waterfall = WaterfallCanvas().Children();
+            constexpr uint32_t waterfall_bins = 96u;
+            constexpr uint32_t waterfall_rows = 24u;
+            while (waterfall.Size() >= waterfall_bins * waterfall_rows)
+            {
+                for (uint32_t bin = 0u; bin < waterfall_bins; ++bin)
+                {
+                    waterfall.RemoveAt(0u);
+                }
+            }
+            for (uint32_t i = 0u; i < waterfall.Size(); ++i)
+            {
+                auto element = waterfall.GetAt(i);
+                Canvas::SetTop(element, Canvas::GetTop(element) + 5.0);
+            }
+            for (uint32_t column = 0u; column < waterfall_bins; ++column)
+            {
+                uint32_t const begin = (column * frame.spectrum_bin_count) / waterfall_bins;
+                uint32_t const end = (std::max)(begin + 1u,
+                    ((column + 1u) * frame.spectrum_bin_count) / waterfall_bins);
+                float level = -120.0f;
+                for (uint32_t bin = begin; bin < (std::min)(end, frame.spectrum_bin_count); ++bin)
+                {
+                    level = (std::max)(level, frame.spectrum_dbfs[bin]);
+                }
+                float const intensity = std::clamp((level + 115.0f) / 75.0f, 0.0f, 1.0f);
+                uint8_t red = 0u;
+                uint8_t green = static_cast<uint8_t>(30.0f + (205.0f * intensity));
+                uint8_t blue = static_cast<uint8_t>(55.0f + (200.0f * (std::min)(intensity * 2.0f, 1.0f)));
+                if (intensity > 0.72f)
+                {
+                    red = static_cast<uint8_t>(255.0f * ((intensity - 0.72f) / 0.28f));
+                }
+
+                Microsoft::UI::Xaml::Shapes::Rectangle cell;
+                cell.Width((900.0 / static_cast<double>(waterfall_bins)) + 0.5);
+                cell.Height(5.25);
+                cell.Fill(SolidColorBrush(ColorHelper::FromArgb(255u, red, green, blue)));
+                Canvas::SetLeft(cell, 900.0 * static_cast<double>(column) /
+                                      static_cast<double>(waterfall_bins));
+                Canvas::SetTop(cell, 0.0);
+                waterfall.Append(cell);
+            }
         }
-        SpectrumTrace().Points(spectrum_points);
 
-        Canvas::SetTop(WaterfallCursor(), static_cast<double>((snapshot.sequence * 7u) % 120u) + 2.0);
-
-        auto children = ConstellationCanvas().Children();
-        while (children.Size() > 2u)
+        auto constellation = ConstellationCanvas().Children();
+        while (constellation.Size() > 2u)
         {
-            children.RemoveAtEnd();
+            constellation.RemoveAtEnd();
         }
-
-        auto const dot_brush = SolidColorBrush(ColorHelper::FromArgb(210u, 84u, 226u, 255u));
-        for (uint32_t i = 0u; i < 24u; ++i)
+        auto const dot_brush = SolidColorBrush(ColorHelper::FromArgb(185u, 84u, 226u, 255u));
+        uint32_t const constellation_points = (std::min)(
+            frame.constellation_point_count,
+            256u);
+        for (uint32_t point = 0u; point < constellation_points; ++point)
         {
-            double const local_phase = phase + (static_cast<double>(i) * 1.91);
-            double const center_x = (i % 2u == 0u) ? 130.0 : 392.0;
-            double const center_y = ((i / 2u) % 2u == 0u) ? 53.0 : 169.0;
-            double const radius = 4.0 + static_cast<double>(i % 5u);
+            uint32_t const source = (point * frame.constellation_point_count) /
+                                    constellation_points;
+            double const x = std::clamp(260.0 + (180.0 * frame.constellation_i[source]), 10.0, 506.0);
+            double const y = std::clamp(110.0 - (82.0 * frame.constellation_q[source]), 10.0, 206.0);
             Microsoft::UI::Xaml::Shapes::Ellipse dot;
-            dot.Width(4.0);
-            dot.Height(4.0);
+            dot.Width(3.0);
+            dot.Height(3.0);
             dot.Fill(dot_brush);
-            Canvas::SetLeft(dot, center_x + (radius * std::cos(local_phase)));
-            Canvas::SetTop(dot, center_y + (radius * std::sin(local_phase * 1.17)));
-            children.Append(dot);
+            Canvas::SetLeft(dot, x);
+            Canvas::SetTop(dot, y);
+            constellation.Append(dot);
+        }
+
+        if (frame.cir_bin_count != 0u)
+        {
+            PointCollection cir_points;
+            constexpr uint32_t display_points = 161u;
+            uint32_t peak_bin = 0u;
+            float peak_level = frame.cir_power_db[0u];
+            for (uint32_t bin = 1u; bin < frame.cir_bin_count; ++bin)
+            {
+                if (frame.cir_power_db[bin] > peak_level)
+                {
+                    peak_level = frame.cir_power_db[bin];
+                    peak_bin = bin;
+                }
+            }
+            for (uint32_t point = 0u; point < display_points; ++point)
+            {
+                uint32_t const begin = (point * frame.cir_bin_count) / display_points;
+                uint32_t const end = (std::max)(begin + 1u,
+                    ((point + 1u) * frame.cir_bin_count) / display_points);
+                float level = -120.0f;
+                for (uint32_t bin = begin; bin < (std::min)(end, frame.cir_bin_count); ++bin)
+                {
+                    level = (std::max)(level, frame.cir_power_db[bin]);
+                }
+                float const x = 800.0f * static_cast<float>(point) /
+                                static_cast<float>(display_points - 1u);
+                float const y = std::clamp(20.0f + (-level * 2.65f), 12.0f, 185.0f);
+                cir_points.Append(Point{ x, y });
+            }
+            CirTrace().Points(cir_points);
+
+            wchar_t cir_status[96]{};
+            double const peak_delay_us = static_cast<double>(peak_bin) *
+                                         static_cast<double>(frame.cir_sample_period_ns) / 1000.0;
+            swprintf_s(cir_status,
+                       L"main path %.2f µs · %u taps",
+                       peak_delay_us,
+                       frame.cir_bin_count);
+            CirStatusText().Text(cir_status);
+        }
+
+        if (frame.carrier_mer_count != 0u)
+        {
+            PointCollection mer_points;
+            constexpr uint32_t display_points = 193u;
+            double mer_sum = 0.0;
+            float minimum_mer = frame.carrier_mer_db[0u];
+            for (uint32_t carrier = 0u; carrier < frame.carrier_mer_count; ++carrier)
+            {
+                mer_sum += frame.carrier_mer_db[carrier];
+                minimum_mer = (std::min)(minimum_mer, frame.carrier_mer_db[carrier]);
+            }
+            for (uint32_t point = 0u; point < display_points; ++point)
+            {
+                uint32_t const begin = (point * frame.carrier_mer_count) / display_points;
+                uint32_t const end = (std::max)(begin + 1u,
+                    ((point + 1u) * frame.carrier_mer_count) / display_points);
+                double sum = 0.0;
+                uint32_t count = 0u;
+                for (uint32_t carrier = begin; carrier < (std::min)(end, frame.carrier_mer_count); ++carrier)
+                {
+                    sum += frame.carrier_mer_db[carrier];
+                    ++count;
+                }
+                float const mer = count != 0u ? static_cast<float>(sum / count) : -20.0f;
+                float const x = 800.0f * static_cast<float>(point) /
+                                static_cast<float>(display_points - 1u);
+                float const y = std::clamp(175.0f - (mer * 3.0f), 12.0f, 180.0f);
+                mer_points.Append(Point{ x, y });
+            }
+            CarrierMerTrace().Points(mer_points);
+            float const average_mer = static_cast<float>(mer_sum /
+                static_cast<double>(frame.carrier_mer_count));
+            MerValueText().Text(format_float(average_mer, L" dB"));
+
+            wchar_t mer_status[112]{};
+            swprintf_s(mer_status,
+                       L"Carrier −768 … +768 · avg %.1f dB · min %.1f dB",
+                       static_cast<double>(average_mer),
+                       static_cast<double>(minimum_mer));
+            CarrierMerStatusText().Text(mer_status);
         }
     }
 

@@ -1,7 +1,9 @@
 #include "dab/receive.h"
 
+#include <math.h>
 #include <string.h>
 
+#include "receive_measurement_internal.h"
 #include "receive_snapshot_internal.h"
 
 void dab_receive_default_config(dab_receive_config_t *config) {
@@ -15,6 +17,7 @@ void dab_receive_default_config(dab_receive_config_t *config) {
     config->agc_enabled = 1;
     config->android_usb_fd = -1;
     config->use_real_device = 1;
+    config->measurement_decimation = 1u;
 }
 
 void dab_receive_snapshot_build(dab_receive_snapshot_t *snapshot,
@@ -87,4 +90,223 @@ void dab_receive_snapshot_build(dab_receive_snapshot_t *snapshot,
         snapshot->msc_runtime_reset_count = msc_audio->runtime_reset_count;
         snapshot->msc_last_reconfig_reason = msc_audio->last_reconfig_reason;
     }
+}
+
+void dab_receive_measurement_reset(dab_receive_measurement_state_t *state) {
+    if (state == 0) {
+        return;
+    }
+    memset(state, 0, sizeof(*state));
+}
+
+static float receive_power_db(float power, float reference_power) {
+    const float ratio = reference_power > 0.0f ? power / reference_power : 0.0f;
+    if (ratio <= 1.0e-12f) {
+        return -120.0f;
+    }
+    return 10.0f * log10f(ratio);
+}
+
+int dab_receive_measurement_begin(dab_receive_measurement_state_t *state,
+                                  uint32_t decimation,
+                                  const dab_prs_fft_t *fft,
+                                  const float *fft_i,
+                                  const float *fft_q,
+                                  const dab_ofdm_t *ofdm) {
+    const uint32_t fft_count = DAB_RECEIVE_SPECTRUM_BIN_COUNT;
+    const float full_scale = (float)fft_count * 32768.0f;
+    const float spectrum_reference_power = full_scale * full_scale;
+    float cir_peak_power = 0.0f;
+    uint32_t i;
+
+    if (state == 0 || fft == 0 || fft_i == 0 || fft_q == 0 || ofdm == 0 ||
+        fft->config.fft_samples != fft_count) {
+        return -1;
+    }
+
+    if (decimation == 0u) {
+        decimation = 1u;
+    }
+    state->frames_seen++;
+    state->collecting = ((state->frames_seen - 1u) % decimation) == 0u;
+    state->constellation_count = 0u;
+    memset(state->carrier_error_sum, 0, sizeof(state->carrier_error_sum));
+    memset(state->carrier_symbol_count, 0, sizeof(state->carrier_symbol_count));
+    if (!state->collecting) {
+        return 0;
+    }
+
+    for (i = 0u; i < fft_count; ++i) {
+        const uint32_t source = (i + (fft_count / 2u)) % fft_count;
+        const float power = (fft_i[source] * fft_i[source]) + (fft_q[source] * fft_q[source]);
+        state->spectrum_dbfs[i] = receive_power_db(power, spectrum_reference_power);
+        state->cir_i[i] = 0.0f;
+        state->cir_q[i] = 0.0f;
+    }
+
+    for (i = 0u; i < DAB_MODE_I_ACTIVE_CARRIERS; ++i) {
+        uint32_t fft_bin;
+        const float equalizer_i = ofdm->channel_i[i];
+        const float equalizer_q = ofdm->channel_q[i];
+        const float denominator = (equalizer_i * equalizer_i) + (equalizer_q * equalizer_q);
+
+        if (i == DAB_MODE_I_ACTIVE_CARRIER_HALF || denominator <= 1.0e-20f) {
+            continue;
+        }
+        fft_bin = i < DAB_MODE_I_ACTIVE_CARRIER_HALF
+            ? DAB_MODE_I_FFT_SAMPLES - DAB_MODE_I_ACTIVE_CARRIER_HALF + i
+            : i - DAB_MODE_I_ACTIVE_CARRIER_HALF;
+        state->cir_i[fft_bin] = equalizer_i / denominator;
+        state->cir_q[fft_bin] = -equalizer_q / denominator;
+    }
+
+    if (dab_prs_fft_execute_complex_f32(fft, state->cir_i, state->cir_q, 1) != 0) {
+        state->collecting = 0;
+        return -1;
+    }
+    for (i = 0u; i < DAB_RECEIVE_CIR_BIN_COUNT; ++i) {
+        const float power = (state->cir_i[i] * state->cir_i[i]) +
+                            (state->cir_q[i] * state->cir_q[i]);
+        if (power > cir_peak_power) {
+            cir_peak_power = power;
+        }
+    }
+    for (i = 0u; i < DAB_RECEIVE_CIR_BIN_COUNT; ++i) {
+        const float power = (state->cir_i[i] * state->cir_i[i]) +
+                            (state->cir_q[i] * state->cir_q[i]);
+        state->cir_power_db[i] = receive_power_db(power, cir_peak_power);
+    }
+    return 0;
+}
+
+void dab_receive_measurement_add_symbol(dab_receive_measurement_state_t *state,
+                                        const float *physical_i,
+                                        const float *physical_q,
+                                        const float *constellation_i,
+                                        const float *constellation_q,
+                                        float common_phase_error_deg) {
+    const float phase = -common_phase_error_deg * (float)(3.14159265358979323846 / 180.0);
+    const float rotation_i = cosf(phase);
+    const float rotation_q = sinf(phase);
+    const float ideal_component = 0.7071067811865475f;
+    double power_sum = 0.0;
+    float scale;
+    uint32_t i;
+
+    if (state == 0 || !state->collecting || physical_i == 0 || physical_q == 0 ||
+        constellation_i == 0 || constellation_q == 0) {
+        return;
+    }
+
+    for (i = 0u; i < DAB_MODE_I_ACTIVE_CARRIERS; ++i) {
+        if (i != DAB_MODE_I_ACTIVE_CARRIER_HALF) {
+            power_sum += ((double)physical_i[i] * (double)physical_i[i]) +
+                         ((double)physical_q[i] * (double)physical_q[i]);
+        }
+    }
+    if (power_sum <= 1.0e-20) {
+        return;
+    }
+    scale = (float)sqrt((double)DAB_RECEIVE_CARRIER_MER_COUNT / power_sum);
+
+    for (i = 0u; i < DAB_MODE_I_ACTIVE_CARRIERS; ++i) {
+        uint32_t carrier;
+        float rotated_i;
+        float rotated_q;
+        float normalized_i;
+        float normalized_q;
+        float ideal_i;
+        float ideal_q;
+        float error_i;
+        float error_q;
+
+        if (i == DAB_MODE_I_ACTIVE_CARRIER_HALF) {
+            continue;
+        }
+        carrier = i < DAB_MODE_I_ACTIVE_CARRIER_HALF ? i : i - 1u;
+        rotated_i = (physical_i[i] * rotation_i) - (physical_q[i] * rotation_q);
+        rotated_q = (physical_i[i] * rotation_q) + (physical_q[i] * rotation_i);
+        normalized_i = rotated_i * scale;
+        normalized_q = rotated_q * scale;
+        ideal_i = normalized_i >= 0.0f ? ideal_component : -ideal_component;
+        ideal_q = normalized_q >= 0.0f ? ideal_component : -ideal_component;
+        error_i = normalized_i - ideal_i;
+        error_q = normalized_q - ideal_q;
+        state->carrier_error_sum[carrier] +=
+            ((double)error_i * (double)error_i) + ((double)error_q * (double)error_q);
+        state->carrier_symbol_count[carrier]++;
+    }
+
+    if (state->constellation_count < DAB_RECEIVE_CONSTELLATION_POINT_CAPACITY) {
+        const uint32_t remaining = DAB_RECEIVE_CONSTELLATION_POINT_CAPACITY -
+                                   state->constellation_count;
+        const uint32_t take = remaining < 64u ? remaining : 64u;
+        uint32_t point;
+
+        for (point = 0u; point < take; ++point) {
+            const uint32_t source = (point * DAB_MODE_I_DATA_CARRIERS) / take;
+            const float source_i = constellation_i[source];
+            const float source_q = constellation_q[source];
+            const uint32_t destination = state->constellation_count++;
+            state->constellation_i[destination] =
+                ((source_i * rotation_i) - (source_q * rotation_q)) * scale;
+            state->constellation_q[destination] =
+                ((source_i * rotation_q) + (source_q * rotation_i)) * scale;
+        }
+    }
+}
+
+int dab_receive_measurement_finish(dab_receive_measurement_state_t *state,
+                                   uint64_t sequence,
+                                   uint64_t timestamp_ns,
+                                   uint64_t frequency_hz,
+                                   uint64_t frame_start_sample,
+                                   uint32_t sample_rate_hz,
+                                   dab_receive_measurement_frame_t *frame) {
+    uint32_t i;
+
+    if (state == 0 || frame == 0 || !state->collecting || sample_rate_hz == 0u) {
+        return -1;
+    }
+
+    for (i = 0u; i < DAB_RECEIVE_CARRIER_MER_COUNT; ++i) {
+        const double error = state->carrier_error_sum[i];
+        float mer = -20.0f;
+        if (state->carrier_symbol_count[i] != 0u) {
+            mer = error <= 1.0e-12
+                ? 60.0f
+                : (float)(10.0 * log10((double)state->carrier_symbol_count[i] / error));
+            if (mer < -20.0f) {
+                mer = -20.0f;
+            } else if (mer > 60.0f) {
+                mer = 60.0f;
+            }
+        }
+        state->carrier_mer_db[i] = mer;
+    }
+
+    memset(frame, 0, sizeof(*frame));
+    frame->sequence = sequence;
+    frame->timestamp_ns = timestamp_ns;
+    frame->frequency_hz = frequency_hz;
+    frame->frame_start_sample = frame_start_sample;
+    frame->sample_rate_hz = sample_rate_hz;
+    frame->spectrum_dbfs = state->spectrum_dbfs;
+    frame->spectrum_bin_count = DAB_RECEIVE_SPECTRUM_BIN_COUNT;
+    frame->spectrum_start_hz = -0.5f * (float)sample_rate_hz;
+    frame->spectrum_bin_hz = (float)sample_rate_hz / (float)DAB_RECEIVE_SPECTRUM_BIN_COUNT;
+    frame->constellation_i = state->constellation_i;
+    frame->constellation_q = state->constellation_q;
+    frame->constellation_point_count = state->constellation_count;
+    frame->cir_power_db = state->cir_power_db;
+    frame->cir_bin_count = DAB_RECEIVE_CIR_BIN_COUNT;
+    frame->cir_sample_period_ns = 1000000000.0f / (float)sample_rate_hz;
+    frame->carrier_mer_db = state->carrier_mer_db;
+    frame->carrier_mer_count = DAB_RECEIVE_CARRIER_MER_COUNT;
+    frame->first_carrier = -768;
+    frame->negative_carrier_count = 768u;
+    frame->carrier_spacing_hz = (float)sample_rate_hz /
+                                (float)DAB_RECEIVE_SPECTRUM_BIN_COUNT;
+    state->collecting = 0;
+    return 0;
 }

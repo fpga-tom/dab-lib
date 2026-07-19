@@ -6,8 +6,10 @@
 
 namespace dab::measurement
 {
-    ReceiverWorker::ReceiverWorker(SnapshotMailbox& mailbox) noexcept
-        : m_mailbox(mailbox)
+    ReceiverWorker::ReceiverWorker(SnapshotMailbox& mailbox,
+                                   MeasurementMailbox& measurement_mailbox) noexcept
+        : m_mailbox(mailbox),
+          m_measurement_mailbox(measurement_mailbox)
     {
     }
 
@@ -171,6 +173,9 @@ namespace dab::measurement
         config.cancel_user = this;
         config.snapshot = &SnapshotMailbox::Callback;
         config.snapshot_user = &m_mailbox;
+        config.measurement = &MeasurementMailbox::Callback;
+        config.measurement_user = &m_measurement_mailbox;
+        config.measurement_decimation = settings.measurement_decimation;
 
         int const result = dab_receive_service(&config, &ReceiverWorker::EventCallback, this);
         if (m_cancel_requested.load(std::memory_order_acquire))

@@ -22,6 +22,7 @@
 #include "dab/hal/sdrplay_device.h"
 #if defined(DAB_RECEIVE_NO_MAIN)
 #include "dab/receive.h"
+#include "receive_measurement_internal.h"
 #include "receive_snapshot_internal.h"
 #endif
 #include "dab/simd/simd.h"
@@ -1063,6 +1064,10 @@ int dab_receiver_session_run(int argc, char **argv) {
     uint8_t selected_sid_fallback_reported = 0u;
     uint8_t lock_reported = 0u;
     uint8_t snapshot_pending = 0u;
+    dab_receive_measurement_state_t *measurement_state = 0;
+    uint64_t measurement_sequence = 0u;
+    uint64_t measurement_frame_start_sample = 0u;
+    uint8_t measurement_pending = 0u;
 #endif
     uint64_t audio_timeout_samples = 0u;
     uint64_t samples_since_audio = 0u;
@@ -1083,7 +1088,7 @@ int dab_receiver_session_run(int argc, char **argv) {
     if (receive_config == 0 || receive_config->frequency_hz == 0u || receive_config->service_id == 0u) {
         return 2;
     }
-    if (receive_config->snapshot != 0) {
+    if (receive_config->snapshot != 0 || receive_config->measurement != 0) {
         receiver_metrics_enabled = 1;
     }
 #elif !defined(DAB_RECEIVER_SESSION_EMBEDDED)
@@ -1300,11 +1305,20 @@ int dab_receiver_session_run(int argc, char **argv) {
     fic_softbits = (int8_t *)calloc(DAB_TFRAME_FIC_SOFTBITS, sizeof(*fic_softbits));
     msc_softbits = (int8_t *)calloc(DAB_TFRAME_MSC_SOFTBITS, sizeof(*msc_softbits));
     frame_softbits = (int8_t *)calloc(DAB_TFRAME_TOTAL_SOFTBITS, sizeof(*frame_softbits));
+#if defined(DAB_RECEIVE_NO_MAIN)
+    if (receive_config->measurement != 0) {
+        measurement_state = (dab_receive_measurement_state_t *)calloc(1u, sizeof(*measurement_state));
+    }
+#endif
     if (fft_i == 0 || fft_q == 0 || active_i == 0 || active_q == 0 ||
         raw_active_i == 0 || raw_active_q == 0 ||
         prev_active_i == 0 || prev_active_q == 0 || diff_i == 0 || diff_q == 0 ||
         deintl_i == 0 || deintl_q == 0 || soft_a == 0 || soft_b == 0 ||
-        fic_softbits == 0 || msc_softbits == 0 || frame_softbits == 0) {
+        fic_softbits == 0 || msc_softbits == 0 || frame_softbits == 0
+#if defined(DAB_RECEIVE_NO_MAIN)
+        || (receive_config->measurement != 0 && measurement_state == 0)
+#endif
+        ) {
         fprintf(stderr, "alloc failed\n");
         goto cleanup;
     }
@@ -1927,6 +1941,17 @@ int dab_receiver_session_run(int argc, char **argv) {
                                                       DAB_OFDM_SYMBOL_PRS,
                                                       &ofdm_buffers,
                                                       &ofdm_result);
+#if defined(DAB_RECEIVE_NO_MAIN)
+                        if (measurement_state != 0) {
+                            (void)dab_receive_measurement_begin(
+                                measurement_state,
+                                receive_config->measurement_decimation,
+                                &fft,
+                                fft_i,
+                                fft_q,
+                                &ofdm);
+                        }
+#endif
                         (void)dab_ofdm_extract_active_carriers_mode_i(fft_i,
                                                                       fft_q,
                                                                       raw_active_i,
@@ -2020,6 +2045,16 @@ int dab_receiver_session_run(int argc, char **argv) {
                                                                             deintl_q,
                                                                             DAB_MODE_I_DATA_CARRIERS)
                                         : 0.0f;
+#if defined(DAB_RECEIVE_NO_MAIN)
+                                if (measurement_state != 0 && ofdm_result.have_softbits) {
+                                    dab_receive_measurement_add_symbol(measurement_state,
+                                                                       diff_i,
+                                                                       diff_q,
+                                                                       deintl_i,
+                                                                       deintl_q,
+                                                                       cpe_deg);
+                                }
+#endif
                                 if (ofdm_result.have_softbits && apply_data_cpe_correction) {
                                     rotate_complex_f32(deintl_i,
                                                        deintl_q,
@@ -2087,6 +2122,13 @@ int dab_receiver_session_run(int argc, char **argv) {
                                                       tframe_result.symbol_index,
                                                       tframe_result.frame_complete);
                                         if (tframe_result.frame_complete) {
+#if defined(DAB_RECEIVE_NO_MAIN)
+                                            if (measurement_state != 0) {
+                                                measurement_pending = 1u;
+                                                measurement_frame_start_sample =
+                                                    tframe_result.frame_start_sample;
+                                            }
+#endif
                                             if (dab_fic_process_frame(&fic,
                                                                       tframe_result.frame_start_sample,
                                                                       fic_softbits,
@@ -2344,6 +2386,24 @@ int dab_receiver_session_run(int argc, char **argv) {
         }
 
 #if defined(DAB_RECEIVE_NO_MAIN)
+        if (measurement_pending != 0u) {
+            dab_receive_measurement_frame_t measurement_frame;
+            if (dab_receive_measurement_finish(measurement_state,
+                                               measurement_sequence + 1u,
+                                               src_block.timestamp_ns,
+                                               stream_config.center_freq_hz,
+                                               measurement_frame_start_sample,
+                                               stream_config.sample_rate,
+                                               &measurement_frame) == 0) {
+                measurement_sequence++;
+                if (receive_config->measurement(&measurement_frame,
+                                                receive_config->measurement_user) != 0) {
+                    rc = -2;
+                    goto cleanup;
+                }
+            }
+            measurement_pending = 0u;
+        }
         if (snapshot_pending != 0u) {
             if (receive_emit_snapshot(receive_config,
                                       &snapshot_sequence,
@@ -2391,6 +2451,9 @@ cleanup:
         fclose(ref_samples_fp);
     }
     free(ref_samples_scratch);
+#if defined(DAB_RECEIVE_NO_MAIN)
+    free(measurement_state);
+#endif
     if (stream != 0) {
         (void)stream->vtbl->stop(stream);
         dab_sdr_stream_close(stream);

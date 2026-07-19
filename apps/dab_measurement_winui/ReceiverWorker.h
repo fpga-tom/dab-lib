@@ -1,5 +1,6 @@
 #pragma once
 
+#include "MeasurementMailbox.h"
 #include "SnapshotMailbox.h"
 
 #include <atomic>
@@ -29,6 +30,7 @@ namespace dab::measurement
         int ppm_correction{ 0 };
         bool bias_tee_enabled{ false };
         bool use_real_device{ true };
+        uint32_t measurement_decimation{ 1 };
     };
 
     struct ReceiverStatus
@@ -42,7 +44,7 @@ namespace dab::measurement
     class ReceiverWorker final
     {
     public:
-        explicit ReceiverWorker(SnapshotMailbox& mailbox) noexcept;
+        ReceiverWorker(SnapshotMailbox& mailbox, MeasurementMailbox& measurement_mailbox) noexcept;
         ~ReceiverWorker();
 
         ReceiverWorker(ReceiverWorker const&) = delete;
@@ -71,6 +73,7 @@ namespace dab::measurement
                            int result_code = 0) noexcept;
 
         SnapshotMailbox& m_mailbox;
+        MeasurementMailbox& m_measurement_mailbox;
         std::atomic<bool> m_cancel_requested{ false };
         std::atomic<ReceiverState> m_state{ ReceiverState::stopped };
         std::thread m_thread;

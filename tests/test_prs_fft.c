@@ -50,3 +50,28 @@ void test_prs_fft_apply_bin_shift_rotates_bins(void) {
     TEST_ASSERT(re[1] == 0.0f);
     TEST_ASSERT(im[1] == 0.0f);
 }
+
+void test_prs_fft_complex_inverse_roundtrips(void) {
+    dab_prs_fft_t fft;
+    dab_prs_fft_config_t config;
+    float re[8] = {1.0f, -2.0f, 3.0f, 0.5f, -0.25f, 4.0f, 1.5f, -3.0f};
+    float im[8] = {-1.0f, 0.25f, 2.0f, -0.5f, 3.0f, -2.0f, 0.75f, 1.0f};
+    float expected_re[8];
+    float expected_im[8];
+    uint32_t i;
+
+    dab_prs_fft_default_config(&config);
+    config.fft_samples = 8u;
+    TEST_ASSERT(dab_prs_fft_init(&fft, &config) == 0);
+    for (i = 0u; i < 8u; ++i) {
+        expected_re[i] = re[i];
+        expected_im[i] = im[i];
+    }
+
+    TEST_ASSERT(dab_prs_fft_execute_complex_f32(&fft, re, im, 0) == 0);
+    TEST_ASSERT(dab_prs_fft_execute_complex_f32(&fft, re, im, 1) == 0);
+    for (i = 0u; i < 8u; ++i) {
+        TEST_ASSERT(fabsf(re[i] - expected_re[i]) < 1.0e-4f);
+        TEST_ASSERT(fabsf(im[i] - expected_im[i]) < 1.0e-4f);
+    }
+}

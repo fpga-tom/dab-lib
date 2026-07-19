@@ -1,7 +1,10 @@
 #include "dab/receive.h"
 
+#include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
+#include "receive_measurement_internal.h"
 #include "receive_snapshot_internal.h"
 #include "test_support.h"
 
@@ -19,6 +22,9 @@ void test_receive_default_config_uses_rtlsdr_playback_defaults(void) {
     TEST_ASSERT(config.use_real_device == 1);
     TEST_ASSERT(config.snapshot == 0);
     TEST_ASSERT(config.snapshot_user == 0);
+    TEST_ASSERT(config.measurement == 0);
+    TEST_ASSERT(config.measurement_user == 0);
+    TEST_ASSERT(config.measurement_decimation == 1u);
 }
 
 void test_receive_service_rejects_incomplete_config_before_opening_device(void) {
@@ -126,4 +132,79 @@ void test_receive_snapshot_maps_receiver_measurements_and_counters(void) {
     TEST_ASSERT(snapshot.msc_last_decode_ok == 1);
     TEST_ASSERT(snapshot.msc_runtime_reset_count == 3u);
     TEST_ASSERT(snapshot.msc_last_reconfig_reason == 0x42u);
+}
+
+void test_receive_measurement_builds_bounded_signal_payloads(void) {
+    dab_receive_measurement_state_t *state =
+        (dab_receive_measurement_state_t *)calloc(1u, sizeof(*state));
+    dab_receive_measurement_frame_t frame;
+    dab_prs_fft_t fft;
+    dab_prs_fft_config_t fft_config;
+    dab_ofdm_t ofdm;
+    dab_ofdm_config_t ofdm_config;
+    float *fft_i = (float *)calloc(DAB_MODE_I_FFT_SAMPLES, sizeof(*fft_i));
+    float *fft_q = (float *)calloc(DAB_MODE_I_FFT_SAMPLES, sizeof(*fft_q));
+    float *physical_i = (float *)calloc(DAB_MODE_I_ACTIVE_CARRIERS, sizeof(*physical_i));
+    float *physical_q = (float *)calloc(DAB_MODE_I_ACTIVE_CARRIERS, sizeof(*physical_q));
+    float *points_i = (float *)calloc(DAB_MODE_I_DATA_CARRIERS, sizeof(*points_i));
+    float *points_q = (float *)calloc(DAB_MODE_I_DATA_CARRIERS, sizeof(*points_q));
+    uint32_t i;
+
+    TEST_ASSERT(state != 0 && fft_i != 0 && fft_q != 0 && physical_i != 0 &&
+                physical_q != 0 && points_i != 0 && points_q != 0);
+    dab_prs_fft_default_config(&fft_config);
+    TEST_ASSERT(dab_prs_fft_init(&fft, &fft_config) == 0);
+    dab_ofdm_default_config(&ofdm_config);
+    TEST_ASSERT(dab_ofdm_init(&ofdm, &ofdm_config) == 0);
+
+    for (i = 0u; i < DAB_MODE_I_ACTIVE_CARRIERS; ++i) {
+        if (i != DAB_MODE_I_ACTIVE_CARRIER_HALF) {
+            ofdm.channel_i[i] = 1.0f;
+            physical_i[i] = (i & 1u) != 0u ? 1.0f : -1.0f;
+            physical_q[i] = (i & 2u) != 0u ? 1.0f : -1.0f;
+        }
+    }
+    for (i = 0u; i < DAB_MODE_I_DATA_CARRIERS; ++i) {
+        points_i[i] = (i & 1u) != 0u ? 1.0f : -1.0f;
+        points_q[i] = (i & 2u) != 0u ? 1.0f : -1.0f;
+    }
+    fft_i[100u] = 1000000.0f;
+
+    dab_receive_measurement_reset(state);
+    TEST_ASSERT(dab_receive_measurement_begin(state, 1u, &fft, fft_i, fft_q, &ofdm) == 0);
+    dab_receive_measurement_add_symbol(state,
+                                       physical_i,
+                                       physical_q,
+                                       points_i,
+                                       points_q,
+                                       0.0f);
+    TEST_ASSERT(dab_receive_measurement_finish(state,
+                                               7u,
+                                               1234u,
+                                               213360000u,
+                                               98765u,
+                                               2048000u,
+                                               &frame) == 0);
+
+    TEST_ASSERT(frame.sequence == 7u);
+    TEST_ASSERT(frame.frequency_hz == 213360000u);
+    TEST_ASSERT(frame.spectrum_bin_count == DAB_RECEIVE_SPECTRUM_BIN_COUNT);
+    TEST_ASSERT(frame.spectrum_dbfs[1124u] > frame.spectrum_dbfs[0u]);
+    TEST_ASSERT(frame.constellation_point_count == 64u);
+    TEST_ASSERT(fabsf(fabsf(frame.constellation_i[0u]) - 0.7071067f) < 1.0e-4f);
+    TEST_ASSERT(frame.cir_bin_count == DAB_RECEIVE_CIR_BIN_COUNT);
+    TEST_ASSERT(fabsf(frame.cir_power_db[0u]) < 1.0e-4f);
+    TEST_ASSERT(frame.carrier_mer_count == DAB_RECEIVE_CARRIER_MER_COUNT);
+    TEST_ASSERT(frame.carrier_mer_db[0u] > 50.0f);
+    TEST_ASSERT(frame.carrier_mer_db[DAB_RECEIVE_CARRIER_MER_COUNT - 1u] > 50.0f);
+    TEST_ASSERT(frame.first_carrier == -768);
+    TEST_ASSERT(frame.negative_carrier_count == 768u);
+
+    free(points_q);
+    free(points_i);
+    free(physical_q);
+    free(physical_i);
+    free(fft_q);
+    free(fft_i);
+    free(state);
 }
