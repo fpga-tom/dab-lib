@@ -4,7 +4,7 @@ This is a Windows-only C++/WinUI 3 shell for the measurement system. It is delib
 
 The current proof of concept includes:
 
-- receiver controls for device, channel, frequency, gain, start, record, and markers;
+- receiver controls for device, the complete 5A–13F Band III channel plan, mapped centre frequency, gain, start, record, and markers;
 - ensemble, service, and component navigation;
 - spectrum, waterfall, constellation, CIR, and carrier-MER placeholders;
 - live KPI cards and receiver detail values;

@@ -12,6 +12,7 @@ namespace winrt::DabMeasurementWinUI::implementation
         ~MainWindow();
 
         void StartButton_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void ChannelComboBox_SelectionChanged(IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
         void RecordButton_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void MarkerButton_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void Window_Closed(IInspectable const&, Microsoft::UI::Xaml::WindowEventArgs const&);

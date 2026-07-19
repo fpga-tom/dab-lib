@@ -57,6 +57,30 @@ namespace winrt::DabMeasurementWinUI::implementation
         m_receiver.StopAndJoin();
     }
 
+    void MainWindow::ChannelComboBox_SelectionChanged(IInspectable const&, SelectionChangedEventArgs const&)
+    {
+        auto selected_channel = ChannelComboBox().SelectedItem().try_as<ComboBoxItem>();
+        if (!selected_channel)
+        {
+            return;
+        }
+
+        auto const channel = unbox_value<hstring>(selected_channel.Content());
+        auto const frequency = unbox_value<hstring>(selected_channel.Tag()) + L" MHz";
+        if (auto frequency_box = FrequencyTextBox())
+        {
+            frequency_box.Text(frequency);
+        }
+        if (auto spectrum_frequency = SpectrumFrequencyText())
+        {
+            spectrum_frequency.Text(frequency);
+        }
+        if (auto status_channel = StatusChannelText())
+        {
+            status_channel.Text(channel);
+        }
+    }
+
     void MainWindow::StartButton_Click(IInspectable const&, RoutedEventArgs const&)
     {
         if (m_receiver.IsActive())

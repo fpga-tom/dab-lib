@@ -70,12 +70,51 @@
                         <ComboBoxItem Content="SDRplay RSP1A" />
                         <ComboBoxItem Content="RTL-SDR" />
                     </ComboBox>
-                    <ComboBox Grid.Column="1" x:Name="ChannelComboBox" Header="CHANNEL" SelectedIndex="0">
-                        <ComboBoxItem Content="11C" />
-                        <ComboBoxItem Content="11D" />
-                        <ComboBoxItem Content="12A" />
+                    <ComboBox Grid.Column="1"
+                              x:Name="ChannelComboBox"
+                              Header="CHANNEL"
+                              SelectedIndex="22"
+                              SelectionChanged="ChannelComboBox_SelectionChanged">
+                        <ComboBoxItem Content="5A" Tag="174.928" />
+                        <ComboBoxItem Content="5B" Tag="176.640" />
+                        <ComboBoxItem Content="5C" Tag="178.352" />
+                        <ComboBoxItem Content="5D" Tag="180.064" />
+                        <ComboBoxItem Content="6A" Tag="181.936" />
+                        <ComboBoxItem Content="6B" Tag="183.648" />
+                        <ComboBoxItem Content="6C" Tag="185.360" />
+                        <ComboBoxItem Content="6D" Tag="187.072" />
+                        <ComboBoxItem Content="7A" Tag="188.928" />
+                        <ComboBoxItem Content="7B" Tag="190.640" />
+                        <ComboBoxItem Content="7C" Tag="192.352" />
+                        <ComboBoxItem Content="7D" Tag="194.064" />
+                        <ComboBoxItem Content="8A" Tag="195.936" />
+                        <ComboBoxItem Content="8B" Tag="197.648" />
+                        <ComboBoxItem Content="8C" Tag="199.360" />
+                        <ComboBoxItem Content="8D" Tag="201.072" />
+                        <ComboBoxItem Content="9A" Tag="202.928" />
+                        <ComboBoxItem Content="9B" Tag="204.640" />
+                        <ComboBoxItem Content="9C" Tag="206.352" />
+                        <ComboBoxItem Content="9D" Tag="208.064" />
+                        <ComboBoxItem Content="10A" Tag="209.936" />
+                        <ComboBoxItem Content="10B" Tag="211.648" />
+                        <ComboBoxItem Content="10C" Tag="213.360" />
+                        <ComboBoxItem Content="10D" Tag="215.072" />
+                        <ComboBoxItem Content="11A" Tag="216.928" />
+                        <ComboBoxItem Content="11B" Tag="218.640" />
+                        <ComboBoxItem Content="11C" Tag="220.352" />
+                        <ComboBoxItem Content="11D" Tag="222.064" />
+                        <ComboBoxItem Content="12A" Tag="223.936" />
+                        <ComboBoxItem Content="12B" Tag="225.648" />
+                        <ComboBoxItem Content="12C" Tag="227.360" />
+                        <ComboBoxItem Content="12D" Tag="229.072" />
+                        <ComboBoxItem Content="13A" Tag="230.784" />
+                        <ComboBoxItem Content="13B" Tag="232.496" />
+                        <ComboBoxItem Content="13C" Tag="234.208" />
+                        <ComboBoxItem Content="13D" Tag="235.776" />
+                        <ComboBoxItem Content="13E" Tag="237.488" />
+                        <ComboBoxItem Content="13F" Tag="239.200" />
                     </ComboBox>
-                    <TextBox Grid.Column="2" x:Name="FrequencyTextBox" Header="FREQUENCY" Text="220.352 MHz" />
+                    <TextBox Grid.Column="2" x:Name="FrequencyTextBox" Header="FREQUENCY" Text="213.360 MHz" />
                     <NumberBox Grid.Column="3" x:Name="GainNumberBox" Header="GAIN" Value="40" SpinButtonPlacementMode="Compact" />
 
                     <Button Grid.Column="4"
@@ -240,7 +279,7 @@
                                               StrokeThickness="2"
                                               Points="0,225 40,223 80,220 120,206 160,198 200,185 240,172 280,148 320,130 360,116 400,110 440,108 480,109 520,113 560,120 600,138 640,162 680,178 720,190 760,205 800,216 850,222 900,225" />
                                     <Line X1="450" Y1="8" X2="450" Y2="250" Stroke="{StaticResource WarningBrush}" StrokeThickness="1" StrokeDashArray="4,4" />
-                                    <TextBlock Canvas.Left="458" Canvas.Top="12" Text="220.352 MHz" Foreground="{StaticResource WarningBrush}" FontFamily="Consolas" FontSize="11" />
+                                    <TextBlock Canvas.Left="458" Canvas.Top="12" x:Name="SpectrumFrequencyText" Text="213.360 MHz" Foreground="{StaticResource WarningBrush}" FontFamily="Consolas" FontSize="11" />
                                 </Canvas>
                             </Viewbox>
                         </Border>
@@ -439,7 +478,7 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="StatusDeviceText" Text="SDRplay RSP1A" VerticalAlignment="Center" />
-                <TextBlock Grid.Column="1" x:Name="StatusChannelText" Text="11C" VerticalAlignment="Center" Foreground="{StaticResource SpectrumBrush}" />
+                <TextBlock Grid.Column="1" x:Name="StatusChannelText" Text="10C" VerticalAlignment="Center" Foreground="{StaticResource SpectrumBrush}" />
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                     <Ellipse Width="7" Height="7" Fill="{StaticResource MeasurementAccentBrush}" />
                     <TextBlock x:Name="StatusSyncText" Text="idle" />
