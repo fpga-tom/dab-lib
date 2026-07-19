@@ -98,6 +98,20 @@ void dab_receiver_session_request_stop(void) {
 #endif
 
 #if defined(DAB_RECEIVE_NO_MAIN)
+static void receive_set_real_adapter_requested(const char *driver, int enabled) {
+    const char *name;
+
+    if (driver == 0) {
+        return;
+    }
+    name = strcmp(driver, "rtlsdr") == 0 ? "DAB_RTLSDR_USE_REAL" : "DAB_SDRPLAY_USE_REAL";
+#if defined(_WIN32)
+    (void)_putenv_s(name, enabled != 0 ? "1" : "0");
+#else
+    (void)setenv(name, enabled != 0 ? "1" : "0", 1);
+#endif
+}
+
 static uint8_t receive_core_sample_rate_index(const dab_msc_dabplus_superframe_t *superframe) {
     if (superframe->dac_rate != 0u) {
         return (uint8_t)(superframe->sbr_flag != 0u ? 6u : 3u);
@@ -1109,6 +1123,7 @@ int dab_receiver_session_run(int argc, char **argv) {
 
 #if defined(DAB_RECEIVE_NO_MAIN)
     params.driver = receive_config->driver != 0 ? receive_config->driver : "rtlsdr";
+    receive_set_real_adapter_requested(params.driver, receive_config->use_real_device);
     stream_config.center_freq_hz = receive_config->frequency_hz;
     stream_config.gain_db = receive_config->gain_db;
     sdrplay_config.gain_mode = receive_config->agc_enabled != 0 ?
@@ -1326,26 +1341,41 @@ int dab_receiver_session_run(int argc, char **argv) {
     fprintf(stderr, "open device\n");
     if (dab_sdr_device_open(&params, &device) != DAB_SDR_STATUS_OK || device == 0) {
         fprintf(stderr, "open failed\n");
+#if defined(DAB_RECEIVE_NO_MAIN)
+        (void)receive_emit_status(receive_callback, receive_user, DAB_RECEIVE_EVENT_ERROR, "open device failed");
+#endif
         goto cleanup;
     }
     fprintf(stderr, "configure device\n");
     if (strcmp(params.driver, "rtlsdr") == 0) {
         if (dab_rtlsdr_configure_device(device, &rtlsdr_config) != DAB_SDR_STATUS_OK) {
             fprintf(stderr, "device config failed\n");
+#if defined(DAB_RECEIVE_NO_MAIN)
+            (void)receive_emit_status(receive_callback, receive_user, DAB_RECEIVE_EVENT_ERROR, "device configuration failed");
+#endif
             goto cleanup;
         }
     } else if (dab_sdrplay_configure_device(device, &sdrplay_config) != DAB_SDR_STATUS_OK) {
         fprintf(stderr, "device config failed\n");
+#if defined(DAB_RECEIVE_NO_MAIN)
+        (void)receive_emit_status(receive_callback, receive_user, DAB_RECEIVE_EVENT_ERROR, "device configuration failed");
+#endif
         goto cleanup;
     }
     fprintf(stderr, "configure stream\n");
     if (device->vtbl->configure(device, &stream_config) != DAB_SDR_STATUS_OK) {
         fprintf(stderr, "stream config failed\n");
+#if defined(DAB_RECEIVE_NO_MAIN)
+        (void)receive_emit_status(receive_callback, receive_user, DAB_RECEIVE_EVENT_ERROR, "stream configuration failed");
+#endif
         goto cleanup;
     }
     fprintf(stderr, "open stream\n");
     if (device->vtbl->open_stream(device, &stream) != DAB_SDR_STATUS_OK || stream == 0) {
         fprintf(stderr, "open stream failed\n");
+#if defined(DAB_RECEIVE_NO_MAIN)
+        (void)receive_emit_status(receive_callback, receive_user, DAB_RECEIVE_EVENT_ERROR, "open stream failed");
+#endif
         goto cleanup;
     }
     fprintf(stderr, "start stream\n");
@@ -1365,7 +1395,7 @@ int dab_receiver_session_run(int argc, char **argv) {
         if (receive_emit_status(receive_callback,
                                 receive_user,
                                 DAB_RECEIVE_EVENT_STATUS,
-                                "Warming up RTL-SDR tuner...") != 0) {
+                                "Warming up receiver...") != 0) {
             rc = -2;
             goto cleanup;
         }

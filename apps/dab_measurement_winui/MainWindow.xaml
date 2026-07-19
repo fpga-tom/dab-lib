@@ -1,0 +1,453 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="DabMeasurementWinUI.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:DabMeasurementWinUI"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Closed="Window_Closed"
+    Title="DAB+ Measurement Workbench">
+
+    <Grid Background="{StaticResource WorkspaceBrush}" RequestedTheme="Dark">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="156" />
+            <RowDefinition Height="34" />
+        </Grid.RowDefinitions>
+
+        <MenuBar Grid.Row="0" Background="{StaticResource PanelBrush}">
+            <MenuBarItem Title="File">
+                <MenuFlyoutItem Text="New measurement" />
+                <MenuFlyoutItem Text="Open session..." />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem Text="Export snapshot..." />
+            </MenuBarItem>
+            <MenuBarItem Title="Receiver">
+                <MenuFlyoutItem Text="Device setup..." />
+                <MenuFlyoutItem Text="Band III channel plan" />
+            </MenuBarItem>
+            <MenuBarItem Title="Measurement">
+                <MenuFlyoutItem Text="New measurement profile..." />
+                <MenuFlyoutItem Text="Alarm thresholds..." />
+            </MenuBarItem>
+            <MenuBarItem Title="View">
+                <MenuFlyoutItem Text="Spectrum and waterfall" />
+                <MenuFlyoutItem Text="Constellation" />
+                <MenuFlyoutItem Text="Timeline" />
+            </MenuBarItem>
+            <MenuBarItem Title="Tools">
+                <MenuFlyoutItem Text="Device diagnostics" />
+                <MenuFlyoutItem Text="Recording browser" />
+            </MenuBarItem>
+            <MenuBarItem Title="Help">
+                <MenuFlyoutItem Text="About DAB+ Measurement Workbench" />
+            </MenuBarItem>
+        </MenuBar>
+
+        <Border Grid.Row="1"
+                Padding="12,8"
+                Background="{StaticResource PanelRaisedBrush}"
+                BorderBrush="{StaticResource PanelStrokeBrush}"
+                BorderThickness="0,1,0,1">
+            <ScrollViewer HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled">
+                <Grid MinWidth="1150" ColumnSpacing="10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="190" />
+                        <ColumnDefinition Width="115" />
+                        <ColumnDefinition Width="165" />
+                        <ColumnDefinition Width="125" />
+                        <ColumnDefinition Width="110" />
+                        <ColumnDefinition Width="110" />
+                        <ColumnDefinition Width="110" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <ComboBox Grid.Column="0" x:Name="DeviceComboBox" Header="DEVICE" SelectedIndex="0">
+                        <ComboBoxItem Content="SDRplay RSP1A" />
+                        <ComboBoxItem Content="RTL-SDR" />
+                    </ComboBox>
+                    <ComboBox Grid.Column="1" x:Name="ChannelComboBox" Header="CHANNEL" SelectedIndex="0">
+                        <ComboBoxItem Content="11C" />
+                        <ComboBoxItem Content="11D" />
+                        <ComboBoxItem Content="12A" />
+                    </ComboBox>
+                    <TextBox Grid.Column="2" x:Name="FrequencyTextBox" Header="FREQUENCY" Text="220.352 MHz" />
+                    <NumberBox Grid.Column="3" x:Name="GainNumberBox" Header="GAIN" Value="40" SpinButtonPlacementMode="Compact" />
+
+                    <Button Grid.Column="4"
+                            x:Name="StartButton"
+                            Height="34"
+                            VerticalAlignment="Bottom"
+                            HorizontalAlignment="Stretch"
+                            Click="StartButton_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon Glyph="&#xE768;" FontSize="14" />
+                            <TextBlock x:Name="StartButtonLabel" Text="Start" />
+                        </StackPanel>
+                    </Button>
+                    <Button Grid.Column="5"
+                            x:Name="RecordButton"
+                            IsEnabled="False"
+                            ToolTipService.ToolTip="Recording will be added after the live receiver path is validated"
+                            Height="34"
+                            VerticalAlignment="Bottom"
+                            HorizontalAlignment="Stretch"
+                            Click="RecordButton_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon Glyph="&#xE7C8;" FontSize="14" />
+                            <TextBlock x:Name="RecordButtonLabel" Text="Record" />
+                        </StackPanel>
+                    </Button>
+                    <Button Grid.Column="6"
+                            Height="34"
+                            VerticalAlignment="Bottom"
+                            HorizontalAlignment="Stretch"
+                            Click="MarkerButton_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon Glyph="&#xE734;" FontSize="14" />
+                            <TextBlock Text="Marker" />
+                        </StackPanel>
+                    </Button>
+
+                    <StackPanel Grid.Column="7" HorizontalAlignment="Right" VerticalAlignment="Center">
+                        <Border Padding="10,4" CornerRadius="12" Background="#2935D0BA">
+                            <TextBlock x:Name="DataModeText" Text="LIVE METRICS" Foreground="{StaticResource MeasurementAccentBrush}" FontSize="11" FontWeight="SemiBold" />
+                        </Border>
+                        <TextBlock x:Name="DataSeamText" Text="receiver stopped" Margin="0,4,0,0" HorizontalAlignment="Right" Foreground="{StaticResource MutedTextBrush}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                </Grid>
+            </ScrollViewer>
+        </Border>
+
+        <Grid Grid.Row="2" Margin="10" ColumnSpacing="10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="230" MinWidth="190" />
+                <ColumnDefinition Width="*" MinWidth="560" />
+                <ColumnDefinition Width="250" MinWidth="220" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" Style="{StaticResource PanelCardStyle}" Padding="14">
+                <Grid RowSpacing="6">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Text="ENSEMBLES" Style="{StaticResource SectionTitleStyle}" />
+                    <Border Grid.Row="1" Padding="10" CornerRadius="6" Background="#2535D0BA" BorderBrush="{StaticResource MeasurementAccentBrush}" BorderThickness="1">
+                        <StackPanel>
+                            <TextBlock Text="DAB SLOVAKIA" FontWeight="SemiBold" />
+                            <TextBlock Text="EId 0xE001 · 11C" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                        </StackPanel>
+                    </Border>
+
+                    <Grid Grid.Row="2" Margin="0,2,0,0">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <TextBlock Text="SERVICES" Style="{StaticResource SectionTitleStyle}" />
+                        <ListView Grid.Row="1" SelectionMode="Single" SelectedIndex="0">
+                            <ListViewItem Content="Radio Slovensko" />
+                            <ListViewItem Content="Rádio FM" />
+                            <ListViewItem Content="Rádio Devín" />
+                            <ListViewItem Content="Rádio_FM AAC+" />
+                        </ListView>
+                    </Grid>
+
+                    <Rectangle Grid.Row="3" Height="1" Fill="{StaticResource PanelStrokeBrush}" />
+                    <TextBlock Grid.Row="4" Text="COMPONENTS" Style="{StaticResource SectionTitleStyle}" />
+                    <StackPanel Grid.Row="5" Spacing="6">
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Glyph="&#xE8D6;" FontSize="13" Foreground="{StaticResource MeasurementAccentBrush}" />
+                            <StackPanel Grid.Column="1">
+                                <TextBlock Text="DAB+ audio" />
+                                <TextBlock Text="SubCh 4 · 96 kbit/s" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                            </StackPanel>
+                        </Grid>
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Glyph="&#xE8A5;" FontSize="13" Foreground="{StaticResource SpectrumBrush}" />
+                            <StackPanel Grid.Column="1">
+                                <TextBlock Text="MOT slideshow" />
+                                <TextBlock Text="packet data" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+
+                </Grid>
+            </Border>
+
+            <Grid Grid.Column="1" RowSpacing="10">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="3*" MinHeight="210" />
+                    <RowDefinition Height="2*" MinHeight="140" />
+                </Grid.RowDefinitions>
+
+                <Border Grid.Row="0" Style="{StaticResource PanelCardStyle}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="44" />
+                            <RowDefinition Height="2*" />
+                            <RowDefinition Height="1*" />
+                        </Grid.RowDefinitions>
+
+                        <Grid Grid.Row="0" Margin="14,0" ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                                <TextBlock Text="SPECTRUM / WATERFALL" Style="{StaticResource SectionTitleStyle}" />
+                                <Border Padding="8,2" CornerRadius="10" Background="#2235D0BA">
+                                    <TextBlock x:Name="SampleRateText" Text="2.048 MS/s" Foreground="{StaticResource MeasurementAccentBrush}" FontSize="10" />
+                                </Border>
+                            </StackPanel>
+                            <TextBlock Grid.Column="1" Text="RBW 1 kHz" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                            <TextBlock Grid.Column="2" x:Name="SampleCounterText" Text="frame 000000" VerticalAlignment="Center" FontFamily="Consolas" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                        </Grid>
+
+                        <Border Grid.Row="1" Margin="10,0,10,4" Background="#FF07101B" CornerRadius="4" BorderBrush="#FF203249" BorderThickness="1">
+                            <Viewbox Stretch="Fill">
+                                <Canvas Width="900" Height="260">
+                                    <Line X1="0" Y1="52" X2="900" Y2="52" Stroke="#253D556E" StrokeThickness="1" />
+                                    <Line X1="0" Y1="104" X2="900" Y2="104" Stroke="#253D556E" StrokeThickness="1" />
+                                    <Line X1="0" Y1="156" X2="900" Y2="156" Stroke="#253D556E" StrokeThickness="1" />
+                                    <Line X1="0" Y1="208" X2="900" Y2="208" Stroke="#253D556E" StrokeThickness="1" />
+                                    <Line X1="180" Y1="0" X2="180" Y2="260" Stroke="#253D556E" StrokeThickness="1" />
+                                    <Line X1="360" Y1="0" X2="360" Y2="260" Stroke="#253D556E" StrokeThickness="1" />
+                                    <Line X1="540" Y1="0" X2="540" Y2="260" Stroke="#253D556E" StrokeThickness="1" />
+                                    <Line X1="720" Y1="0" X2="720" Y2="260" Stroke="#253D556E" StrokeThickness="1" />
+                                    <Rectangle Canvas.Left="110" Canvas.Top="14" Width="680" Height="226" Fill="#0B35D0BA" Stroke="#4035D0BA" StrokeThickness="1" />
+                                    <Polyline x:Name="SpectrumTrace"
+                                              Stroke="{StaticResource SpectrumBrush}"
+                                              StrokeThickness="2"
+                                              Points="0,225 40,223 80,220 120,206 160,198 200,185 240,172 280,148 320,130 360,116 400,110 440,108 480,109 520,113 560,120 600,138 640,162 680,178 720,190 760,205 800,216 850,222 900,225" />
+                                    <Line X1="450" Y1="8" X2="450" Y2="250" Stroke="{StaticResource WarningBrush}" StrokeThickness="1" StrokeDashArray="4,4" />
+                                    <TextBlock Canvas.Left="458" Canvas.Top="12" Text="220.352 MHz" Foreground="{StaticResource WarningBrush}" FontFamily="Consolas" FontSize="11" />
+                                </Canvas>
+                            </Viewbox>
+                        </Border>
+
+                        <Border Grid.Row="2" Margin="10,0,10,10" CornerRadius="4" BorderBrush="#FF203249" BorderThickness="1">
+                            <Viewbox Stretch="Fill">
+                                <Canvas Width="900" Height="125" Background="#FF07101B">
+                                    <Rectangle Width="900" Height="125">
+                                        <Rectangle.Fill>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                                <GradientStop Color="#FF07101B" Offset="0" />
+                                                <GradientStop Color="#FF153448" Offset="0.14" />
+                                                <GradientStop Color="#FF087B79" Offset="0.32" />
+                                                <GradientStop Color="#FF22C8A8" Offset="0.5" />
+                                                <GradientStop Color="#FF087B79" Offset="0.68" />
+                                                <GradientStop Color="#FF153448" Offset="0.86" />
+                                                <GradientStop Color="#FF07101B" Offset="1" />
+                                            </LinearGradientBrush>
+                                        </Rectangle.Fill>
+                                    </Rectangle>
+                                    <Line X1="0" Y1="25" X2="900" Y2="25" Stroke="#30000000" StrokeThickness="3" />
+                                    <Line X1="0" Y1="52" X2="900" Y2="52" Stroke="#30000000" StrokeThickness="3" />
+                                    <Line X1="0" Y1="79" X2="900" Y2="79" Stroke="#30000000" StrokeThickness="3" />
+                                    <Line X1="0" Y1="106" X2="900" Y2="106" Stroke="#30000000" StrokeThickness="3" />
+                                    <Line x:Name="WaterfallCursor" X1="0" Y1="4" X2="900" Y2="4" Stroke="#AAFFFFFF" StrokeThickness="1" />
+                                </Canvas>
+                            </Viewbox>
+                        </Border>
+                    </Grid>
+                </Border>
+
+                <Border Grid.Row="1" Style="{StaticResource PanelCardStyle}">
+                    <TabView IsAddTabButtonVisible="False" TabWidthMode="Equal">
+                        <TabViewItem Header="Constellation" IsClosable="False">
+                            <Grid Margin="10">
+                                <Viewbox Stretch="Uniform">
+                                    <Canvas x:Name="ConstellationCanvas" Width="520" Height="220" Background="#FF07101B">
+                                        <Line X1="260" Y1="10" X2="260" Y2="210" Stroke="#334B6178" StrokeThickness="1" />
+                                        <Line X1="10" Y1="110" X2="510" Y2="110" Stroke="#334B6178" StrokeThickness="1" />
+                                        <Ellipse Canvas.Left="126" Canvas.Top="50" Width="7" Height="7" Fill="#FF54E2FF" />
+                                        <Ellipse Canvas.Left="388" Canvas.Top="50" Width="7" Height="7" Fill="#FF54E2FF" />
+                                        <Ellipse Canvas.Left="126" Canvas.Top="166" Width="7" Height="7" Fill="#FF54E2FF" />
+                                        <Ellipse Canvas.Left="388" Canvas.Top="166" Width="7" Height="7" Fill="#FF54E2FF" />
+                                    </Canvas>
+                                </Viewbox>
+                            </Grid>
+                        </TabViewItem>
+                        <TabViewItem Header="CIR" IsClosable="False">
+                            <Viewbox Margin="10" Stretch="Fill">
+                                <Canvas Width="800" Height="210" Background="#FF07101B">
+                                    <Line X1="0" Y1="170" X2="800" Y2="170" Stroke="#334B6178" />
+                                    <Polyline Stroke="{StaticResource MeasurementAccentBrush}" StrokeThickness="2" Points="0,180 45,178 80,174 110,70 125,168 180,175 260,160 275,110 290,170 390,178 520,176 610,150 620,178 800,180" />
+                                    <TextBlock Canvas.Left="112" Canvas.Top="45" Text="main path" Foreground="{StaticResource MeasurementAccentBrush}" FontSize="11" />
+                                </Canvas>
+                            </Viewbox>
+                        </TabViewItem>
+                        <TabViewItem Header="Carrier MER" IsClosable="False">
+                            <Grid Margin="14" RowSpacing="8">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <Viewbox Stretch="Fill">
+                                    <Canvas Width="800" Height="190" Background="#FF07101B">
+                                        <Polyline Stroke="{StaticResource MeasurementAccentBrush}" StrokeThickness="2" Points="0,98 40,85 80,90 120,72 160,84 200,68 240,75 280,62 320,70 360,58 400,67 440,61 480,74 520,68 560,82 600,76 640,91 680,84 720,102 760,94 800,108" />
+                                        <Line X1="0" Y1="130" X2="800" Y2="130" Stroke="{StaticResource WarningBrush}" StrokeDashArray="4,4" />
+                                    </Canvas>
+                                </Viewbox>
+                                <TextBlock Grid.Row="1" Text="Carrier index −768 … +768 · threshold 18 dB" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                            </Grid>
+                        </TabViewItem>
+                    </TabView>
+                </Border>
+            </Grid>
+
+            <Border Grid.Column="2" Style="{StaticResource PanelCardStyle}" Padding="12">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Spacing="6">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="LIVE KPIs" Style="{StaticResource SectionTitleStyle}" VerticalAlignment="Center" />
+                            <Ellipse Grid.Column="1" Width="8" Height="8" Fill="{StaticResource MeasurementAccentBrush}" />
+                        </Grid>
+
+                        <Border Padding="10,6" CornerRadius="6" Background="{StaticResource PanelRaisedBrush}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="MER (C/N proxy)" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                    <TextBlock x:Name="MerValueText" Text="— dB" Style="{StaticResource KpiValueStyle}" />
+                                </StackPanel>
+                                <FontIcon Grid.Column="1" Glyph="&#xE9D2;" Foreground="{StaticResource MeasurementAccentBrush}" />
+                            </Grid>
+                        </Border>
+                        <Border Padding="10,6" CornerRadius="6" Background="{StaticResource PanelRaisedBrush}">
+                            <StackPanel>
+                                <TextBlock Text="SNR" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                <TextBlock x:Name="SnrValueText" Text="— dB" Style="{StaticResource KpiValueStyle}" />
+                            </StackPanel>
+                        </Border>
+                        <Border Padding="10,6" CornerRadius="6" Background="{StaticResource PanelRaisedBrush}">
+                            <StackPanel>
+                                <TextBlock Text="CFO" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                <TextBlock x:Name="CfoValueText" Text="— Hz" Style="{StaticResource KpiValueStyle}" />
+                            </StackPanel>
+                        </Border>
+
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Border Padding="8,6" CornerRadius="6" Background="{StaticResource PanelRaisedBrush}">
+                                <StackPanel>
+                                    <TextBlock Text="BER proxy" Foreground="{StaticResource MutedTextBrush}" FontSize="10" />
+                                    <TextBlock x:Name="BerValueText" Text="—" FontFamily="Consolas" FontSize="16" FontWeight="SemiBold" />
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Column="1" Padding="8,6" CornerRadius="6" Background="{StaticResource PanelRaisedBrush}">
+                                <StackPanel>
+                                    <TextBlock Text="FIB CRC" Foreground="{StaticResource MutedTextBrush}" FontSize="10" />
+                                    <TextBlock x:Name="CrcValueText" Text="— / —" FontFamily="Consolas" FontSize="16" FontWeight="SemiBold" />
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+
+                        <Rectangle Height="1" Fill="{StaticResource PanelStrokeBrush}" Margin="0,2" />
+                        <TextBlock Text="RECEIVER DETAIL" Style="{StaticResource SectionTitleStyle}" />
+                        <Grid RowSpacing="7" ColumnSpacing="8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="ADC level" Foreground="{StaticResource MutedTextBrush}" />
+                            <TextBlock Grid.Column="1" x:Name="AdcValueText" Text="— dBFS" FontFamily="Consolas" />
+                            <TextBlock Grid.Row="1" Text="PRS score" Foreground="{StaticResource MutedTextBrush}" />
+                            <TextBlock Grid.Row="1" Grid.Column="1" x:Name="PrsValueText" Text="—" FontFamily="Consolas" />
+                            <TextBlock Grid.Row="2" Text="Spectrum C/N" Foreground="{StaticResource MutedTextBrush}" />
+                            <TextBlock Grid.Row="2" Grid.Column="1" x:Name="CnValueText" Text="— dB" FontFamily="Consolas" />
+                            <TextBlock Grid.Row="3" Text="Timing error" Foreground="{StaticResource MutedTextBrush}" />
+                            <TextBlock Grid.Row="3" Grid.Column="1" x:Name="TimingValueText" Text="— samples" FontFamily="Consolas" />
+                            <TextBlock Grid.Row="4" Text="Dropped blocks" Foreground="{StaticResource MutedTextBrush}" />
+                            <TextBlock Grid.Row="4" Grid.Column="1" x:Name="DropValueText" Text="0" FontFamily="Consolas" />
+                        </Grid>
+                        <ProgressBar x:Name="FicProgress" Minimum="0" Maximum="1" Value="0" Height="4" Foreground="{StaticResource MeasurementAccentBrush}" />
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+        </Grid>
+
+        <Border Grid.Row="3" Margin="10,0,10,10" Style="{StaticResource PanelCardStyle}">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="40" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <Grid Grid.Row="0" Margin="14,0" ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="TIMELINE · EVENTS · ALARMS · ANNOTATIONS" Style="{StaticResource SectionTitleStyle}" VerticalAlignment="Center" />
+                    <Line Grid.Column="1" X1="0" Y1="20" X2="1000" Y2="20" Stretch="Fill" Stroke="{StaticResource PanelStrokeBrush}" StrokeThickness="1" />
+                    <TextBlock Grid.Column="2" Text="last 60 s" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" FontSize="11" />
+                </Grid>
+                <ListView Grid.Row="1" x:Name="TimelineList" SelectionMode="None" Padding="8,0" IsItemClickEnabled="False">
+                    <ListViewItem Content="00:00.000  ·  Ready — select a device and start the receiver" />
+                    <ListViewItem Content="00:00.000  ·  Snapshot mailbox initialized" />
+                </ListView>
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="4" Background="#FF0B1522" BorderBrush="{StaticResource PanelStrokeBrush}" BorderThickness="0,1,0,0" Padding="12,0">
+            <Grid ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="StatusDeviceText" Text="SDRplay RSP1A" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" x:Name="StatusChannelText" Text="11C" VerticalAlignment="Center" Foreground="{StaticResource SpectrumBrush}" />
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                    <Ellipse Width="7" Height="7" Fill="{StaticResource MeasurementAccentBrush}" />
+                    <TextBlock x:Name="StatusSyncText" Text="idle" />
+                </StackPanel>
+                <TextBlock Grid.Column="3" x:Name="StatusRecordText" Text="not recording" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" />
+                <TextBlock Grid.Column="4" x:Name="StatusOverrunText" Text="no overruns" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" />
+                <TextBlock Grid.Column="6" Text="DAB+ Measurement Workbench · WinUI proof of concept" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+            </Grid>
+        </Border>
+    </Grid>
+</Window>
