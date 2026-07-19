@@ -17,6 +17,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(DAB_BUILD_TESTS "Build unit tests" ON)
 option(DAB_BUILD_GUI "Build wxWidgets GUI prototype" ON)
+option(DAB_BUILD_TOOLS "Build command-line tools" ON)
 option(DAB_ENABLE_AVX2 "Enable AVX2 backend when supported" ON)
 option(DAB_ENABLE_NEON "Enable NEON backend when supported" ON)
 option(DAB_ENABLE_RELEASE_IPO "Enable interprocedural optimization in Release builds" ON)
@@ -220,7 +221,7 @@ elseif(PkgConfig_FOUND)
     endif()
 endif()
 
-add_library(dab
+add_library(dab STATIC
     src/core/audio_eq.c
     src/core/audio_spectrum.c
     src/core/block_pool.c
@@ -256,6 +257,8 @@ add_library(dab
     src/os/os_shared_lib.c
     src/os/os_thread.c
     src/os/os_time.c
+    src/receive/receive.c
+    src/scan/scan.c
     src/simd/simd.c
     src/simd/simd_scalar.c
 )
@@ -266,6 +269,11 @@ target_include_directories(dab
 )
 
 target_compile_definitions(dab PUBLIC DAB_CAPTURE_BLOCK_COUNT=${DAB_CAPTURE_BLOCK_COUNT})
+set_target_properties(dab PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+if(NOT WIN32)
+    target_link_libraries(dab PUBLIC m ${CMAKE_DL_LIBS})
+endif()
 
 if(DAB_BUILD_GUI)
     find_package(OpenGL QUIET)
@@ -319,202 +327,203 @@ if(DAB_BUILD_GUI)
     endif()
 endif()
 
-add_executable(dab_sdrplay_scan
-    tools/dab_sdrplay_scan.c
-)
+if(DAB_BUILD_TOOLS)
+    add_executable(dab_sdrplay_scan
+        tools/dab_sdrplay_scan.c
+    )
 
-target_link_libraries(dab_sdrplay_scan PRIVATE dab)
-dab_target_link_math(dab_sdrplay_scan)
+    target_link_libraries(dab_sdrplay_scan PRIVATE dab)
+    dab_target_link_math(dab_sdrplay_scan)
 
-add_executable(dab_sdrplay_probe
-    tools/sdrplay_probe.c
-)
+    add_executable(dab_sdrplay_probe
+        tools/sdrplay_probe.c
+    )
 
-target_link_libraries(dab_sdrplay_probe PRIVATE dab)
+    target_link_libraries(dab_sdrplay_probe PRIVATE dab)
 
-add_executable(dab_simd_bench
-    tools/dab_simd_bench.c
-)
-target_link_libraries(dab_simd_bench PRIVATE dab)
+    add_executable(dab_simd_bench
+        tools/dab_simd_bench.c
+    )
+    target_link_libraries(dab_simd_bench PRIVATE dab)
 
-add_executable(dab_sdrplay_null_probe
-    tools/sdrplay_null_probe.c
-)
+    add_executable(dab_sdrplay_null_probe
+        tools/sdrplay_null_probe.c
+    )
 
-target_link_libraries(dab_sdrplay_null_probe PRIVATE dab)
+    target_link_libraries(dab_sdrplay_null_probe PRIVATE dab)
 
-add_executable(dab_sdrplay_sync_probe
-    tools/sdrplay_sync_probe.c
-)
+    add_executable(dab_sdrplay_sync_probe
+        tools/sdrplay_sync_probe.c
+    )
 
-target_link_libraries(dab_sdrplay_sync_probe PRIVATE dab)
-dab_set_windows_stack_size(dab_sdrplay_sync_probe 8388608)
+    target_link_libraries(dab_sdrplay_sync_probe PRIVATE dab)
+    dab_set_windows_stack_size(dab_sdrplay_sync_probe 8388608)
 
-add_executable(dab_sdrplay_audio
-    tools/dab_sdrplay_audio.c
-    tools/audio_playback.c
-)
+    add_executable(dab_sdrplay_audio
+        tools/dab_sdrplay_audio.c
+        tools/audio_playback.c
+    )
 
-target_link_libraries(dab_sdrplay_audio PRIVATE dab)
+    target_link_libraries(dab_sdrplay_audio PRIVATE dab)
 
-add_executable(dab_sync_file_replay
-    tools/dab_sync_file_replay.c
-    tools/audio_playback.c
-)
+    add_executable(dab_sync_file_replay
+        tools/dab_sync_file_replay.c
+        tools/audio_playback.c
+    )
 
-target_link_libraries(dab_sync_file_replay PRIVATE dab)
-if(DAB_AUDIO_PLAYBACK_AVAILABLE)
-    target_compile_definitions(dab_sync_file_replay PRIVATE DAB_HAVE_AUDIO_PLAYBACK=1)
-    target_link_libraries(dab_sync_file_replay PRIVATE ${DAB_AUDIO_LINK_TARGETS})
-    target_compile_definitions(dab_sdrplay_audio PRIVATE DAB_HAVE_AUDIO_PLAYBACK=1)
-    target_link_libraries(dab_sdrplay_audio PRIVATE ${DAB_AUDIO_LINK_TARGETS})
-    if(FDK_AAC_FOUND)
-        target_compile_definitions(dab_sync_file_replay PRIVATE DAB_HAVE_FDK_AAC=1)
-        target_compile_definitions(dab_sdrplay_audio PRIVATE DAB_HAVE_FDK_AAC=1)
+    target_link_libraries(dab_sync_file_replay PRIVATE dab)
+    if(DAB_AUDIO_PLAYBACK_AVAILABLE)
+        target_compile_definitions(dab_sync_file_replay PRIVATE DAB_HAVE_AUDIO_PLAYBACK=1)
+        target_link_libraries(dab_sync_file_replay PRIVATE ${DAB_AUDIO_LINK_TARGETS})
+        target_compile_definitions(dab_sdrplay_audio PRIVATE DAB_HAVE_AUDIO_PLAYBACK=1)
+        target_link_libraries(dab_sdrplay_audio PRIVATE ${DAB_AUDIO_LINK_TARGETS})
+        if(FDK_AAC_FOUND)
+            target_compile_definitions(dab_sync_file_replay PRIVATE DAB_HAVE_FDK_AAC=1)
+            target_compile_definitions(dab_sdrplay_audio PRIVATE DAB_HAVE_FDK_AAC=1)
+        endif()
+        if(DAB_FAAD2_FOUND OR FAAD2_FOUND)
+            target_compile_definitions(dab_sync_file_replay PRIVATE DAB_HAVE_FAAD2=1)
+            target_compile_definitions(dab_sdrplay_audio PRIVATE DAB_HAVE_FAAD2=1)
+        endif()
     endif()
-    if(DAB_FAAD2_FOUND OR FAAD2_FOUND)
-        target_compile_definitions(dab_sync_file_replay PRIVATE DAB_HAVE_FAAD2=1)
-        target_compile_definitions(dab_sdrplay_audio PRIVATE DAB_HAVE_FAAD2=1)
-    endif()
+    dab_set_windows_stack_size(dab_sdrplay_audio 8388608)
+    dab_set_windows_stack_size(dab_sync_file_replay 8388608)
+    dab_copy_runtime_dlls(dab_sdrplay_audio ${DAB_AUDIO_RUNTIME_DLLS})
+    dab_copy_runtime_dlls(dab_sync_file_replay ${DAB_AUDIO_RUNTIME_DLLS})
+
+    add_executable(dab_gen_mode_i_prs_table
+        tools/gen_mode_i_prs_table.c
+    )
+
+    add_executable(dab_fic_dump_analyze
+        tools/dab_fic_dump_analyze.c
+    )
+
+    target_link_libraries(dab_fic_dump_analyze PRIVATE dab)
+
+    add_executable(dab_fic_symbol_dump_analyze
+        tools/dab_fic_symbol_dump_analyze.c
+    )
+
+    target_link_libraries(dab_fic_symbol_dump_analyze PRIVATE dab)
+
+    add_executable(dab_fic_carrier_dump_analyze
+        tools/dab_fic_carrier_dump_analyze.c
+    )
+
+    target_link_libraries(dab_fic_carrier_dump_analyze PRIVATE dab)
+
+    add_executable(dab_fic_diff_dump_analyze
+        tools/dab_fic_diff_dump_analyze.c
+    )
+
+    target_link_libraries(dab_fic_diff_dump_analyze PRIVATE dab)
+
+    add_executable(dab_fic_active_dump_analyze
+        tools/dab_fic_active_dump_analyze.c
+    )
+
+    target_link_libraries(dab_fic_active_dump_analyze PRIVATE dab)
+
+    add_executable(dab_fic_raw_active_dump_analyze
+        tools/dab_fic_raw_active_dump_analyze.c
+    )
+
+    target_link_libraries(dab_fic_raw_active_dump_analyze PRIVATE dab)
+    target_include_directories(dab_fic_raw_active_dump_analyze PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
+
+    add_executable(dab_fic_block_dump_analyze
+        tools/dab_fic_block_dump_analyze.c
+    )
+
+    target_link_libraries(dab_fic_block_dump_analyze PRIVATE dab)
+
+    add_executable(dab_fic_input_compare
+        tools/dab_fic_input_compare.c
+    )
+
+    target_link_libraries(dab_fic_input_compare PRIVATE dab)
+
+    add_executable(dab_fic_unpuncture_compare
+        tools/dab_fic_unpuncture_compare.c
+    )
+
+    target_link_libraries(dab_fic_unpuncture_compare PRIVATE dab)
+
+    add_executable(dab_fic_postviterbi_compare
+        tools/dab_fic_postviterbi_compare.c
+    )
+
+    target_link_libraries(dab_fic_postviterbi_compare PRIVATE dab)
+
+    add_executable(dab_prs_active_compare
+        tools/dab_prs_active_compare.c
+    )
+
+    target_include_directories(dab_prs_active_compare PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
+
+    add_executable(dab_prs_fft_compare
+        tools/dab_prs_fft_compare.c
+    )
+
+    target_link_libraries(dab_prs_fft_compare PRIVATE dab)
+    target_include_directories(dab_prs_fft_compare PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
+
+    add_executable(dab_prs_ref_compare
+        tools/dab_prs_ref_compare.c
+    )
+
+    target_link_libraries(dab_prs_ref_compare PRIVATE dab)
+
+    add_executable(dab_ofdm_chain_compare
+        tools/dab_ofdm_chain_compare.c
+    )
+
+    target_link_libraries(dab_ofdm_chain_compare PRIVATE dab)
+    target_include_directories(dab_ofdm_chain_compare PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
+
+    add_executable(dab_fic_ref_compare
+        tools/dab_fic_ref_compare.c
+    )
+
+    target_link_libraries(dab_fic_ref_compare PRIVATE dab)
+
+    add_executable(dab_fic_qpsk_compare
+        tools/dab_fic_qpsk_compare.c
+    )
+
+    target_link_libraries(dab_fic_qpsk_compare PRIVATE dab)
+
+    add_executable(dab_symbol_dump_compare
+        tools/dab_symbol_dump_compare.c
+    )
+
+    add_executable(dab_carrier_dump_compare
+        tools/dab_carrier_dump_compare.c
+    )
+
+    add_executable(dab_diff_dump_compare
+        tools/dab_diff_dump_compare.c
+    )
+
+    add_executable(dab_active_dump_compare
+        tools/dab_active_dump_compare.c
+    )
+
+    add_executable(dab_raw_active_compare
+        tools/dab_raw_active_compare.c
+    )
+
+    add_executable(dab_fft_offset_scan_compare
+        tools/dab_fft_offset_scan_compare.c
+    )
+    target_link_libraries(dab_fft_offset_scan_compare PRIVATE dab)
+    dab_target_link_math(dab_fft_offset_scan_compare)
 endif()
-dab_set_windows_stack_size(dab_sdrplay_audio 8388608)
-dab_set_windows_stack_size(dab_sync_file_replay 8388608)
-dab_copy_runtime_dlls(dab_sdrplay_audio ${DAB_AUDIO_RUNTIME_DLLS})
-dab_copy_runtime_dlls(dab_sync_file_replay ${DAB_AUDIO_RUNTIME_DLLS})
-
-add_executable(dab_gen_mode_i_prs_table
-    tools/gen_mode_i_prs_table.c
-)
-
-add_executable(dab_fic_dump_analyze
-    tools/dab_fic_dump_analyze.c
-)
-
-target_link_libraries(dab_fic_dump_analyze PRIVATE dab)
-
-add_executable(dab_fic_symbol_dump_analyze
-    tools/dab_fic_symbol_dump_analyze.c
-)
-
-target_link_libraries(dab_fic_symbol_dump_analyze PRIVATE dab)
-
-add_executable(dab_fic_carrier_dump_analyze
-    tools/dab_fic_carrier_dump_analyze.c
-)
-
-target_link_libraries(dab_fic_carrier_dump_analyze PRIVATE dab)
-
-add_executable(dab_fic_diff_dump_analyze
-    tools/dab_fic_diff_dump_analyze.c
-)
-
-target_link_libraries(dab_fic_diff_dump_analyze PRIVATE dab)
-
-add_executable(dab_fic_active_dump_analyze
-    tools/dab_fic_active_dump_analyze.c
-)
-
-target_link_libraries(dab_fic_active_dump_analyze PRIVATE dab)
-
-add_executable(dab_fic_raw_active_dump_analyze
-    tools/dab_fic_raw_active_dump_analyze.c
-)
-
-target_link_libraries(dab_fic_raw_active_dump_analyze PRIVATE dab)
-target_include_directories(dab_fic_raw_active_dump_analyze PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
-
-add_executable(dab_fic_block_dump_analyze
-    tools/dab_fic_block_dump_analyze.c
-)
-
-target_link_libraries(dab_fic_block_dump_analyze PRIVATE dab)
-
-add_executable(dab_fic_input_compare
-    tools/dab_fic_input_compare.c
-)
-
-target_link_libraries(dab_fic_input_compare PRIVATE dab)
-
-add_executable(dab_fic_unpuncture_compare
-    tools/dab_fic_unpuncture_compare.c
-)
-
-target_link_libraries(dab_fic_unpuncture_compare PRIVATE dab)
-
-add_executable(dab_fic_postviterbi_compare
-    tools/dab_fic_postviterbi_compare.c
-)
-
-target_link_libraries(dab_fic_postviterbi_compare PRIVATE dab)
-
-add_executable(dab_prs_active_compare
-    tools/dab_prs_active_compare.c
-)
-
-target_include_directories(dab_prs_active_compare PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
-
-add_executable(dab_prs_fft_compare
-    tools/dab_prs_fft_compare.c
-)
-
-target_link_libraries(dab_prs_fft_compare PRIVATE dab)
-target_include_directories(dab_prs_fft_compare PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
-
-add_executable(dab_prs_ref_compare
-    tools/dab_prs_ref_compare.c
-)
-
-target_link_libraries(dab_prs_ref_compare PRIVATE dab)
-
-add_executable(dab_ofdm_chain_compare
-    tools/dab_ofdm_chain_compare.c
-)
-
-target_link_libraries(dab_ofdm_chain_compare PRIVATE dab)
-target_include_directories(dab_ofdm_chain_compare PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
-
-add_executable(dab_fic_ref_compare
-    tools/dab_fic_ref_compare.c
-)
-
-target_link_libraries(dab_fic_ref_compare PRIVATE dab)
-
-add_executable(dab_fic_qpsk_compare
-    tools/dab_fic_qpsk_compare.c
-)
-
-target_link_libraries(dab_fic_qpsk_compare PRIVATE dab)
-
-add_executable(dab_symbol_dump_compare
-    tools/dab_symbol_dump_compare.c
-)
-
-add_executable(dab_carrier_dump_compare
-    tools/dab_carrier_dump_compare.c
-)
-
-add_executable(dab_diff_dump_compare
-    tools/dab_diff_dump_compare.c
-)
-
-add_executable(dab_active_dump_compare
-    tools/dab_active_dump_compare.c
-)
-
-add_executable(dab_raw_active_compare
-    tools/dab_raw_active_compare.c
-)
-
-add_executable(dab_fft_offset_scan_compare
-    tools/dab_fft_offset_scan_compare.c
-)
-target_link_libraries(dab_fft_offset_scan_compare PRIVATE dab)
-dab_target_link_math(dab_fft_offset_scan_compare)
 
 target_compile_definitions(dab
     PRIVATE
         $<$<BOOL:${DAB_ENABLE_AVX2}>:DAB_ENABLE_AVX2=1>
-        $<$<BOOL:${DAB_ENABLE_NEON}>:DAB_ENABLE_NEON=1>
 )
 
 if(DAB_ENABLE_AVX2)
@@ -533,7 +542,8 @@ if(DAB_ENABLE_NEON)
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64|ARM64|armv8)")
         target_sources(dab PRIVATE src/simd/simd_neon.c)
         target_sources(dab PRIVATE src/core/prs_fft_neon.c)
-        if(NOT MSVC AND NOT APPLE)
+        target_compile_definitions(dab PRIVATE DAB_ENABLE_NEON=1)
+        if(NOT MSVC AND NOT APPLE AND NOT ANDROID)
             target_compile_options(dab PRIVATE -mfpu=neon)
         endif()
     endif()

@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "dab/os/os_thread.h"
 #include "dab/os/os_time.h"
@@ -130,11 +131,28 @@ static dab_sdr_status_t dab_rtlsdr_real_open_and_configure(dab_rtlsdr_real_adapt
     uint32_t count;
     int rc;
 
-    count = adapter->api.get_device_count();
-    if (adapter->base.device_index >= count) {
-        return DAB_SDR_STATUS_NOT_FOUND;
+#if defined(__ANDROID__)
+    if (adapter->base.device_config.android_usb_fd >= 0 && adapter->api.open_fd != 0) {
+        rc = adapter->api.open_fd(&adapter->dev, adapter->base.device_config.android_usb_fd);
+    } else
+#endif
+    {
+#if defined(__ANDROID__)
+        if (adapter->base.device_config.android_usb_fd >= 0) {
+            char fd_string[32];
+            snprintf(fd_string, sizeof(fd_string), "%d", adapter->base.device_config.android_usb_fd);
+            setenv("RTLSDR_ANDROID_USB_FD", fd_string, 1);
+            rc = adapter->api.open(&adapter->dev, adapter->base.device_index);
+        } else
+#endif
+        {
+        count = adapter->api.get_device_count();
+        if (adapter->base.device_index >= count) {
+            return DAB_SDR_STATUS_NOT_FOUND;
+        }
+        rc = adapter->api.open(&adapter->dev, adapter->base.device_index);
+        }
     }
-    rc = adapter->api.open(&adapter->dev, adapter->base.device_index);
     dab_rtlsdr_debug_rc("open", rc);
     if (rc != 0 || adapter->dev == 0) {
         dab_rtlsdr_error_rc("open", rc);

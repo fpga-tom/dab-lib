@@ -13,6 +13,7 @@ typedef uint32_t (*dab_rtlsdr_get_device_count_fn)(void);
 typedef const char *(*dab_rtlsdr_get_device_name_fn)(uint32_t index);
 typedef int (*dab_rtlsdr_get_device_usb_strings_fn)(uint32_t index, char *manufact, char *product, char *serial);
 typedef int (*dab_rtlsdr_open_fn)(dab_rtlsdr_dev_t **dev, uint32_t index);
+typedef int (*dab_rtlsdr_open_fd_fn)(dab_rtlsdr_dev_t **dev, int fd);
 typedef int (*dab_rtlsdr_close_fn)(dab_rtlsdr_dev_t *dev);
 typedef int (*dab_rtlsdr_set_center_freq_fn)(dab_rtlsdr_dev_t *dev, uint32_t freq);
 typedef int (*dab_rtlsdr_set_sample_rate_fn)(dab_rtlsdr_dev_t *dev, uint32_t rate);
@@ -37,6 +38,7 @@ typedef struct {
     dab_rtlsdr_get_device_name_fn get_device_name;
     dab_rtlsdr_get_device_usb_strings_fn get_device_usb_strings;
     dab_rtlsdr_open_fn open;
+    dab_rtlsdr_open_fd_fn open_fd;
     dab_rtlsdr_close_fn close;
     dab_rtlsdr_set_center_freq_fn set_center_freq;
     dab_rtlsdr_set_sample_rate_fn set_sample_rate;

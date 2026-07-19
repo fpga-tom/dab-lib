@@ -164,7 +164,7 @@ int dab_prs_fft_execute_i16_cfo(const dab_prs_fft_t *fft,
         const float step_im = (float)sin(step);
         float rot_re = (float)cos(base_phase);
         float rot_im = (float)sin(base_phase);
-        uint32_t n;
+        uint32_t n = 0u;
 
 #if defined(DAB_ENABLE_AVX2) && (defined(__AVX2__) || defined(_M_AVX2))
         {

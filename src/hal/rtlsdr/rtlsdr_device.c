@@ -205,6 +205,7 @@ void dab_rtlsdr_default_config(dab_rtlsdr_config_t *config) {
     config->gain_mode = DAB_RTLSDR_GAIN_MODE_AUTO;
     config->ppm_correction = 0;
     config->bias_tee_enabled = 0;
+    config->android_usb_fd = -1;
 }
 
 static int dab_rtlsdr_validate_device_config(const dab_rtlsdr_config_t *config) {

@@ -105,6 +105,58 @@ static int dab_gui_scan_printf(const char *fmt, ...) {
 #undef main
 #undef printf
 
+static int dab_gui_scan_cancel_callback(void *user) {
+    (void)user;
+    return dab_gui_scan_cancel_requested();
+}
+
+static int dab_gui_scan_event_bridge(const dab_scan_event_t *event, void *user) {
+    char line[512];
+    int *error_reported = (int *)user;
+
+    if (event == 0) {
+        return 0;
+    }
+
+    switch (event->type) {
+        case DAB_SCAN_EVENT_PROGRESS:
+            snprintf(line,
+                     sizeof(line),
+                     "SCAN_PROGRESS\t%u\t%u\t%s\t%llu",
+                     event->index,
+                     event->total,
+                     event->channel != 0 ? event->channel : "",
+                     (unsigned long long)event->frequency_hz);
+            dab_gui_scan_emit_line(line);
+            break;
+        case DAB_SCAN_EVENT_LOCK:
+            snprintf(line,
+                     sizeof(line),
+                     "SCAN_LOCK\t%u\t%u\t%s\t%llu\t%u\t%u",
+                     event->index,
+                     event->total,
+                     event->channel != 0 ? event->channel : "",
+                     (unsigned long long)event->frequency_hz,
+                     event->service_count,
+                     event->label_count);
+            dab_gui_scan_emit_line(line);
+            break;
+        case DAB_SCAN_EVENT_ERROR:
+            if (event->message != 0 && event->message[0] != '\0') {
+                snprintf(line, sizeof(line), "SCAN_ERROR\t%s", event->message);
+                dab_gui_scan_emit_line(line);
+                if (error_reported != 0) {
+                    *error_reported = 1;
+                }
+            }
+            break;
+        default:
+            break;
+    }
+
+    return 0;
+}
+
 void dab_gui_scan_cancel_current(void) {
     dab_gui_scan_cancel_set(1);
 }
@@ -117,9 +169,12 @@ int dab_gui_scan_run(const char *output_path, dab_gui_scan_event_callback_t call
     dab_rtlsdr_config_t rtlsdr_config;
     dab_sdr_device_t *device = 0;
     scan_runtime_t runtime = {0};
+    dab_scan_config_t scan_config;
+    dab_scan_context_t scan_context;
     FILE *results_fp = 0;
     uint32_t channel_index;
     uint32_t total_services = 0u;
+    int scan_error_reported = 0;
     int rc = -1;
 
     if (output_path == 0 || output_path[0] == '\0') {
@@ -135,6 +190,17 @@ int dab_gui_scan_run(const char *output_path, dab_gui_scan_event_callback_t call
         driver = "rtlsdr";
     }
     params.driver = driver;
+    dab_scan_default_config(&scan_config);
+    scan_config.driver = driver;
+    scan_config.per_frequency_seconds = 4u;
+    scan_config.gain_db = settings.gain_db;
+    scan_config.agc_enabled = settings.agc_enabled != 0;
+    scan_config.use_real_device = 1;
+    scan_config.cancel = dab_gui_scan_cancel_callback;
+    scan_config.cancel_user = 0;
+    scan_context.config = &scan_config;
+    scan_context.callback = dab_gui_scan_event_bridge;
+    scan_context.user = &scan_error_reported;
 
     dab_gui_setenv_real_backend();
 
@@ -183,15 +249,18 @@ int dab_gui_scan_run(const char *output_path, dab_gui_scan_event_callback_t call
                            channel_index,
                            4u,
                            settings.gain_db,
-                           results_fp);
+                           results_fp,
+                           &scan_context);
         if (services == -2) {
             rc = -2;
             goto cleanup;
         }
         if (services < 0) {
-            char line[128];
-            snprintf(line, sizeof(line), "SCAN_ERROR\tchannel %s failed", kBandIIIChannels[channel_index].channel);
-            dab_gui_scan_emit_line(line);
+            if (scan_error_reported == 0) {
+                char line[128];
+                snprintf(line, sizeof(line), "SCAN_ERROR\tchannel %s failed", kBandIIIChannels[channel_index].channel);
+                dab_gui_scan_emit_line(line);
+            }
             goto cleanup;
         }
         total_services += (uint32_t)services;
