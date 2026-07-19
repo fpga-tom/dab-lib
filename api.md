@@ -10,6 +10,14 @@ Initializes a `dab_receiver_t` with its IQ block pool and filled-block queue. Us
 ### `dab_receiver_shutdown`
 Stops queues, destroys internal storage, frees allocated receiver buffers, and resets the receiver struct.
 
+## End-to-End Receive Session
+
+### `dab_receive_default_config`
+Loads the default RTL-SDR playback configuration used by the end-to-end receive session.
+
+### `dab_receive_service`
+Runs the reusable live receiver session for one frequency and service until cancellation or failure. Status, audio format, encoded audio access units, and errors are delivered through the caller's event callback.
+
 ### `dab_frontend_default_config`
 Fills `dab_frontend_config_t` with default frontend settings. Currently this sets the DC-removal smoothing factor.
 
