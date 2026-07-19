@@ -8,6 +8,8 @@ The current proof of concept includes:
 - live ensemble, service, and component navigation decoded from the tuned signal's FIC;
 - live spectrum, rolling waterfall, constellation, CIR, and per-carrier MER views;
 - live KPI cards and receiver detail values;
+- a dedicated RF Measurements workspace with toolbar, navigation, View-menu, and live-summary entry points;
+- an RF Overview page with live ADC-referenced power, C/N, carrier MER, CFO, synchronization stability, overruns, receiver configuration, process CPU usage, and rolling 60-second traces;
 - event/annotation timeline and receiver status bar;
 - a thread-safe latest-snapshot mailbox compatible with `dab_receive_config_t.snapshot`;
 - a UI-owned receiver worker that runs `dab_receive_service` on a dedicated thread;
@@ -34,7 +36,8 @@ The receiver controls currently open a real SDR device. The selected SDRplay or 
 
 Current proof-of-concept limitations:
 
-- the reusable receiver selects the first decoded audio service automatically; explicit service selection from the navigation list is not wired to the audio decoder yet;
+- selecting an audio service in the navigation list restarts the receiver session on the same channel with that explicit SID;
+- absolute input power remains uncalibrated, so RF power is correctly displayed in dBFS rather than dBm; sample-clock and ADC-clipping estimators are not available yet;
 - the high-rate callback is emitted after a complete synchronized DAB transmission frame; acquisition without frame synchronization produces scalar snapshots but no array payload;
 - BER remains a FIC CRC-loss proxy; and
 - recording is not implemented, so the Record control is disabled.

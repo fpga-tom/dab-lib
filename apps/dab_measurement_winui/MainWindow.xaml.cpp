@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "MainWindow.xaml.h"
 
+#include <limits>
+
 #if __has_include("MainWindow.g.cpp")
 #include "MainWindow.g.cpp"
 #endif
@@ -88,6 +90,47 @@ namespace
             return L"Unknown transport";
         }
     }
+
+    uint64_t file_time_value(FILETIME const& value)
+    {
+        ULARGE_INTEGER result{};
+        result.LowPart = value.dwLowDateTime;
+        result.HighPart = value.dwHighDateTime;
+        return result.QuadPart;
+    }
+
+    template <size_t Capacity>
+    PointCollection history_points(std::array<float, Capacity> const& values,
+                                   size_t write_index,
+                                   size_t count,
+                                   float minimum,
+                                   float maximum,
+                                   float width,
+                                   float height)
+    {
+        PointCollection points;
+        if (count == 0u || maximum <= minimum)
+        {
+            return points;
+        }
+
+        size_t const first = (write_index + Capacity - count) % Capacity;
+        for (size_t point = 0u; point < count; ++point)
+        {
+            float const value = values[(first + point) % Capacity];
+            if (!std::isfinite(value))
+            {
+                continue;
+            }
+            float const x = count > 1u
+                ? width * static_cast<float>(point) / static_cast<float>(count - 1u)
+                : width;
+            float const normalized = std::clamp((value - minimum) / (maximum - minimum), 0.0f, 1.0f);
+            float const y = (height - 3.0f) - normalized * (height - 6.0f);
+            points.Append(Point{ x, y });
+        }
+        return points;
+    }
 }
 
 namespace winrt::DabMeasurementWinUI::implementation
@@ -128,6 +171,56 @@ namespace winrt::DabMeasurementWinUI::implementation
             status_channel.Text(channel);
         }
         m_selected_service_id = 0u;
+        UpdateRfContext();
+    }
+
+    void MainWindow::ReceiverWorkspace_Click(IInspectable const&, RoutedEventArgs const&)
+    {
+        ShowWorkspace(false);
+    }
+
+    void MainWindow::RfMeasurements_Click(IInspectable const&, RoutedEventArgs const&)
+    {
+        ShowWorkspace(true);
+    }
+
+    void MainWindow::RootLayout_SizeChanged(IInspectable const&, SizeChangedEventArgs const& args)
+    {
+        ApplyWorkspaceWidth(static_cast<double>(args.NewSize().Width));
+    }
+
+    void MainWindow::ApplyWorkspaceWidth(double root_width)
+    {
+        double const workspace_width = (std::max)(520.0, root_width - 150.0);
+        if (ReceiverWorkspaceMain())
+        {
+            ReceiverWorkspaceMain().Width(workspace_width);
+        }
+        if (ReceiverTimelinePanel())
+        {
+            ReceiverTimelinePanel().Width(workspace_width);
+        }
+        if (RfWorkspace())
+        {
+            RfWorkspace().Width(workspace_width);
+        }
+        if (RfOverviewContent())
+        {
+            RfOverviewContent().Width((std::max)(480.0, workspace_width - 36.0));
+        }
+    }
+
+    void MainWindow::RfWorkspace_SizeChanged(IInspectable const&, SizeChangedEventArgs const& args)
+    {
+        if (RfOverviewContent() && args.NewSize().Width > 48.0f)
+        {
+            RfOverviewContent().Width(static_cast<double>(args.NewSize().Width) - 36.0);
+        }
+    }
+
+    void MainWindow::AudioButton_Click(IInspectable const&, RoutedEventArgs const&)
+    {
+        AddTimelineEvent(L"Audio playback is enabled and follows the selected DAB+ service");
     }
 
     void MainWindow::ServicesListView_SelectionChanged(IInspectable const&,
@@ -187,6 +280,14 @@ namespace winrt::DabMeasurementWinUI::implementation
     void MainWindow::OnTimerTick(IInspectable const&, IInspectable const&)
     {
         ++m_tick;
+        if (m_tick == 1u && RootLayout())
+        {
+            ApplyWorkspaceWidth(RootLayout().ActualWidth());
+        }
+        if ((m_tick % 4u) == 0u)
+        {
+            UpdateCpuUsage();
+        }
 
         dab::measurement::ReceiverStatus receiver_status;
         uint64_t status_version = 0;
@@ -274,6 +375,12 @@ namespace winrt::DabMeasurementWinUI::implementation
         if (clear_catalog)
         {
             ClearCatalogView();
+            m_rf_history_write = 0u;
+            m_rf_history_count = 0u;
+            m_latest_mer_valid = false;
+            m_rf_was_locked = false;
+            m_rf_lock_started_ns = 0u;
+            UpdateRfHistoryVisuals();
         }
         m_active_service_id = settings.service_id;
         SetReceiverControlsEnabled(false);
@@ -374,12 +481,14 @@ namespace winrt::DabMeasurementWinUI::implementation
         switch (status.state)
         {
         case ReceiverState::starting:
+            RfLiveBadgeText().Text(L"STARTING");
             SetReceiverControlsEnabled(false);
             StartButton().IsEnabled(true);
             StartButtonLabel().Text(L"Stop");
             StatusSyncText().Text(L"opening");
             break;
         case ReceiverState::running:
+            RfLiveBadgeText().Text(L"● LIVE");
             SetReceiverControlsEnabled(false);
             StartButton().IsEnabled(true);
             StartButtonLabel().Text(L"Stop");
@@ -389,6 +498,7 @@ namespace winrt::DabMeasurementWinUI::implementation
             }
             break;
         case ReceiverState::stopping:
+            RfLiveBadgeText().Text(L"STOPPING");
             SetReceiverControlsEnabled(false);
             StartButton().IsEnabled(false);
             StartButtonLabel().Text(L"Stopping...");
@@ -396,6 +506,11 @@ namespace winrt::DabMeasurementWinUI::implementation
             break;
         case ReceiverState::stopped:
             m_active_service_id = 0u;
+            RfLiveBadgeText().Text(L"IDLE");
+            RfStatusValueText().Text(L"IDLE");
+            RfStatusDetailText().Text(L"Receiver stopped");
+            m_rf_was_locked = false;
+            m_rf_lock_started_ns = 0u;
             SetReceiverControlsEnabled(true);
             StartButton().IsEnabled(true);
             StartButtonLabel().Text(L"Start");
@@ -403,6 +518,9 @@ namespace winrt::DabMeasurementWinUI::implementation
             break;
         case ReceiverState::failed:
             m_active_service_id = 0u;
+            RfLiveBadgeText().Text(L"ERROR");
+            RfStatusValueText().Text(L"ERROR");
+            RfStatusDetailText().Text(status_text(status.message));
             SetReceiverControlsEnabled(true);
             StartButton().IsEnabled(true);
             StartButtonLabel().Text(L"Start");
@@ -426,6 +544,230 @@ namespace winrt::DabMeasurementWinUI::implementation
         ChannelComboBox().IsEnabled(enabled);
         FrequencyTextBox().IsEnabled(enabled);
         GainNumberBox().IsEnabled(enabled);
+    }
+
+    void MainWindow::ShowWorkspace(bool rf_measurements)
+    {
+        bool const changed = m_rf_workspace_active != rf_measurements;
+        m_rf_workspace_active = rf_measurements;
+        ReceiverWorkspaceMain().Visibility(rf_measurements ? Visibility::Collapsed : Visibility::Visible);
+        ReceiverTimelinePanel().Visibility(rf_measurements ? Visibility::Collapsed : Visibility::Visible);
+        RfWorkspace().Visibility(rf_measurements ? Visibility::Visible : Visibility::Collapsed);
+        ReceiverNavIndicator().Visibility(rf_measurements ? Visibility::Collapsed : Visibility::Visible);
+        RfNavIndicator().Visibility(rf_measurements ? Visibility::Visible : Visibility::Collapsed);
+        ReceiverNavigationButton().Opacity(rf_measurements ? 0.70 : 1.0);
+        RfNavigationButton().Opacity(rf_measurements ? 1.0 : 0.70);
+        RfToolbarButton().Opacity(rf_measurements ? 1.0 : 0.82);
+        ApplyWorkspaceWidth(RootLayout().ActualWidth());
+        if (rf_measurements)
+        {
+            UpdateRfContext();
+        }
+        if (changed)
+        {
+            AddTimelineEvent(rf_measurements
+                ? hstring{ L"Opened RF Measurements workspace" }
+                : hstring{ L"Opened Receiver workspace" });
+        }
+    }
+
+    void MainWindow::UpdateRfContext()
+    {
+        // Channel selection fires while InitializeComponent is still creating
+        // controls that appear later in the XAML document.
+        if (!RfContextText())
+        {
+            return;
+        }
+
+        hstring device{ L"Receiver" };
+        hstring channel{ L"—" };
+        hstring frequency{ L"— MHz" };
+        if (auto const selected_device = DeviceComboBox().SelectedItem().try_as<ComboBoxItem>())
+        {
+            device = unbox_value<hstring>(selected_device.Content());
+        }
+        if (auto const selected_channel = ChannelComboBox().SelectedItem().try_as<ComboBoxItem>())
+        {
+            channel = unbox_value<hstring>(selected_channel.Content());
+        }
+        if (FrequencyTextBox())
+        {
+            frequency = FrequencyTextBox().Text();
+        }
+        RfContextText().Text(device + L" · Serial not reported · Channel " + channel + L" · " + frequency);
+
+        double gain = GainNumberBox().Value();
+        if (!std::isfinite(gain))
+        {
+            gain = 40.0;
+        }
+        wchar_t gain_text[32]{};
+        swprintf_s(gain_text, L"%.0f dB", gain);
+        RfConfigGainText().Text(gain_text);
+        RfConfigAgcText().Text(L"Disabled");
+        RfConfigAntennaText().Text(L"A");
+        RfConfigCalibrationText().Text(L"Not configured");
+    }
+
+    void MainWindow::UpdateCpuUsage()
+    {
+        FILETIME creation{};
+        FILETIME exit{};
+        FILETIME process_kernel{};
+        FILETIME process_user{};
+        FILETIME system_idle{};
+        FILETIME system_kernel{};
+        FILETIME system_user{};
+        if (!GetProcessTimes(GetCurrentProcess(),
+                             &creation,
+                             &exit,
+                             &process_kernel,
+                             &process_user) ||
+            !GetSystemTimes(&system_idle, &system_kernel, &system_user))
+        {
+            return;
+        }
+
+        uint64_t const process_time = file_time_value(process_kernel) + file_time_value(process_user);
+        uint64_t const system_time = file_time_value(system_kernel) + file_time_value(system_user);
+        if (m_last_process_time_100ns != 0u && system_time > m_last_system_time_100ns)
+        {
+            double const usage = std::clamp(
+                100.0 * static_cast<double>(process_time - m_last_process_time_100ns) /
+                static_cast<double>(system_time - m_last_system_time_100ns),
+                0.0,
+                100.0);
+            wchar_t text[24]{};
+            swprintf_s(text, L"CPU %.1f%%", usage);
+            StatusCpuText().Text(text);
+        }
+        m_last_process_time_100ns = process_time;
+        m_last_system_time_100ns = system_time;
+    }
+
+    void MainWindow::ApplyRfSnapshot(dab_receive_snapshot_t const& snapshot)
+    {
+        UpdateRfContext();
+        RfLiveBadgeText().Text(L"● LIVE");
+        StatusCalibrationText().Text(L"Uncalibrated");
+
+        RfPowerValueText().Text(snapshot.adc_level_valid
+            ? format_float(snapshot.adc_level_dbfs, L" dBFS")
+            : hstring{ L"— dBFS" });
+        RfSummaryPowerText().Text(snapshot.adc_level_valid
+            ? format_float(snapshot.adc_level_dbfs, L" dBFS")
+            : hstring{ L"— dBFS" });
+        RfAdcValueText().Text(snapshot.adc_level_valid
+            ? format_float(snapshot.adc_level_dbfs, L" dBFS")
+            : hstring{ L"— dBFS" });
+        RfCnValueText().Text(snapshot.cn_valid
+            ? format_float(snapshot.cn_db, L" dB")
+            : hstring{ L"— dB" });
+        RfCfoValueText().Text(snapshot.cfo_valid
+            ? format_float(snapshot.cfo_hz, L" Hz")
+            : hstring{ L"— Hz" });
+        RfResidualCfoText().Text(snapshot.cfo_valid
+            ? hstring{ L"Residual " } + format_float(snapshot.fine_cfo_hz, L" Hz")
+            : hstring{ L"Residual — Hz" });
+        RfOverrunValueText().Text(to_hstring(snapshot.dropped_blocks));
+        RfConfigSampleRateText().Text(snapshot.sample_rate_hz != 0u
+            ? format_float(static_cast<float>(snapshot.sample_rate_hz) / 1000000.0f, L" MS/s", 3)
+            : hstring{ L"— MS/s" });
+
+        uint64_t const timestamp_ns = snapshot.timestamp_ns != 0u
+            ? snapshot.timestamp_ns
+            : m_tick * 250000000ull;
+        if (snapshot.locked != 0)
+        {
+            if (!m_rf_was_locked || timestamp_ns < m_rf_lock_started_ns)
+            {
+                m_rf_lock_started_ns = timestamp_ns;
+            }
+            m_rf_was_locked = true;
+            uint64_t const stable_seconds = (timestamp_ns - m_rf_lock_started_ns) / 1000000000ull;
+            wchar_t stable_text[48]{};
+            swprintf_s(stable_text,
+                       L"Stable %02llu:%02llu:%02llu",
+                       static_cast<unsigned long long>(stable_seconds / 3600ull),
+                       static_cast<unsigned long long>((stable_seconds / 60ull) % 60ull),
+                       static_cast<unsigned long long>(stable_seconds % 60ull));
+            RfStatusValueText().Text(L"LOCKED");
+            RfStatusDetailText().Text(stable_text);
+            RfLockIndicator().Fill(
+                Application::Current().Resources().Lookup(box_value(hstring{ L"MeasurementAccentBrush" })).as<Brush>());
+        }
+        else
+        {
+            m_rf_was_locked = false;
+            m_rf_lock_started_ns = 0u;
+            RfStatusValueText().Text(L"ACQUIRING");
+            RfStatusDetailText().Text(L"Waiting for stable synchronization");
+            RfLockIndicator().Fill(
+                Application::Current().Resources().Lookup(box_value(hstring{ L"WarningBrush" })).as<Brush>());
+        }
+
+        float const missing = (std::numeric_limits<float>::quiet_NaN)();
+        AppendRfHistory(snapshot.adc_level_valid ? snapshot.adc_level_dbfs : missing,
+                        snapshot.cn_valid ? snapshot.cn_db : missing);
+    }
+
+    void MainWindow::AppendRfHistory(float power_dbfs, float cn_db)
+    {
+        m_rf_power_history[m_rf_history_write] = power_dbfs;
+        m_rf_cn_history[m_rf_history_write] = cn_db;
+        m_rf_mer_history[m_rf_history_write] = m_latest_mer_valid
+            ? m_latest_mer_db
+            : (std::numeric_limits<float>::quiet_NaN)();
+        m_rf_history_write = (m_rf_history_write + 1u) % rf_history_capacity;
+        m_rf_history_count = (std::min)(m_rf_history_count + 1u, rf_history_capacity);
+        UpdateRfHistoryVisuals();
+    }
+
+    void MainWindow::UpdateRfHistoryVisuals()
+    {
+        RfPowerHistoryTrace().Points(history_points(m_rf_power_history,
+                                                    m_rf_history_write,
+                                                    m_rf_history_count,
+                                                    -90.0f,
+                                                    0.0f,
+                                                    520.0f,
+                                                    45.0f));
+        RfCnHistoryTrace().Points(history_points(m_rf_cn_history,
+                                                 m_rf_history_write,
+                                                 m_rf_history_count,
+                                                 0.0f,
+                                                 40.0f,
+                                                 520.0f,
+                                                 45.0f));
+        RfMerHistoryTrace().Points(history_points(m_rf_mer_history,
+                                                  m_rf_history_write,
+                                                  m_rf_history_count,
+                                                  0.0f,
+                                                  40.0f,
+                                                  520.0f,
+                                                  45.0f));
+        RfPowerSparkline().Points(history_points(m_rf_power_history,
+                                                 m_rf_history_write,
+                                                 m_rf_history_count,
+                                                 -90.0f,
+                                                 0.0f,
+                                                 100.0f,
+                                                 24.0f));
+        RfCnSparkline().Points(history_points(m_rf_cn_history,
+                                              m_rf_history_write,
+                                              m_rf_history_count,
+                                              0.0f,
+                                              40.0f,
+                                              100.0f,
+                                              24.0f));
+        RfMerSparkline().Points(history_points(m_rf_mer_history,
+                                               m_rf_history_write,
+                                               m_rf_history_count,
+                                               0.0f,
+                                               40.0f,
+                                               100.0f,
+                                               24.0f));
     }
 
     void MainWindow::ApplySnapshot(dab_receive_snapshot_t const& snapshot)
@@ -482,6 +824,7 @@ namespace winrt::DabMeasurementWinUI::implementation
             BerValueText().Text(L"N/A");
         }
         SampleCounterText().Text(L"frame " + to_hstring(snapshot.sequence));
+        ApplyRfSnapshot(snapshot);
     }
 
     void MainWindow::ApplyCatalog(dab_receive_catalog_t const& catalog)
@@ -867,6 +1210,9 @@ namespace winrt::DabMeasurementWinUI::implementation
             float const average_mer = static_cast<float>(mer_sum /
                 static_cast<double>(frame.carrier_mer_count));
             MerValueText().Text(format_float(average_mer, L" dB"));
+            m_latest_mer_db = average_mer;
+            m_latest_mer_valid = true;
+            RfMerValueText().Text(format_float(average_mer, L" dB"));
 
             wchar_t mer_status[112]{};
             swprintf_s(mer_status,

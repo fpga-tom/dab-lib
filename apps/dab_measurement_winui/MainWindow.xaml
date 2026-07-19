@@ -10,7 +10,10 @@
     Closed="Window_Closed"
     Title="DAB+ Measurement Workbench">
 
-    <Grid Background="{StaticResource WorkspaceBrush}" RequestedTheme="Dark">
+    <Grid x:Name="RootLayout"
+          Background="{StaticResource WorkspaceBrush}"
+          RequestedTheme="Dark"
+          SizeChanged="RootLayout_SizeChanged">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -35,6 +38,9 @@
                 <MenuFlyoutItem Text="Alarm thresholds..." />
             </MenuBarItem>
             <MenuBarItem Title="View">
+                <MenuFlyoutItem Text="Receiver workspace" Click="ReceiverWorkspace_Click" />
+                <MenuFlyoutItem Text="RF Measurements" Click="RfMeasurements_Click" />
+                <MenuFlyoutSeparator />
                 <MenuFlyoutItem Text="Spectrum and waterfall" />
                 <MenuFlyoutItem Text="Constellation" />
                 <MenuFlyoutItem Text="Timeline" />
@@ -54,15 +60,16 @@
                 BorderBrush="{StaticResource PanelStrokeBrush}"
                 BorderThickness="0,1,0,1">
             <ScrollViewer HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled">
-                <Grid MinWidth="1150" ColumnSpacing="10">
+                <Grid MinWidth="890" ColumnSpacing="10">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="190" />
-                        <ColumnDefinition Width="115" />
-                        <ColumnDefinition Width="165" />
-                        <ColumnDefinition Width="125" />
-                        <ColumnDefinition Width="110" />
-                        <ColumnDefinition Width="110" />
-                        <ColumnDefinition Width="110" />
+                        <ColumnDefinition Width="145" />
+                        <ColumnDefinition Width="75" />
+                        <ColumnDefinition Width="120" />
+                        <ColumnDefinition Width="75" />
+                        <ColumnDefinition Width="85" />
+                        <ColumnDefinition Width="85" />
+                        <ColumnDefinition Width="58" />
+                        <ColumnDefinition Width="68" />
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
 
@@ -142,17 +149,27 @@
                         </StackPanel>
                     </Button>
                     <Button Grid.Column="6"
+                            x:Name="RfToolbarButton"
                             Height="34"
                             VerticalAlignment="Bottom"
                             HorizontalAlignment="Stretch"
-                            Click="MarkerButton_Click">
+                            Click="RfMeasurements_Click">
                         <StackPanel Orientation="Horizontal" Spacing="8">
-                            <FontIcon Glyph="&#xE734;" FontSize="14" />
-                            <TextBlock Text="Marker" />
+                            <TextBlock Text="RF" />
                         </StackPanel>
                     </Button>
 
-                    <StackPanel Grid.Column="7" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <Button Grid.Column="7"
+                            Height="34"
+                            VerticalAlignment="Bottom"
+                            HorizontalAlignment="Stretch"
+                            Click="AudioButton_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="Audio" />
+                        </StackPanel>
+                    </Button>
+
+                    <StackPanel Grid.Column="8" HorizontalAlignment="Right" VerticalAlignment="Center">
                         <Border Padding="10,4" CornerRadius="12" Background="#2935D0BA">
                             <TextBlock x:Name="DataModeText" Text="LIVE METRICS" Foreground="{StaticResource MeasurementAccentBrush}" FontSize="11" FontWeight="SemiBold" />
                         </Border>
@@ -162,11 +179,52 @@
             </ScrollViewer>
         </Border>
 
-        <Grid Grid.Row="2" Margin="10" ColumnSpacing="10">
+        <Border Grid.Row="2"
+                Grid.RowSpan="2"
+                Width="120"
+                Margin="10"
+                HorizontalAlignment="Left"
+                Style="{StaticResource PanelCardStyle}"
+                Padding="10">
+            <StackPanel Spacing="8">
+                <TextBlock Text="WORKSPACES" Style="{StaticResource SectionTitleStyle}" Margin="6,4,0,6" />
+                <Button x:Name="ReceiverNavigationButton"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Stretch"
+                        Click="ReceiverWorkspace_Click">
+                    <Grid ColumnSpacing="9">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Ellipse x:Name="ReceiverNavIndicator" Width="8" Height="8" Fill="{StaticResource MeasurementAccentBrush}" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="1" Text="Receiver" />
+                    </Grid>
+                </Button>
+                <Button x:Name="RfNavigationButton"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Stretch"
+                        Click="RfMeasurements_Click">
+                    <Grid ColumnSpacing="9">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Ellipse x:Name="RfNavIndicator" Width="8" Height="8" Fill="{StaticResource MeasurementAccentBrush}" Visibility="Collapsed" VerticalAlignment="Center" />
+                        <StackPanel Grid.Column="1" Spacing="0">
+                            <TextBlock Text="RF" />
+                            <TextBlock Text="Measurements" FontSize="10" />
+                        </StackPanel>
+                    </Grid>
+                </Button>
+            </StackPanel>
+        </Border>
+
+        <Grid x:Name="ReceiverWorkspaceMain" Grid.Row="2" Margin="140,10,10,10" ColumnSpacing="10" HorizontalAlignment="Left">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="230" MinWidth="190" />
-                <ColumnDefinition Width="*" MinWidth="560" />
-                <ColumnDefinition Width="250" MinWidth="220" />
+                <ColumnDefinition Width="175" MinWidth="150" />
+                <ColumnDefinition Width="*" MinWidth="350" />
+                <ColumnDefinition Width="175" MinWidth="160" />
             </Grid.ColumnDefinitions>
 
             <Border Grid.Column="0" Style="{StaticResource PanelCardStyle}" Padding="14">
@@ -330,6 +388,12 @@
                         </Grid>
 
                         <Border Padding="10,6" CornerRadius="6" Background="{StaticResource PanelRaisedBrush}">
+                            <StackPanel>
+                                <TextBlock Text="RF INPUT" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                <TextBlock x:Name="RfSummaryPowerText" Text="— dBFS" Style="{StaticResource KpiValueStyle}" />
+                            </StackPanel>
+                        </Border>
+                        <Border Padding="10,6" CornerRadius="6" Background="{StaticResource PanelRaisedBrush}">
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
@@ -400,12 +464,18 @@
                             <TextBlock Grid.Row="4" Grid.Column="1" x:Name="DropValueText" Text="0" FontFamily="Consolas" />
                         </Grid>
                         <ProgressBar x:Name="FicProgress" Minimum="0" Maximum="1" Value="0" Height="4" Foreground="{StaticResource MeasurementAccentBrush}" />
+                        <Button x:Name="OpenRfButton"
+                                Margin="0,4,0,0"
+                                HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Center"
+                                Click="RfMeasurements_Click"
+                                Content="Open RF Measurements  →" />
                     </StackPanel>
                 </ScrollViewer>
             </Border>
         </Grid>
 
-        <Border Grid.Row="3" Margin="10,0,10,10" Style="{StaticResource PanelCardStyle}">
+        <Border x:Name="ReceiverTimelinePanel" Grid.Row="3" Margin="140,0,10,10" Style="{StaticResource PanelCardStyle}" HorizontalAlignment="Left">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="40" />
@@ -428,9 +498,275 @@
             </Grid>
         </Border>
 
+        <Grid x:Name="RfWorkspace"
+              Grid.Row="2"
+              Grid.RowSpan="2"
+              Margin="140,10,10,10"
+              HorizontalAlignment="Left"
+              SizeChanged="RfWorkspace_SizeChanged"
+              Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <Border Grid.Row="0" Style="{StaticResource PanelCardStyle}" Padding="18,13" Margin="0,0,0,10">
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Spacing="3" MaxWidth="420">
+                        <TextBlock Text="RF Measurements" FontSize="24" FontWeight="SemiBold" />
+                        <TextBlock x:Name="RfContextText"
+                                   Text="SDRplay RSP1A · Serial not reported · Channel 10C · 213.360 MHz"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <Border Padding="10,4" CornerRadius="12" Background="#2935D0BA">
+                            <TextBlock x:Name="RfLiveBadgeText" Text="IDLE" Foreground="{StaticResource MeasurementAccentBrush}" FontSize="11" FontWeight="SemiBold" />
+                        </Border>
+                        <Border Padding="10,4" CornerRadius="12" Background="#29FFC857">
+                            <TextBlock x:Name="RfCalibrationBadgeText" Text="UNCALIBRATED" Foreground="{StaticResource WarningBrush}" FontSize="11" FontWeight="SemiBold" />
+                        </Border>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <TabView Grid.Row="1" IsAddTabButtonVisible="False" TabWidthMode="SizeToContent">
+                <TabViewItem Header="Overview" IsClosable="False">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollMode="Disabled"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  Padding="12">
+                        <StackPanel x:Name="RfOverviewContent" Spacing="12">
+                            <Grid ColumnSpacing="10" RowSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="132" />
+                                    <RowDefinition Height="116" />
+                                </Grid.RowDefinitions>
+
+                                <Border Grid.Row="0" Grid.Column="0" Style="{StaticResource RfMetricCardStyle}">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="*" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <TextBlock Text="RECEIVED POWER" Style="{StaticResource RfMetricLabelStyle}" />
+                                        <TextBlock Grid.Row="1" x:Name="RfPowerValueText" Text="— dBFS" Style="{StaticResource RfMetricValueStyle}" />
+                                        <Viewbox Grid.Row="2" Stretch="Fill" Margin="0,3">
+                                            <Canvas Width="100" Height="24">
+                                                <Line X1="0" Y1="20" X2="100" Y2="20" Stroke="#253D556E" />
+                                                <Polyline x:Name="RfPowerSparkline" Stroke="{StaticResource SpectrumBrush}" StrokeThickness="1.5" Points="0,20 100,20" />
+                                            </Canvas>
+                                        </Viewbox>
+                                        <TextBlock Grid.Row="3" x:Name="RfPowerDetailText" Text="ADC-referenced · calibration required" Foreground="{StaticResource MutedTextBrush}" FontSize="11" TextWrapping="Wrap" />
+                                    </Grid>
+                                </Border>
+
+                                <Border Grid.Row="0" Grid.Column="1" Style="{StaticResource RfMetricCardStyle}">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="*" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <TextBlock Text="C/N" Style="{StaticResource RfMetricLabelStyle}" />
+                                        <TextBlock Grid.Row="1" x:Name="RfCnValueText" Text="— dB" Style="{StaticResource RfMetricValueStyle}" />
+                                        <Viewbox Grid.Row="2" Stretch="Fill" Margin="0,3">
+                                            <Canvas Width="100" Height="24">
+                                                <Line X1="0" Y1="20" X2="100" Y2="20" Stroke="#253D556E" />
+                                                <Polyline x:Name="RfCnSparkline" Stroke="{StaticResource MeasurementAccentBrush}" StrokeThickness="1.5" Points="0,20 100,20" />
+                                            </Canvas>
+                                        </Viewbox>
+                                        <TextBlock Grid.Row="3" Text="Null-symbol estimate" Foreground="{StaticResource MutedTextBrush}" FontSize="11" TextWrapping="Wrap" />
+                                    </Grid>
+                                </Border>
+
+                                <Border Grid.Row="0" Grid.Column="2" Style="{StaticResource RfMetricCardStyle}">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="*" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <TextBlock Text="MER" Style="{StaticResource RfMetricLabelStyle}" />
+                                        <TextBlock Grid.Row="1" x:Name="RfMerValueText" Text="— dB" Style="{StaticResource RfMetricValueStyle}" />
+                                        <Viewbox Grid.Row="2" Stretch="Fill" Margin="0,3">
+                                            <Canvas Width="100" Height="24">
+                                                <Line X1="0" Y1="20" X2="100" Y2="20" Stroke="#253D556E" />
+                                                <Polyline x:Name="RfMerSparkline" Stroke="{StaticResource WarningBrush}" StrokeThickness="1.5" Points="0,20 100,20" />
+                                            </Canvas>
+                                        </Viewbox>
+                                        <TextBlock Grid.Row="3" Text="Average over active carriers" Foreground="{StaticResource MutedTextBrush}" FontSize="11" TextWrapping="Wrap" />
+                                    </Grid>
+                                </Border>
+
+                                <Border Grid.Row="0" Grid.Column="3" Style="{StaticResource RfMetricCardStyle}">
+                                    <StackPanel Spacing="7">
+                                        <TextBlock Text="STATUS" Style="{StaticResource RfMetricLabelStyle}" />
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <Ellipse x:Name="RfLockIndicator" Width="10" Height="10" Fill="{StaticResource MutedTextBrush}" VerticalAlignment="Center" />
+                                            <TextBlock x:Name="RfStatusValueText" Text="IDLE" FontFamily="Consolas" FontSize="24" FontWeight="SemiBold" />
+                                        </StackPanel>
+                                        <TextBlock x:Name="RfStatusDetailText" Text="Receiver stopped" Foreground="{StaticResource MutedTextBrush}" FontSize="11" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Grid.Row="1" Grid.Column="0" Style="{StaticResource RfMetricCardStyle}">
+                                    <StackPanel Spacing="6">
+                                        <TextBlock Text="CFO" Style="{StaticResource RfMetricLabelStyle}" />
+                                        <TextBlock x:Name="RfCfoValueText" Text="— Hz" Style="{StaticResource RfMetricValueStyle}" />
+                                        <TextBlock x:Name="RfResidualCfoText" Text="Residual — Hz" Foreground="{StaticResource MutedTextBrush}" FontSize="11" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Grid.Row="1" Grid.Column="1" Style="{StaticResource RfMetricCardStyle}">
+                                    <StackPanel Spacing="6">
+                                        <TextBlock Text="SAMPLE CLOCK" Style="{StaticResource RfMetricLabelStyle}" />
+                                        <TextBlock x:Name="RfSampleClockValueText" Text="— ppm" Style="{StaticResource RfMetricValueStyle}" />
+                                        <TextBlock x:Name="RfSampleClockDetailText" Text="Estimator not available" Foreground="{StaticResource MutedTextBrush}" FontSize="11" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Grid.Row="1" Grid.Column="2" Style="{StaticResource RfMetricCardStyle}">
+                                    <StackPanel Spacing="6">
+                                        <TextBlock Text="ADC LEVEL" Style="{StaticResource RfMetricLabelStyle}" />
+                                        <TextBlock x:Name="RfAdcValueText" Text="— dBFS" Style="{StaticResource RfMetricValueStyle}" />
+                                        <TextBlock x:Name="RfClippingText" Text="Clipping measurement unavailable" Foreground="{StaticResource MutedTextBrush}" FontSize="11" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Grid.Row="1" Grid.Column="3" Style="{StaticResource RfMetricCardStyle}">
+                                    <StackPanel Spacing="6">
+                                        <TextBlock Text="OVERRUNS" Style="{StaticResource RfMetricLabelStyle}" />
+                                        <TextBlock x:Name="RfOverrunValueText" Text="0" Style="{StaticResource RfMetricValueStyle}" />
+                                        <TextBlock Text="Since receiver start" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="3*" />
+                                    <ColumnDefinition Width="2*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0" Style="{StaticResource PanelCardStyle}" Padding="16">
+                                    <Grid RowSpacing="7">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="*" />
+                                            <RowDefinition Height="*" />
+                                            <RowDefinition Height="*" />
+                                        </Grid.RowDefinitions>
+                                        <TextBlock Text="RF quality — last 60 seconds" FontSize="15" FontWeight="SemiBold" />
+                                        <Grid Grid.Row="1" ColumnSpacing="10">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="54" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                            <TextBlock Text="Power" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" />
+                                            <Viewbox Grid.Column="1" Height="45" Stretch="Fill">
+                                                <Canvas Width="520" Height="45" Background="#FF07101B">
+                                                    <Line X1="0" Y1="38" X2="520" Y2="38" Stroke="#253D556E" />
+                                                    <Polyline x:Name="RfPowerHistoryTrace" Stroke="{StaticResource SpectrumBrush}" StrokeThickness="2" Points="0,38 520,38" />
+                                                </Canvas>
+                                            </Viewbox>
+                                        </Grid>
+                                        <Grid Grid.Row="2" ColumnSpacing="10">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="54" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                            <TextBlock Text="MER" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" />
+                                            <Viewbox Grid.Column="1" Height="45" Stretch="Fill">
+                                                <Canvas Width="520" Height="45" Background="#FF07101B">
+                                                    <Line X1="0" Y1="38" X2="520" Y2="38" Stroke="#253D556E" />
+                                                    <Polyline x:Name="RfMerHistoryTrace" Stroke="{StaticResource WarningBrush}" StrokeThickness="2" Points="0,38 520,38" />
+                                                </Canvas>
+                                            </Viewbox>
+                                        </Grid>
+                                        <Grid Grid.Row="3" ColumnSpacing="10">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="54" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                            <TextBlock Text="C/N" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" />
+                                            <Viewbox Grid.Column="1" Height="45" Stretch="Fill">
+                                                <Canvas Width="520" Height="45" Background="#FF07101B">
+                                                    <Line X1="0" Y1="38" X2="520" Y2="38" Stroke="#253D556E" />
+                                                    <Polyline x:Name="RfCnHistoryTrace" Stroke="{StaticResource MeasurementAccentBrush}" StrokeThickness="2" Points="0,38 520,38" />
+                                                </Canvas>
+                                            </Viewbox>
+                                        </Grid>
+                                    </Grid>
+                                </Border>
+
+                                <Border Grid.Column="1" Style="{StaticResource PanelCardStyle}" Padding="16">
+                                    <Grid RowSpacing="9" ColumnSpacing="14">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.ColumnSpan="2" Text="Current receiver configuration" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,3" />
+                                        <TextBlock Grid.Row="1" Text="Device gain" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="1" Grid.Column="1" x:Name="RfConfigGainText" Text="40 dB" FontFamily="Consolas" />
+                                        <TextBlock Grid.Row="2" Text="AGC" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="2" Grid.Column="1" x:Name="RfConfigAgcText" Text="Disabled" FontFamily="Consolas" />
+                                        <TextBlock Grid.Row="3" Text="Sample rate" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="3" Grid.Column="1" x:Name="RfConfigSampleRateText" Text="2.048 MS/s" FontFamily="Consolas" />
+                                        <TextBlock Grid.Row="4" Text="Antenna port" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="4" Grid.Column="1" x:Name="RfConfigAntennaText" Text="A" FontFamily="Consolas" />
+                                        <TextBlock Grid.Row="5" Text="Calibration" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="5" Grid.Column="1" x:Name="RfConfigCalibrationText" Text="Not configured" Foreground="{StaticResource WarningBrush}" FontFamily="Consolas" />
+                                    </Grid>
+                                </Border>
+                            </Grid>
+
+                            <Border Style="{StaticResource PanelCardStyle}" Padding="16,12">
+                                <StackPanel Spacing="5">
+                                    <TextBlock Text="Active warnings" FontSize="15" FontWeight="SemiBold" />
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <FontIcon Glyph="&#xE7BA;" Foreground="{StaticResource WarningBrush}" FontSize="13" />
+                                        <TextBlock x:Name="RfWarningsText"
+                                                   Text="Input power is ADC-referenced (dBFS) until an RF calibration profile is configured."
+                                                   Foreground="{StaticResource WarningBrush}"
+                                                   TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabViewItem>
+                <TabViewItem Header="Spectrum" IsClosable="False">
+                    <TextBlock Text="Spectrum workspace integration is the next RF page." HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" />
+                </TabViewItem>
+                <TabViewItem Header="RF Input" IsClosable="False">
+                    <TextBlock Text="RF input controls and calibration will be added here." HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" />
+                </TabViewItem>
+                <TabViewItem Header="Frequency &amp; Sync" IsClosable="False">
+                    <TextBlock Text="Frequency and synchronization diagnostics will be added here." HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" />
+                </TabViewItem>
+                <TabViewItem Header="Channel/CIR" IsClosable="False">
+                    <TextBlock Text="Channel impulse response analysis will be added here." HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" />
+                </TabViewItem>
+                <TabViewItem Header="History" IsClosable="False">
+                    <TextBlock Text="Long-term RF history and export will be added here." HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" />
+                </TabViewItem>
+            </TabView>
+        </Grid>
+
         <Border Grid.Row="4" Background="#FF0B1522" BorderBrush="{StaticResource PanelStrokeBrush}" BorderThickness="0,1,0,0" Padding="12,0">
             <Grid ColumnSpacing="16">
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
@@ -446,8 +782,9 @@
                     <TextBlock x:Name="StatusSyncText" Text="idle" />
                 </StackPanel>
                 <TextBlock Grid.Column="3" x:Name="StatusRecordText" Text="not recording" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" />
-                <TextBlock Grid.Column="4" x:Name="StatusOverrunText" Text="no overruns" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" />
-                <TextBlock Grid.Column="6" Text="DAB+ Measurement Workbench · WinUI proof of concept" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                <TextBlock Grid.Column="4" x:Name="StatusCalibrationText" Text="Uncalibrated" VerticalAlignment="Center" Foreground="{StaticResource WarningBrush}" />
+                <TextBlock Grid.Column="5" x:Name="StatusOverrunText" Text="no overruns" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" />
+                <TextBlock Grid.Column="7" x:Name="StatusCpuText" Text="CPU —" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" FontFamily="Consolas" />
             </Grid>
         </Border>
     </Grid>

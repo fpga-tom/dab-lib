@@ -17,6 +17,11 @@ namespace winrt::DabMeasurementWinUI::implementation
         void ChannelComboBox_SelectionChanged(IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
         void ServicesListView_SelectionChanged(IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
         void ServicesListView_ItemClick(IInspectable const&, Microsoft::UI::Xaml::Controls::ItemClickEventArgs const&);
+        void ReceiverWorkspace_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void RfMeasurements_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void RootLayout_SizeChanged(IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
+        void RfWorkspace_SizeChanged(IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
+        void AudioButton_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void RecordButton_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void MarkerButton_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void Window_Closed(IInspectable const&, Microsoft::UI::Xaml::WindowEventArgs const&);
@@ -27,6 +32,13 @@ namespace winrt::DabMeasurementWinUI::implementation
         void HandleReceiverStatus(dab::measurement::ReceiverStatus const& status);
         void SetReceiverControlsEnabled(bool enabled);
         void ApplySnapshot(dab_receive_snapshot_t const& snapshot);
+        void ApplyRfSnapshot(dab_receive_snapshot_t const& snapshot);
+        void AppendRfHistory(float power_dbfs, float cn_db);
+        void UpdateRfHistoryVisuals();
+        void UpdateRfContext();
+        void ShowWorkspace(bool rf_measurements);
+        void ApplyWorkspaceWidth(double root_width);
+        void UpdateCpuUsage();
         void ApplyCatalog(dab_receive_catalog_t const& catalog);
         void ApplySelectedServiceComponents();
         void SelectAudioService(uint32_t service_id);
@@ -57,6 +69,19 @@ namespace winrt::DabMeasurementWinUI::implementation
         uint32_t m_selected_service_id{ 0u };
         uint32_t m_active_service_id{ 0u };
         std::optional<dab::measurement::ReceiverSettings> m_pending_receiver_restart;
+        static constexpr size_t rf_history_capacity = 240u;
+        std::array<float, rf_history_capacity> m_rf_power_history{};
+        std::array<float, rf_history_capacity> m_rf_cn_history{};
+        std::array<float, rf_history_capacity> m_rf_mer_history{};
+        size_t m_rf_history_write{ 0u };
+        size_t m_rf_history_count{ 0u };
+        float m_latest_mer_db{ 0.0f };
+        bool m_latest_mer_valid{ false };
+        bool m_rf_workspace_active{ false };
+        bool m_rf_was_locked{ false };
+        uint64_t m_rf_lock_started_ns{ 0u };
+        uint64_t m_last_process_time_100ns{ 0u };
+        uint64_t m_last_system_time_100ns{ 0u };
     };
 }
 
