@@ -226,7 +226,13 @@ Parses one valid 30-byte FIB payload into a `dab_fic_repo_t`, covering the curre
 Initializes MSC state.
 
 ### `dab_msc_reset`
-Clears MSC frame counters and stored sample values.
+Clears MSC frame counters, decoder runtimes, and stored sample values while preserving the configured service filter.
+
+### `dab_msc_set_service_filter`
+Restricts subsequent MSC convolutional deinterleaving and FEC decoding to the stream-audio subchannel mapped to one service ID. FIC-derived ensemble metadata and component bindings remain available for all services.
+
+### `dab_msc_clear_service_filter`
+Restores the default behavior of decoding every valid MSC subchannel.
 
 ### `dab_msc_build_layout`
 Normalizes parsed FIG0/1 and FIG0/2 data into MSC subchannel and service-component mappings, including derived CU size and bitrate for UEP/EEP profiles.
@@ -265,6 +271,18 @@ Consumes the MSC softbits for one frame and records simple frame-level state. Th
 Consumes one MSC frame, builds the current subchannel/service layout from parsed FIC data, decodes routed subchannels, records decoded component bindings, and feeds stream-audio components into the DAB+ superframe assembler.
 
 ## Threading And Buffer Utilities
+
+### `dab_sample_history_init`
+Allocates a mirrored circular IQ history. The mirrored storage allows wrapped samples to be exposed as one contiguous `dab_sdr_block_view_t` without shifting retained data.
+
+### `dab_sample_history_append`
+Appends one contiguous IQ block, retains the newest samples up to capacity, and automatically resets history when sample indices are discontinuous.
+
+### `dab_sample_history_view`
+Returns a contiguous chronological view over the retained IQ samples, including when the circular write position has wrapped.
+
+### `dab_sample_history_contains_range`
+Reports whether an absolute half-open sample range is currently retained.
 
 ### `dab_pc_queue_init`
 Initializes a bounded producer-consumer queue over caller-provided storage.

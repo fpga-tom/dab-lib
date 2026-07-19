@@ -43,3 +43,33 @@ void test_simd_convert_and_dot(void) {
     TEST_ASSERT(abs2[2] == 61.0f);
     TEST_ASSERT(ops->dot_f32(a, b, 3u) == 32.0f);
 }
+
+void test_simd_complex_convert_vector_and_tail(void) {
+    enum { COUNT = 25 };
+    const dab_simd_ops_t *ops = dab_simd_get_ops();
+    int16_t storage[(2u * COUNT) + 1u];
+    int16_t *iq = storage + 1u;
+    float i_storage[COUNT + 2u];
+    float q_storage[COUNT + 2u];
+    float *i_out = i_storage + 1u;
+    float *q_out = q_storage + 1u;
+    uint32_t index;
+
+    i_storage[0] = i_storage[COUNT + 1u] = 123456.0f;
+    q_storage[0] = q_storage[COUNT + 1u] = -123456.0f;
+    for (index = 0u; index < COUNT; ++index) {
+        iq[2u * index] = (int16_t)((index * 5003u) - 32768u);
+        iq[(2u * index) + 1u] = (int16_t)(32767 - (int32_t)(index * 4099u));
+    }
+
+    ops->complex_i16_to_f32(i_out, q_out, iq, COUNT);
+
+    for (index = 0u; index < COUNT; ++index) {
+        TEST_ASSERT(i_out[index] == (float)iq[2u * index]);
+        TEST_ASSERT(q_out[index] == (float)iq[(2u * index) + 1u]);
+    }
+    TEST_ASSERT(i_storage[0] == 123456.0f);
+    TEST_ASSERT(i_storage[COUNT + 1u] == 123456.0f);
+    TEST_ASSERT(q_storage[0] == -123456.0f);
+    TEST_ASSERT(q_storage[COUNT + 1u] == -123456.0f);
+}

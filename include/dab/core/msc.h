@@ -15,6 +15,9 @@ enum {
     DAB_MSC_MAX_PUNCTURE_SEGMENTS = 5u,
     DAB_MSC_CONV_DEINTERLEAVER_DEPTH = 16u,
     DAB_MSC_MAX_CONV_BITS = (4u * 192u * 16u) + 32u,
+    DAB_MSC_CONV_DEINTERLEAVER_GROUPS =
+        (DAB_MSC_MAX_CONV_BITS + DAB_MSC_CONV_DEINTERLEAVER_DEPTH - 1u) /
+        DAB_MSC_CONV_DEINTERLEAVER_DEPTH,
     DAB_MSC_MAX_LOGICAL_FRAME_BYTES_PER_CIF = 1152u,
     DAB_MSC_DABPLUS_COLUMNS_PER_SUPERFRAME = 120u,
     DAB_MSC_DABPLUS_COLUMNS_PER_RS_PAYLOAD = 110u,
@@ -81,10 +84,14 @@ typedef struct {
 
 typedef struct {
     uint32_t conv_len;
-    int8_t regs[DAB_MSC_MAX_CONV_BITS * DAB_MSC_CONV_DEINTERLEAVER_DEPTH];
+    uint8_t write_index;
+    int8_t regs[DAB_MSC_CONV_DEINTERLEAVER_GROUPS *
+                DAB_MSC_CONV_DEINTERLEAVER_DEPTH *
+                DAB_MSC_CONV_DEINTERLEAVER_DEPTH];
 } dab_msc_deinterleaver_t;
 
 typedef struct dab_msc_dabplus_stream_runtime dab_msc_dabplus_stream_runtime_t;
+typedef struct dab_msc_decoder_workspace dab_msc_decoder_workspace_t;
 
 typedef struct {
     uint8_t valid;
@@ -93,6 +100,7 @@ typedef struct {
     uint32_t reset_count;
     uint8_t last_reconfig_reason;
     dab_msc_deinterleaver_t *deinterleaver;
+    dab_msc_decoder_workspace_t *workspace;
     dab_msc_dabplus_stream_runtime_t *dabplus;
 } dab_msc_subchannel_runtime_t;
 
@@ -250,10 +258,14 @@ typedef struct {
     dab_msc_decoded_subchannel_t decoded_subchannels[DAB_FIC_MAX_SUBCHANNELS];
     dab_msc_decoded_component_t decoded_components[DAB_MSC_MAX_COMPONENT_MAPPINGS];
     uint16_t decoded_component_count;
+    uint8_t service_filter_enabled;
+    uint32_t service_filter_sid;
 } dab_msc_state_t;
 
 int dab_msc_init(dab_msc_state_t *state);
 void dab_msc_reset(dab_msc_state_t *state);
+void dab_msc_set_service_filter(dab_msc_state_t *state, uint32_t sid);
+void dab_msc_clear_service_filter(dab_msc_state_t *state);
 int dab_msc_build_layout(dab_msc_layout_t *layout, const dab_fic_database_t *db);
 int dab_msc_build_frame_view(dab_msc_frame_view_t *frame_view,
                              const dab_msc_layout_t *layout,
@@ -261,6 +273,10 @@ int dab_msc_build_frame_view(dab_msc_frame_view_t *frame_view,
 int dab_msc_prepare_decoder_config(dab_msc_decoder_config_t *config, const dab_msc_subchannel_t *subchannel);
 int dab_msc_sync_runtimes(dab_msc_subchannel_runtime_t *runtimes, const dab_msc_layout_t *layout);
 void dab_msc_deinterleaver_reset(dab_msc_deinterleaver_t *state);
+int dab_msc_deinterleaver_get_history(const dab_msc_deinterleaver_t *state,
+                                      uint32_t bit_index,
+                                      uint32_t age,
+                                      int8_t *value);
 int dab_msc_convolutional_deinterleave(dab_msc_deinterleaver_t *state,
                                        const int8_t *input,
                                        uint32_t input_count,

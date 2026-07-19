@@ -44,6 +44,16 @@ struct dab_msc_dabplus_stream_runtime {
     uint8_t *superframe;
 };
 
+struct dab_msc_decoder_workspace {
+    int8_t *deinterleaved;
+    int16_t *unpunctured;
+    unsigned char *metrics;
+    void *viterbi;
+    uint32_t conv_len;
+    uint32_t unpunctured_count;
+    uint32_t framebits;
+};
+
 static const dab_msc_uep_entry_t DAB_MSC_UEP_TABLE[64] = {
     {16u, 32u, 5u, 1u, {3u, 4u, 17u, 0u}, {5, 3, 2, -1}, 0u, 768u},
     {21u, 32u, 4u, 1u, {3u, 3u, 18u, 0u}, {11, 6, 5, -1}, 0u, 768u},
@@ -876,6 +886,49 @@ static int dab_msc_fill_subchannel_frame(const dab_msc_subchannel_t *subchannel,
     return 0;
 }
 
+static void dab_msc_free_decoder_workspace(dab_msc_decoder_workspace_t *workspace) {
+    if (workspace == 0) {
+        return;
+    }
+
+    delete_viterbi47_port(workspace->viterbi);
+    free(workspace->metrics);
+    free(workspace->unpunctured);
+    free(workspace->deinterleaved);
+    free(workspace);
+}
+
+static dab_msc_decoder_workspace_t *dab_msc_create_decoder_workspace(
+    const dab_msc_decoder_config_t *config) {
+    dab_msc_decoder_workspace_t *workspace;
+    uint32_t symbol_count;
+
+    if (config == 0 || config->valid == 0u || config->conv_len == 0u || config->framebits == 0u) {
+        return 0;
+    }
+
+    symbol_count = (config->framebits + 6u) * 4u;
+    workspace = (dab_msc_decoder_workspace_t *)calloc(1u, sizeof(*workspace));
+    if (workspace == 0) {
+        return 0;
+    }
+
+    workspace->deinterleaved = (int8_t *)malloc(config->conv_len);
+    workspace->unpunctured = (int16_t *)malloc(sizeof(*workspace->unpunctured) * symbol_count);
+    workspace->metrics = (unsigned char *)malloc(symbol_count);
+    workspace->viterbi = create_viterbi47_port((int)config->framebits);
+    if (workspace->deinterleaved == 0 || workspace->unpunctured == 0 ||
+        workspace->metrics == 0 || workspace->viterbi == 0) {
+        dab_msc_free_decoder_workspace(workspace);
+        return 0;
+    }
+
+    workspace->conv_len = config->conv_len;
+    workspace->unpunctured_count = symbol_count;
+    workspace->framebits = config->framebits;
+    return workspace;
+}
+
 static void dab_msc_free_runtimes(dab_msc_subchannel_runtime_t *runtimes) {
     uint32_t i;
 
@@ -884,8 +937,10 @@ static void dab_msc_free_runtimes(dab_msc_subchannel_runtime_t *runtimes) {
     }
     for (i = 0u; i < DAB_FIC_MAX_SUBCHANNELS; ++i) {
         free(runtimes[i].deinterleaver);
+        dab_msc_free_decoder_workspace(runtimes[i].workspace);
         dab_msc_free_dabplus_stream(runtimes[i].dabplus);
         runtimes[i].deinterleaver = 0;
+        runtimes[i].workspace = 0;
         runtimes[i].dabplus = 0;
     }
 }
@@ -939,22 +994,18 @@ static int dab_msc_depuncture_cif(const int8_t *punctured,
     return in_pos + config->padding_bits == punctured_count ? 0 : -1;
 }
 
-static int dab_msc_viterbi_decode(const int16_t *symbols,
-                                  uint32_t framebits,
-                                  uint8_t *bytes_out,
-                                  uint32_t output_count) {
+static int dab_msc_viterbi_decode_preallocated(const int16_t *symbols,
+                                               uint32_t framebits,
+                                               uint8_t *bytes_out,
+                                               uint32_t output_count,
+                                               unsigned char *metrics,
+                                               void *vp) {
     const uint32_t trellis_bits = framebits + 6u;
     const uint32_t symbol_count = trellis_bits * 4u;
-    unsigned char *metrics;
-    void *vp;
     uint32_t i;
 
-    if (symbols == 0 || bytes_out == 0 || output_count < (framebits / 8u)) {
-        return -1;
-    }
-
-    metrics = (unsigned char *)malloc(symbol_count);
-    if (metrics == 0) {
+    if (symbols == 0 || bytes_out == 0 || metrics == 0 || vp == 0 ||
+        output_count < (framebits / 8u)) {
         return -1;
     }
 
@@ -968,28 +1019,51 @@ static int dab_msc_viterbi_decode(const int16_t *symbols,
         metrics[i] = (unsigned char)value;
     }
 
-    vp = create_viterbi47_port((int)framebits);
-    if (vp == 0) {
-        free(metrics);
-        return -1;
-    }
     if (init_viterbi47_port(vp, 0) != 0 ||
         update_viterbi47_blk_port(vp, metrics, (int)trellis_bits) != 0) {
-        delete_viterbi47_port(vp);
-        free(metrics);
         return -1;
     }
 
     memset(bytes_out, 0, output_count);
     if (chainback_viterbi47_port(vp, bytes_out, framebits, 0) != 0) {
-        delete_viterbi47_port(vp);
+        return -1;
+    }
+
+    return 0;
+}
+
+static int dab_msc_viterbi_decode(const int16_t *symbols,
+                                  uint32_t framebits,
+                                  uint8_t *bytes_out,
+                                  uint32_t output_count) {
+    const uint32_t symbol_count = (framebits + 6u) * 4u;
+    unsigned char *metrics;
+    void *vp;
+    int rc;
+
+    if (symbols == 0 || bytes_out == 0 || output_count < (framebits / 8u)) {
+        return -1;
+    }
+
+    metrics = (unsigned char *)malloc(symbol_count);
+    if (metrics == 0) {
+        return -1;
+    }
+    vp = create_viterbi47_port((int)framebits);
+    if (vp == 0) {
         free(metrics);
         return -1;
     }
 
+    rc = dab_msc_viterbi_decode_preallocated(symbols,
+                                              framebits,
+                                              bytes_out,
+                                              output_count,
+                                              metrics,
+                                              vp);
     delete_viterbi47_port(vp);
     free(metrics);
-    return 0;
+    return rc;
 }
 
 static void dab_msc_descramble_bytes(uint8_t *data, uint32_t byte_count) {
@@ -1147,12 +1221,13 @@ int dab_msc_sync_runtimes(dab_msc_subchannel_runtime_t *runtimes, const dab_msc_
 
         if (subchannel->valid == 0u) {
             free(runtime->deinterleaver);
+            dab_msc_free_decoder_workspace(runtime->workspace);
             dab_msc_free_dabplus_stream(runtime->dabplus);
             *runtime = (dab_msc_subchannel_runtime_t){0};
             continue;
         }
 
-        if (runtime->valid == 0u ||
+        if (runtime->valid == 0u || runtime->deinterleaver == 0 || runtime->workspace == 0 ||
             runtime->subchid != subchannel->subchid ||
             runtime->config.profile != subchannel->profile ||
             runtime->config.protection_level != subchannel->protection_level ||
@@ -1160,9 +1235,11 @@ int dab_msc_sync_runtimes(dab_msc_subchannel_runtime_t *runtimes, const dab_msc_
             runtime->config.size_cu != subchannel->size_cu) {
             dab_msc_decoder_config_t config;
             dab_msc_deinterleaver_t *deinterleaver = runtime->deinterleaver;
+            dab_msc_decoder_workspace_t *workspace;
             dab_msc_dabplus_stream_runtime_t *dabplus = runtime->dabplus;
             uint32_t reset_count = runtime->reset_count;
             uint8_t reason = 0u;
+            int allocated_deinterleaver = 0;
 
             if (runtime->valid == 0u) {
                 reason |= 0x01u;
@@ -1187,6 +1264,7 @@ int dab_msc_sync_runtimes(dab_msc_subchannel_runtime_t *runtimes, const dab_msc_
 
             if (dab_msc_prepare_decoder_config(&config, subchannel) != 0) {
                 free(runtime->deinterleaver);
+                dab_msc_free_decoder_workspace(runtime->workspace);
                 dab_msc_free_dabplus_stream(runtime->dabplus);
                 *runtime = (dab_msc_subchannel_runtime_t){0};
                 continue;
@@ -1194,11 +1272,18 @@ int dab_msc_sync_runtimes(dab_msc_subchannel_runtime_t *runtimes, const dab_msc_
             if (deinterleaver == 0) {
                 deinterleaver = (dab_msc_deinterleaver_t *)calloc(1u, sizeof(*deinterleaver));
                 if (deinterleaver == 0) {
-                    dab_msc_free_dabplus_stream(dabplus);
-                    *runtime = (dab_msc_subchannel_runtime_t){0};
                     return -1;
                 }
+                allocated_deinterleaver = 1;
             }
+            workspace = dab_msc_create_decoder_workspace(&config);
+            if (workspace == 0) {
+                if (allocated_deinterleaver != 0) {
+                    free(deinterleaver);
+                }
+                return -1;
+            }
+            dab_msc_free_decoder_workspace(runtime->workspace);
             if (dabplus != 0) {
                 dab_msc_free_dabplus_stream(dabplus);
                 dabplus = 0;
@@ -1210,6 +1295,7 @@ int dab_msc_sync_runtimes(dab_msc_subchannel_runtime_t *runtimes, const dab_msc_
             runtime->reset_count = reset_count;
             runtime->last_reconfig_reason = reason;
             runtime->deinterleaver = deinterleaver;
+            runtime->workspace = workspace;
             dab_msc_deinterleaver_reset(runtime->deinterleaver);
         }
     }
@@ -1224,30 +1310,64 @@ void dab_msc_deinterleaver_reset(dab_msc_deinterleaver_t *state) {
     memset(state, 0, sizeof(*state));
 }
 
+int dab_msc_deinterleaver_get_history(const dab_msc_deinterleaver_t *state,
+                                      uint32_t bit_index,
+                                      uint32_t age,
+                                      int8_t *value) {
+    const uint32_t lane = bit_index & (DAB_MSC_CONV_DEINTERLEAVER_DEPTH - 1u);
+    const uint32_t group = bit_index / DAB_MSC_CONV_DEINTERLEAVER_DEPTH;
+    uint32_t slot;
+
+    if (state == 0 || value == 0 || bit_index >= state->conv_len ||
+        age >= DAB_MSC_CONV_DEINTERLEAVER_DEPTH) {
+        return -1;
+    }
+
+    slot = (state->write_index - 1u - age) & (DAB_MSC_CONV_DEINTERLEAVER_DEPTH - 1u);
+    *value = state->regs[((lane * DAB_MSC_CONV_DEINTERLEAVER_DEPTH + slot) *
+                          DAB_MSC_CONV_DEINTERLEAVER_GROUPS) + group];
+    return 0;
+}
+
 int dab_msc_convolutional_deinterleave(dab_msc_deinterleaver_t *state,
                                        const int8_t *input,
                                        uint32_t input_count,
                                        int8_t *output,
                                        uint32_t output_count) {
-    uint32_t i;
+    const uint32_t history_mask = DAB_MSC_CONV_DEINTERLEAVER_DEPTH - 1u;
+    uint32_t write_index;
+    uint32_t lane;
 
     if (state == 0 || input == 0 || output == 0 || input_count == 0u || input_count != output_count ||
         input_count > DAB_MSC_MAX_CONV_BITS) {
         return -1;
     }
 
-    state->conv_len = input_count;
-    for (i = 0u; i < input_count; ++i) {
-        const uint32_t base = i * DAB_MSC_CONV_DEINTERLEAVER_DEPTH;
-        const uint8_t delay = DAB_MSC_DEINTERLEAVER_DELAYS[i & 0x0Fu];
-        uint32_t j;
-
-        for (j = delay; j > 0u; --j) {
-            state->regs[base + j] = state->regs[base + j - 1u];
-        }
-        state->regs[base] = input[i];
-        output[i] = state->regs[base + delay];
+    if (state->conv_len != 0u && state->conv_len != input_count) {
+        dab_msc_deinterleaver_reset(state);
     }
+    state->conv_len = input_count;
+    write_index = state->write_index;
+    for (lane = 0u; lane < DAB_MSC_CONV_DEINTERLEAVER_DEPTH && lane < input_count; ++lane) {
+        const uint8_t delay = DAB_MSC_DEINTERLEAVER_DELAYS[lane];
+        const uint32_t read_index = (write_index - delay) & history_mask;
+        const uint32_t write_base =
+            ((lane * DAB_MSC_CONV_DEINTERLEAVER_DEPTH) + write_index) *
+            DAB_MSC_CONV_DEINTERLEAVER_GROUPS;
+        const uint32_t read_base =
+            ((lane * DAB_MSC_CONV_DEINTERLEAVER_DEPTH) + read_index) *
+            DAB_MSC_CONV_DEINTERLEAVER_GROUPS;
+        uint32_t bit_index = lane;
+        uint32_t group = 0u;
+
+        while (bit_index < input_count) {
+            state->regs[write_base + group] = input[bit_index];
+            output[bit_index] = state->regs[read_base + group];
+            bit_index += DAB_MSC_CONV_DEINTERLEAVER_DEPTH;
+            group++;
+        }
+    }
+    state->write_index = (uint8_t)((write_index + 1u) & history_mask);
 
     return 0;
 }
@@ -1415,6 +1535,58 @@ int dab_msc_decode_subchannel_cif(const int8_t *msc_softbits,
     return rc;
 }
 
+static int dab_msc_decode_subchannel_cif_runtime(const int8_t *msc_softbits,
+                                                 uint32_t msc_softbit_count,
+                                                 const dab_msc_subchannel_frame_t *frame,
+                                                 dab_msc_subchannel_runtime_t *runtime,
+                                                 uint32_t cif_index,
+                                                 uint8_t *output_bytes,
+                                                 uint32_t output_count) {
+    const dab_msc_decoder_config_t *config;
+    dab_msc_decoder_workspace_t *workspace;
+    int rc;
+
+    if (msc_softbits == 0 || frame == 0 || runtime == 0 || output_bytes == 0 ||
+        runtime->valid == 0u || runtime->deinterleaver == 0 || runtime->workspace == 0 ||
+        msc_softbit_count != DAB_TFRAME_MSC_SOFTBITS || cif_index >= DAB_MSC_CIFS_PER_FRAME ||
+        frame->valid == 0u) {
+        return -1;
+    }
+
+    config = &runtime->config;
+    workspace = runtime->workspace;
+    if (config->valid == 0u || frame->cif_softbit_count[cif_index] != config->conv_len ||
+        workspace->conv_len != config->conv_len || workspace->framebits != config->framebits ||
+        workspace->unpunctured_count < ((config->framebits + 6u) * 4u)) {
+        return -1;
+    }
+
+    rc = dab_msc_convolutional_deinterleave(runtime->deinterleaver,
+                                             msc_softbits + frame->cif_softbit_offset[cif_index],
+                                             frame->cif_softbit_count[cif_index],
+                                             workspace->deinterleaved,
+                                             config->conv_len);
+    if (rc == 0) {
+        rc = dab_msc_depuncture_cif(workspace->deinterleaved,
+                                    config->conv_len,
+                                    config,
+                                    workspace->unpunctured,
+                                    workspace->unpunctured_count);
+    }
+    if (rc == 0) {
+        rc = dab_msc_viterbi_decode_preallocated(workspace->unpunctured,
+                                                  config->framebits,
+                                                  output_bytes,
+                                                  output_count,
+                                                  workspace->metrics,
+                                                  workspace->viterbi);
+    }
+    if (rc == 0) {
+        dab_msc_descramble_bytes(output_bytes, config->framebits / 8u);
+    }
+    return rc == 0 ? 0 : -1;
+}
+
 int dab_msc_init(dab_msc_state_t *state) {
     if (state == 0) {
         return -1;
@@ -1424,11 +1596,34 @@ int dab_msc_init(dab_msc_state_t *state) {
 }
 
 void dab_msc_reset(dab_msc_state_t *state) {
+    uint8_t service_filter_enabled;
+    uint32_t service_filter_sid;
+
     if (state == 0) {
         return;
     }
+    service_filter_enabled = state->service_filter_enabled;
+    service_filter_sid = state->service_filter_sid;
     dab_msc_free_runtimes(state->runtimes);
     *state = (dab_msc_state_t){0};
+    state->service_filter_enabled = service_filter_enabled;
+    state->service_filter_sid = service_filter_sid;
+}
+
+void dab_msc_set_service_filter(dab_msc_state_t *state, uint32_t sid) {
+    if (state == 0) {
+        return;
+    }
+    state->service_filter_enabled = 1u;
+    state->service_filter_sid = sid;
+}
+
+void dab_msc_clear_service_filter(dab_msc_state_t *state) {
+    if (state == 0) {
+        return;
+    }
+    state->service_filter_enabled = 0u;
+    state->service_filter_sid = 0u;
 }
 
 int dab_msc_build_layout(dab_msc_layout_t *layout, const dab_fic_database_t *db) {
@@ -1875,6 +2070,8 @@ int dab_msc_process_frame_with_fic(dab_msc_state_t *state,
                                    uint32_t msc_softbit_count,
                                    const dab_fic_database_t *db) {
     uint32_t i;
+    dab_msc_layout_t filtered_layout;
+    const dab_msc_layout_t *runtime_layout;
     const char *diag_subch_env = getenv("DAB_MSC_DIAG_SUBCHID");
     int diag_subch = -1;
 
@@ -1894,11 +2091,44 @@ int dab_msc_process_frame_with_fic(dab_msc_state_t *state,
     if (dab_msc_build_frame_view(&state->frame_view, &state->layout, msc_softbit_count) != 0) {
         return -1;
     }
-    if (dab_msc_sync_runtimes(state->runtimes, &state->layout) != 0) {
+    runtime_layout = &state->layout;
+    if (state->service_filter_enabled != 0u) {
+        uint8_t selected_subchid = 0xffu;
+
+        filtered_layout = state->layout;
+        for (i = 0u; i < filtered_layout.component_count; ++i) {
+            const dab_msc_component_mapping_t *component = &filtered_layout.components[i];
+
+            if (component->used != 0u && component->sid == state->service_filter_sid &&
+                component->subchid < DAB_FIC_MAX_SUBCHANNELS &&
+                dab_msc_component_kind(component->tmid) == DAB_MSC_COMPONENT_STREAM_AUDIO) {
+                selected_subchid = component->subchid;
+                if (component->primary != 0u) {
+                    break;
+                }
+            }
+        }
+
+        filtered_layout.subchannel_count = 0u;
+        for (i = 0u; i < DAB_FIC_MAX_SUBCHANNELS; ++i) {
+            if (i != selected_subchid) {
+                filtered_layout.subchannels[i].valid = 0u;
+            } else if (filtered_layout.subchannels[i].valid != 0u) {
+                filtered_layout.subchannel_count = 1u;
+            }
+        }
+        runtime_layout = &filtered_layout;
+    }
+    if (dab_msc_sync_runtimes(state->runtimes, runtime_layout) != 0) {
         return -1;
     }
 
-    memset(state->decoded_subchannels, 0, sizeof(state->decoded_subchannels));
+    for (i = 0u; i < DAB_FIC_MAX_SUBCHANNELS; ++i) {
+        state->decoded_subchannels[i].valid = 0u;
+        state->decoded_subchannels[i].subchid = 0u;
+        memset(state->decoded_subchannels[i].cif_valid, 0, sizeof(state->decoded_subchannels[i].cif_valid));
+        memset(state->decoded_subchannels[i].byte_count, 0, sizeof(state->decoded_subchannels[i].byte_count));
+    }
     memset(state->decoded_components, 0, sizeof(state->decoded_components));
     state->decoded_component_count = 0u;
 
@@ -1916,7 +2146,7 @@ int dab_msc_process_frame_with_fic(dab_msc_state_t *state,
         decoded->subchid = frame->subchid;
         for (cif_index = 0u; cif_index < DAB_MSC_CIFS_PER_FRAME; ++cif_index) {
             const uint32_t byte_count = runtime->config.framebits / 8u;
-            uint8_t decoded_bytes[DAB_MSC_MAX_LOGICAL_FRAME_BYTES_PER_CIF];
+            uint8_t *decoded_bytes = decoded->data[cif_index];
             dab_msc_deinterleaver_t state_before_decode;
             int have_state_before_decode = 0;
 
@@ -1927,16 +2157,14 @@ int dab_msc_process_frame_with_fic(dab_msc_state_t *state,
                 state_before_decode = *runtime->deinterleaver;
                 have_state_before_decode = 1;
             }
-            memset(decoded_bytes, 0, sizeof(decoded_bytes));
-            if (dab_msc_decode_subchannel_cif(msc_softbits,
-                                              msc_softbit_count,
-                                              frame,
-                                              &runtime->config,
-                                              runtime->deinterleaver,
-                                              cif_index,
-                                              decoded_bytes,
-                                              byte_count) == 0) {
-                memcpy(decoded->data[cif_index], decoded_bytes, byte_count);
+            memset(decoded_bytes, 0, byte_count);
+            if (dab_msc_decode_subchannel_cif_runtime(msc_softbits,
+                                                      msc_softbit_count,
+                                                      frame,
+                                                      runtime,
+                                                      cif_index,
+                                                      decoded_bytes,
+                                                      byte_count) == 0) {
                 if (have_state_before_decode != 0) {
                     uint8_t verify_bytes[DAB_MSC_MAX_LOGICAL_FRAME_BYTES_PER_CIF];
 

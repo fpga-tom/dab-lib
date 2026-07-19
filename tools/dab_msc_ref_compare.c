@@ -11,6 +11,7 @@
 #include "dab/core/prs_acquire.h"
 #include "dab/core/prs_fft.h"
 #include "dab/core/prs_score.h"
+#include "dab/core/sample_history.h"
 #include "dab/core/sync.h"
 #include "dab/core/tframe.h"
 #include "dab/simd/simd.h"
@@ -22,12 +23,7 @@ void unflatten_tframe(tframe_t *tframe, tframe_raw_t *tframe_raw);
 void unflatten_subch(tframe_t *tframe, tframe_raw_t *tframe_raw, dab_subch_runtime_t *subch_rt);
 int subch_read_cif(dab_subch_runtime_t *subch_rt, uint8_t *data, int cif);
 
-typedef struct {
-    int16_t *iq;
-    uint32_t capacity_samples;
-    uint32_t sample_count;
-    uint64_t start_sample_index;
-} history_buffer_t;
+typedef dab_sample_history_t history_buffer_t;
 
 typedef struct {
     int pending;
@@ -288,108 +284,25 @@ static int refine_symbol_fft_start_cp(const dab_prs_score_t *cp_score,
 }
 
 static int history_init(history_buffer_t *history, uint32_t capacity_samples) {
-    if (history == 0 || capacity_samples == 0u) {
-        return -1;
-    }
-    history->iq = (int16_t *)calloc((size_t)capacity_samples * 2u, sizeof(*history->iq));
-    if (history->iq == 0) {
-        return -1;
-    }
-    history->capacity_samples = capacity_samples;
-    history->sample_count = 0u;
-    history->start_sample_index = 0u;
-    return 0;
+    return dab_sample_history_init(history, capacity_samples);
 }
 
 static void history_destroy(history_buffer_t *history) {
-    if (history == 0) {
-        return;
-    }
-    free(history->iq);
-    history->iq = 0;
-    history->capacity_samples = 0u;
-    history->sample_count = 0u;
-    history->start_sample_index = 0u;
-}
-
-static void history_reset(history_buffer_t *history, const dab_sdr_block_view_t *block) {
-    uint32_t keep;
-
-    if (history == 0 || block == 0 || history->iq == 0 || block->iq_interleaved == 0) {
-        return;
-    }
-
-    keep = block->sample_count > history->capacity_samples ? history->capacity_samples : block->sample_count;
-    memcpy(history->iq,
-           block->iq_interleaved + (2u * (block->sample_count - keep)),
-           sizeof(*history->iq) * 2u * keep);
-    history->sample_count = keep;
-    history->start_sample_index = block->sample_index + (block->sample_count - keep);
+    dab_sample_history_destroy(history);
 }
 
 static void history_append(history_buffer_t *history, const dab_sdr_block_view_t *block) {
-    uint32_t drop;
-    uint32_t keep;
-    uint64_t expected_next;
-
-    if (history == 0 || block == 0 || history->iq == 0 || block->iq_interleaved == 0) {
-        return;
-    }
-    if (history->sample_count == 0u) {
-        history_reset(history, block);
-        return;
-    }
-
-    expected_next = history->start_sample_index + history->sample_count;
-    if (block->sample_index != expected_next) {
-        history_reset(history, block);
-        return;
-    }
-
-    keep = block->sample_count;
-    if (keep > history->capacity_samples) {
-        history_reset(history, block);
-        return;
-    }
-
-    if ((history->sample_count + keep) > history->capacity_samples) {
-        drop = (history->sample_count + keep) - history->capacity_samples;
-        memmove(history->iq,
-                history->iq + (2u * drop),
-                sizeof(*history->iq) * 2u * (history->sample_count - drop));
-        history->sample_count -= drop;
-        history->start_sample_index += drop;
-    }
-
-    memcpy(history->iq + (2u * history->sample_count),
-           block->iq_interleaved,
-           sizeof(*history->iq) * 2u * keep);
-    history->sample_count += keep;
+    (void)dab_sample_history_append(history, block);
 }
 
 static dab_sdr_block_view_t history_view(const history_buffer_t *history) {
-    dab_sdr_block_view_t view = {0};
-
-    if (history == 0) {
-        return view;
-    }
-    view.iq_interleaved = history->iq;
-    view.sample_count = history->sample_count;
-    view.sample_index = history->start_sample_index;
-    view.timestamp_ns = 0u;
-    return view;
+    return dab_sample_history_view(history);
 }
 
 static int history_contains_sample_range(const history_buffer_t *history,
                                          uint64_t start_sample,
                                          uint64_t end_sample) {
-    uint64_t history_end;
-
-    if (history == 0 || history->sample_count == 0u) {
-        return 0;
-    }
-    history_end = history->start_sample_index + history->sample_count;
-    return start_sample >= history->start_sample_index && end_sample <= history_end;
+    return dab_sample_history_contains_range(history, start_sample, end_sample);
 }
 
 static int read_block(FILE *fp,
@@ -926,16 +839,18 @@ static int compare_deinterleaver_state_stage(const char *stage,
 
     for (i = 0u; i < conv_len; ++i) {
         uint32_t j;
-        const uint32_t base = i * DAB_MSC_CONV_DEINTERLEAVER_DEPTH;
 
         for (j = 0u; j < DAB_MSC_CONV_DEINTERLEAVER_DEPTH; ++j) {
-            if ((int)ours->regs[base + j] != (int)ref[i][j]) {
+            int8_t ours_value = 0;
+
+            if (dab_msc_deinterleaver_get_history(ours, i, j, &ours_value) != 0 ||
+                (int)ours_value != (int)ref[i][j]) {
                 fprintf(stderr,
                         "%s-mismatch bit=%u delay=%u ours=%d ref=%d\n",
                         stage,
                         i,
                         j,
-                        (int)ours->regs[base + j],
+                        (int)ours_value,
                         (int)ref[i][j]);
                 return 1;
             }
@@ -957,10 +872,13 @@ static void seed_ref_deinterleaver_state(dab_subch_runtime_t *ref_subch,
 
     for (i = 0u; i < conv_len; ++i) {
         uint32_t j;
-        const uint32_t base = i * DAB_MSC_CONV_DEINTERLEAVER_DEPTH;
 
         for (j = 0u; j < DAB_MSC_CONV_DEINTERLEAVER_DEPTH; ++j) {
-            ref_subch->conv_reg_deintlv[i][j] = (bit_t)ours->regs[base + j];
+            int8_t value = 0;
+
+            if (dab_msc_deinterleaver_get_history(ours, i, j, &value) == 0) {
+                ref_subch->conv_reg_deintlv[i][j] = (bit_t)value;
+            }
         }
     }
 }
@@ -1491,13 +1409,19 @@ int main(int argc, char **argv) {
         fprintf(stderr, "sync init failed\n");
         return 2;
     }
-    if (dab_fic_init(&fic) != 0 || dab_msc_init(&msc) != 0) {
+    if (dab_fic_init(&fic) != 0) {
         fprintf(stderr, "fic/msc init failed\n");
+        return 2;
+    }
+    if (dab_msc_init(&msc) != 0) {
+        fprintf(stderr, "fic/msc init failed\n");
+        dab_fic_destroy(&fic);
         return 2;
     }
     dab_ofdm_default_config(&ofdm_config);
     if (dab_ofdm_init(&ofdm, &ofdm_config) != 0) {
         fprintf(stderr, "ofdm init failed\n");
+        dab_fic_destroy(&fic);
         return 2;
     }
 
@@ -2229,6 +2153,7 @@ cleanup:
     free(iq_block);
     free(sample_scratch);
     history_destroy(&history);
+    dab_fic_destroy(&fic);
     free(frame_softbits);
     free(msc_softbits);
     free(fic_softbits);

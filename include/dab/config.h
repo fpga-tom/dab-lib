@@ -6,6 +6,9 @@
 #define DAB_IQ_BLOCK_SAMPLES 16384u
 #define DAB_IQ_BLOCK_ALIGNMENT 32u
 #define DAB_DEFAULT_QUEUE_CAPACITY 32u
+#ifndef DAB_CAPTURE_BLOCK_COUNT
+#define DAB_CAPTURE_BLOCK_COUNT 32u
+#endif
 
 typedef struct {
     uint32_t sample_rate;

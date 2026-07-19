@@ -14,6 +14,14 @@ cmake -S . -B build
 cmake --build build
 ```
 
+Pure `Release` builds use speed optimization, aggressive inlining, and
+interprocedural/link-time optimization when the compiler supports it. Set
+`-DDAB_ENABLE_RELEASE_IPO=OFF` to disable the latter for troubleshooting.
+
+Live SDR streams preallocate 32 IQ capture blocks by default (about 2 MiB per
+open stream). Builds that need a larger capture latency cushion can override
+the depth, for example `cmake -S . -B build -DDAB_CAPTURE_BLOCK_COUNT=64`.
+
 ## Windows Installer
 
 To stage the GUI application and build an installer on Windows:
@@ -42,6 +50,12 @@ The generated installer is written to:
 ```sh
 ./build/dab_tests
 ctest --test-dir build --output-on-failure
+```
+
+The SIMD conversion microbenchmark accepts an optional iteration count:
+
+```sh
+./build/dab_simd_bench 20000
 ```
 
 ## SDRplay Probe

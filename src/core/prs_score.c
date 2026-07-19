@@ -2,6 +2,7 @@
 
 #include <math.h>
 
+#include "dab/core/ofdm.h"
 #include "prs_template_mode_i_table.h"
 
 #define DAB_TWO_PI_D 6.28318530717958647692
@@ -108,11 +109,25 @@ int dab_prs_score_search_i16(const dab_prs_score_t *score,
                              const dab_sdr_block_view_t *block,
                              const dab_prs_candidate_t *candidate,
                              dab_prs_result_t *result) {
-    const uint64_t search_start = dab_prs_candidate_search_start_sample(candidate);
-    const uint64_t search_end = dab_prs_candidate_search_end_sample(candidate);
+    uint64_t search_start;
+    uint64_t search_end;
+    uint64_t block_start;
+    uint64_t block_end;
+    uint64_t valid_start;
+    uint64_t valid_end;
     uint64_t fft_start_sample;
+    uint32_t guard;
+    uint32_t fft;
+    uint32_t guard_start_offset;
+    uint32_t useful_tail_offset;
+    uint32_t i;
+    double corr_re = 0.0;
+    double corr_im = 0.0;
+    double energy_a = 0.0;
+    double energy_b = 0.0;
+    double best_corr_re = 0.0;
+    double best_corr_im = 0.0;
     float best_score = -1.0f;
-    float best_cfo = 0.0f;
 
     if (score == 0 || block == 0 || candidate == 0 || result == 0) {
         return -1;
@@ -123,27 +138,83 @@ int dab_prs_score_search_i16(const dab_prs_score_t *score,
 
     *result = (dab_prs_result_t){0};
 
-    for (fft_start_sample = search_start; fft_start_sample < search_end; ++fft_start_sample) {
-        float candidate_score;
-        float candidate_cfo;
+    guard = score->config.guard_samples;
+    fft = score->config.fft_samples;
+    search_start = dab_prs_candidate_search_start_sample(candidate);
+    search_end = dab_prs_candidate_search_end_sample(candidate);
+    block_start = block->sample_index;
+    block_end = block_start + block->sample_count;
+    if (block_end < block_start || block->sample_count < fft ||
+        (block->sample_count - fft) < guard) {
+        return 0;
+    }
 
-        if (dab_prs_score_cp_metric_i16(score,
-                                        block,
-                                        fft_start_sample,
-                                        &candidate_score,
-                                        &candidate_cfo) != 0) {
-            continue;
+    valid_start = block_start + guard;
+    valid_end = (block_end - fft) + 1u;
+    if (search_start < valid_start) {
+        search_start = valid_start;
+    }
+    if (search_end > valid_end) {
+        search_end = valid_end;
+    }
+    if (search_start >= search_end) {
+        return 0;
+    }
+
+    guard_start_offset = (uint32_t)((search_start - guard) - block_start);
+    useful_tail_offset = (uint32_t)((search_start + fft - guard) - block_start);
+    for (i = 0u; i < guard; ++i) {
+        const double ai = (double)block->iq_interleaved[2u * (guard_start_offset + i)];
+        const double aq = (double)block->iq_interleaved[(2u * (guard_start_offset + i)) + 1u];
+        const double bi = (double)block->iq_interleaved[2u * (useful_tail_offset + i)];
+        const double bq = (double)block->iq_interleaved[(2u * (useful_tail_offset + i)) + 1u];
+
+        corr_re += (ai * bi) + (aq * bq);
+        corr_im += (aq * bi) - (ai * bq);
+        energy_a += (ai * ai) + (aq * aq);
+        energy_b += (bi * bi) + (bq * bq);
+    }
+
+    for (fft_start_sample = search_start; fft_start_sample < search_end; ++fft_start_sample) {
+        if (energy_a > 0.0 && energy_b > 0.0) {
+            const double score_value = ((corr_re * corr_re) + (corr_im * corr_im)) /
+                                       (energy_a * energy_b);
+            const float candidate_score = (float)score_value;
+
+            if (candidate_score > best_score) {
+                best_score = candidate_score;
+                best_corr_re = corr_re;
+                best_corr_im = corr_im;
+                result->prs_peak_sample = fft_start_sample;
+                result->prs_fft_start_sample = fft_start_sample;
+                result->prs_symbol_start_sample = fft_start_sample - guard;
+                result->prs_score = candidate_score;
+                result->valid = 1;
+            }
         }
 
-        if (candidate_score > best_score) {
-            best_score = candidate_score;
-            best_cfo = candidate_cfo;
-            result->prs_peak_sample = fft_start_sample;
-            result->prs_fft_start_sample = fft_start_sample;
-            result->prs_symbol_start_sample = fft_start_sample - score->config.guard_samples;
-            result->prs_score = candidate_score;
-            result->coarse_freq_error_hz = candidate_cfo;
-            result->valid = 1;
+        if ((fft_start_sample + 1u) < search_end) {
+            const uint32_t incoming_guard_offset = guard_start_offset + guard;
+            const uint32_t incoming_tail_offset = useful_tail_offset + guard;
+            const double old_ai = (double)block->iq_interleaved[2u * guard_start_offset];
+            const double old_aq = (double)block->iq_interleaved[(2u * guard_start_offset) + 1u];
+            const double old_bi = (double)block->iq_interleaved[2u * useful_tail_offset];
+            const double old_bq = (double)block->iq_interleaved[(2u * useful_tail_offset) + 1u];
+            const double new_ai = (double)block->iq_interleaved[2u * incoming_guard_offset];
+            const double new_aq = (double)block->iq_interleaved[(2u * incoming_guard_offset) + 1u];
+            const double new_bi = (double)block->iq_interleaved[2u * incoming_tail_offset];
+            const double new_bq = (double)block->iq_interleaved[(2u * incoming_tail_offset) + 1u];
+
+            corr_re -= (old_ai * old_bi) + (old_aq * old_bq);
+            corr_im -= (old_aq * old_bi) - (old_ai * old_bq);
+            energy_a -= (old_ai * old_ai) + (old_aq * old_aq);
+            energy_b -= (old_bi * old_bi) + (old_bq * old_bq);
+            corr_re += (new_ai * new_bi) + (new_aq * new_bq);
+            corr_im += (new_aq * new_bi) - (new_ai * new_bq);
+            energy_a += (new_ai * new_ai) + (new_aq * new_aq);
+            energy_b += (new_bi * new_bi) + (new_bq * new_bq);
+            guard_start_offset++;
+            useful_tail_offset++;
         }
     }
 
@@ -152,7 +223,9 @@ int dab_prs_score_search_i16(const dab_prs_score_t *score,
     }
 
     result->prs_score = best_score;
-    result->coarse_freq_error_hz = best_cfo;
+    result->coarse_freq_error_hz = (float)(-atan2(best_corr_im, best_corr_re) *
+                                           (double)score->config.sample_rate /
+                                           (DAB_TWO_PI_D * (double)fft));
     return 1;
 }
 
@@ -492,16 +565,11 @@ int dab_prs_estimate_equalized_snr_f32(const float *rx_i,
 
     uint32_t i;
     uint32_t used = 0u;
-    double inv_i[1537];
-    double inv_q[1537];
+    double channel_i[1537];
+    double channel_q[1537];
     uint8_t valid[1537];
-    double eq_cross_re = 0.0;
-    double eq_cross_im = 0.0;
-    double ref_energy = 0.0;
     double signal_energy = 0.0;
     double noise_energy = 0.0;
-    double fit_re;
-    double fit_im;
 
     if (rx_i == 0 || rx_q == 0 || ref_i == 0 || ref_q == 0 || result == 0 || count == 0u || count > 1537u) {
         return -1;
@@ -512,18 +580,17 @@ int dab_prs_estimate_equalized_snr_f32(const float *rx_i,
         const double sq = (double)rx_q[i];
         const double ri = (double)ref_i[i];
         const double rq = (double)ref_q[i];
-        const double sym_energy = (si * si) + (sq * sq);
         const double ref_bin_energy = (ri * ri) + (rq * rq);
 
-        if (sym_energy <= 1.0e-12 || ref_bin_energy <= 0.0) {
-            inv_i[i] = 0.0;
-            inv_q[i] = 0.0;
+        if (ref_bin_energy <= 0.0) {
+            channel_i[i] = 0.0;
+            channel_q[i] = 0.0;
             valid[i] = 0u;
             continue;
         }
 
-        inv_i[i] = ((ri * si) + (rq * sq)) / sym_energy;
-        inv_q[i] = ((rq * si) - (ri * sq)) / sym_energy;
+        channel_i[i] = ((si * ri) + (sq * rq)) / ref_bin_energy;
+        channel_q[i] = ((sq * ri) - (si * rq)) / ref_bin_energy;
         valid[i] = 1u;
     }
 
@@ -531,14 +598,26 @@ int dab_prs_estimate_equalized_snr_f32(const float *rx_i,
         const double ri = (double)ref_i[i];
         const double rq = (double)ref_q[i];
         const double ref_bin_energy = (ri * ri) + (rq * rq);
-        double avg_inv_re = 0.0;
-        double avg_inv_im = 0.0;
-        uint32_t avg_count = 0u;
+        double sum_x = 0.0;
+        double sum_xx = 0.0;
+        double sum_h_re = 0.0;
+        double sum_h_im = 0.0;
+        double sum_xh_re = 0.0;
+        double sum_xh_im = 0.0;
+        uint32_t neighbor_count = 0u;
         uint32_t j0;
         uint32_t j1;
         uint32_t j;
-        double eq_re;
-        double eq_im;
+        double denominator;
+        double fit_channel_re;
+        double fit_channel_im;
+        double prediction_noise_factor;
+        double fit_re;
+        double fit_im;
+        double err_re;
+        double err_im;
+        double corrected_noise;
+        double corrected_signal;
 
         if (ref_bin_energy <= 0.0) {
             continue;
@@ -551,90 +630,52 @@ int dab_prs_estimate_equalized_snr_f32(const float *rx_i,
         }
 
         for (j = j0; j <= j1; ++j) {
-            if (valid[j] == 0u) {
+            double x;
+
+            if (j == i || valid[j] == 0u) {
                 continue;
             }
-            avg_inv_re += inv_i[j];
-            avg_inv_im += inv_q[j];
-            avg_count++;
+
+            x = (double)(int32_t)j - (double)(int32_t)i;
+            sum_x += x;
+            sum_xx += x * x;
+            sum_h_re += channel_i[j];
+            sum_h_im += channel_q[j];
+            sum_xh_re += x * channel_i[j];
+            sum_xh_im += x * channel_q[j];
+            neighbor_count++;
         }
 
-        if (avg_count == 0u) {
+        if (neighbor_count < 2u) {
             continue;
         }
 
-        avg_inv_re /= (double)avg_count;
-        avg_inv_im /= (double)avg_count;
-        eq_re = ((double)rx_i[i] * avg_inv_re) - ((double)rx_q[i] * avg_inv_im);
-        eq_im = ((double)rx_i[i] * avg_inv_im) + ((double)rx_q[i] * avg_inv_re);
+        denominator = ((double)neighbor_count * sum_xx) - (sum_x * sum_x);
+        if (denominator > 1.0e-12) {
+            fit_channel_re = ((sum_xx * sum_h_re) - (sum_x * sum_xh_re)) / denominator;
+            fit_channel_im = ((sum_xx * sum_h_im) - (sum_x * sum_xh_im)) / denominator;
+            prediction_noise_factor = sum_xx / denominator;
+        } else {
+            fit_channel_re = sum_h_re / (double)neighbor_count;
+            fit_channel_im = sum_h_im / (double)neighbor_count;
+            prediction_noise_factor = 1.0 / (double)neighbor_count;
+        }
 
-        eq_cross_re += (eq_re * ri) + (eq_im * rq);
-        eq_cross_im += (eq_im * ri) - (eq_re * rq);
-        ref_energy += ref_bin_energy;
+        fit_re = (fit_channel_re * ri) - (fit_channel_im * rq);
+        fit_im = (fit_channel_re * rq) + (fit_channel_im * ri);
+        err_re = (double)rx_i[i] - fit_re;
+        err_im = (double)rx_q[i] - fit_im;
+
+        corrected_noise = ((err_re * err_re) + (err_im * err_im)) /
+                          (1.0 + prediction_noise_factor);
+        corrected_signal = ((fit_re * fit_re) + (fit_im * fit_im)) -
+                           (corrected_noise * prediction_noise_factor);
+        signal_energy += corrected_signal;
+        noise_energy += corrected_noise;
         used++;
     }
 
-    if (used == 0u || ref_energy <= 0.0) {
-        return -1;
-    }
-
-    fit_re = eq_cross_re / ref_energy;
-    fit_im = eq_cross_im / ref_energy;
-
-    for (i = 0u; i < count; ++i) {
-        const double ri = (double)ref_i[i];
-        const double rq = (double)ref_q[i];
-        const double ref_bin_energy = (ri * ri) + (rq * rq);
-        double avg_inv_re = 0.0;
-        double avg_inv_im = 0.0;
-        uint32_t avg_count = 0u;
-        uint32_t j0;
-        uint32_t j1;
-        uint32_t j;
-        double eq_re;
-        double eq_im;
-        double fit_ref_re;
-        double fit_ref_im;
-        double err_re;
-        double err_im;
-
-        if (ref_bin_energy <= 0.0) {
-            continue;
-        }
-
-        j0 = i > DAB_PRS_SNR_SMOOTH_RADIUS ? i - DAB_PRS_SNR_SMOOTH_RADIUS : 0u;
-        j1 = i + DAB_PRS_SNR_SMOOTH_RADIUS;
-        if (j1 >= count) {
-            j1 = count - 1u;
-        }
-
-        for (j = j0; j <= j1; ++j) {
-            if (valid[j] == 0u) {
-                continue;
-            }
-            avg_inv_re += inv_i[j];
-            avg_inv_im += inv_q[j];
-            avg_count++;
-        }
-
-        if (avg_count == 0u) {
-            continue;
-        }
-
-        avg_inv_re /= (double)avg_count;
-        avg_inv_im /= (double)avg_count;
-        eq_re = ((double)rx_i[i] * avg_inv_re) - ((double)rx_q[i] * avg_inv_im);
-        eq_im = ((double)rx_i[i] * avg_inv_im) + ((double)rx_q[i] * avg_inv_re);
-        fit_ref_re = (fit_re * ri) - (fit_im * rq);
-        fit_ref_im = (fit_re * rq) + (fit_im * ri);
-        err_re = eq_re - fit_ref_re;
-        err_im = eq_im - fit_ref_im;
-
-        signal_energy += (fit_ref_re * fit_ref_re) + (fit_ref_im * fit_ref_im);
-        noise_energy += (err_re * err_re) + (err_im * err_im);
-    }
-
-    if (signal_energy <= 0.0 || noise_energy <= 0.0) {
+    if (used == 0u || signal_energy <= 0.0 || noise_energy <= 0.0) {
         return -1;
     }
 
@@ -642,6 +683,111 @@ int dab_prs_estimate_equalized_snr_f32(const float *rx_i,
     result->noise_energy = (float)noise_energy;
     result->snr_db = (float)(10.0 * log10(signal_energy / noise_energy));
     result->used_carriers = used;
+    return 0;
+}
+
+int dab_prs_estimate_spectrum_cn_mode_i_f32(const float *fft_i,
+                                            const float *fft_q,
+                                            float *cn_db_out) {
+    const uint32_t inactive_low_start = 772u;
+    const uint32_t inactive_low_end = 1020u;
+    const uint32_t inactive_high_start = 1028u;
+    const uint32_t inactive_high_end = 1276u;
+    double active_power = 0.0;
+    double inactive_power = 0.0;
+    double active_mean;
+    double noise_mean;
+    double carrier_power;
+    uint32_t active_count = 0u;
+    uint32_t inactive_count = 0u;
+    uint32_t bin;
+
+    if (fft_i == 0 || fft_q == 0 || cn_db_out == 0) {
+        return -1;
+    }
+
+    for (bin = 0u; bin < DAB_MODE_I_FFT_SAMPLES; ++bin) {
+        const double re = (double)fft_i[bin];
+        const double im = (double)fft_q[bin];
+        const double power = (re * re) + (im * im);
+        const int is_active =
+            (bin <= DAB_MODE_I_ACTIVE_CARRIER_HALF) ||
+            (bin >= (DAB_MODE_I_FFT_SAMPLES - DAB_MODE_I_ACTIVE_CARRIER_HALF));
+
+        if (bin == 0u || bin == (DAB_MODE_I_FFT_SAMPLES / 2u)) {
+            continue;
+        }
+
+        if (is_active) {
+            active_power += power;
+            active_count++;
+            continue;
+        }
+
+        if ((bin >= inactive_low_start && bin <= inactive_low_end) ||
+            (bin >= inactive_high_start && bin <= inactive_high_end)) {
+            inactive_power += power;
+            inactive_count++;
+        }
+    }
+
+    if (active_count == 0u || inactive_count == 0u || inactive_power <= 0.0) {
+        return -1;
+    }
+
+    active_mean = active_power / (double)active_count;
+    noise_mean = inactive_power / (double)inactive_count;
+    carrier_power = active_mean - noise_mean;
+    if (carrier_power <= 0.0) {
+        return -1;
+    }
+
+    *cn_db_out = (float)(10.0 * log10(carrier_power / noise_mean));
+    return 0;
+}
+
+int dab_prs_estimate_rf_level_dbfs_i16(const dab_sdr_block_view_t *block,
+                                       uint64_t start_sample,
+                                       uint32_t count,
+                                       float *level_dbfs_out) {
+    const double full_scale = 32768.0;
+    uint64_t offset;
+    double mean_i = 0.0;
+    double mean_q = 0.0;
+    double power = 0.0;
+    uint32_t i;
+
+    if (block == 0 || block->iq_interleaved == 0 || level_dbfs_out == 0 || count == 0u ||
+        start_sample < block->sample_index) {
+        return -1;
+    }
+
+    offset = start_sample - block->sample_index;
+    if (offset > (uint64_t)block->sample_count ||
+        (uint64_t)count > (uint64_t)block->sample_count - offset) {
+        return -1;
+    }
+
+    for (i = 0u; i < count; ++i) {
+        const uint64_t sample = offset + (uint64_t)i;
+        mean_i += (double)block->iq_interleaved[2u * sample];
+        mean_q += (double)block->iq_interleaved[(2u * sample) + 1u];
+    }
+    mean_i /= (double)count;
+    mean_q /= (double)count;
+
+    for (i = 0u; i < count; ++i) {
+        const uint64_t sample = offset + (uint64_t)i;
+        const double re = (double)block->iq_interleaved[2u * sample] - mean_i;
+        const double im = (double)block->iq_interleaved[(2u * sample) + 1u] - mean_q;
+        power += (re * re) + (im * im);
+    }
+    power /= (double)count;
+    if (power <= 0.0) {
+        return -1;
+    }
+
+    *level_dbfs_out = (float)(10.0 * log10(power / (full_scale * full_scale)));
     return 0;
 }
 

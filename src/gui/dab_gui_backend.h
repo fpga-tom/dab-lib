@@ -18,6 +18,8 @@ typedef struct {
     float receiver_snr_db;
     int has_spectrum_cn;
     float spectrum_cn_db;
+    int has_rf_level;
+    float rf_level_dbfs;
     float prs_score;
     uint64_t frequency_hz;
     uint32_t sid;

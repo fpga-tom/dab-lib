@@ -12,6 +12,7 @@
 #include "dab/core/prs_acquire.h"
 #include "dab/core/prs_fft.h"
 #include "dab/core/prs_score.h"
+#include "dab/core/sample_history.h"
 #include "dab/core/sync.h"
 #include "dab/core/tframe.h"
 #include "dab/core/msc.h"
@@ -30,16 +31,13 @@ void dab_gui_embedded_audio_status_update(int locked,
                                           float receiver_snr_db,
                                           int has_spectrum_cn,
                                           float spectrum_cn_db,
+                                          int has_rf_level,
+                                          float rf_level_dbfs,
                                           float prs_score);
 void dab_gui_embedded_audio_process_superframe(const dab_msc_dabplus_superframe_t *superframe);
 #endif
 
-typedef struct {
-    int16_t *iq;
-    uint32_t capacity_samples;
-    uint32_t sample_count;
-    uint64_t start_sample_index;
-} history_buffer_t;
+typedef dab_sample_history_t history_buffer_t;
 
 typedef struct {
     int pending;
@@ -230,61 +228,12 @@ static void publish_playback_status(const dab_sync_t *sync) {
                                          sync->state.receiver_snr_db,
                                          sync->state.spectrum_cn_valid,
                                          sync->state.spectrum_cn_db,
+                                         sync->state.rf_level_valid,
+                                         sync->state.rf_level_dbfs,
                                          sync->state.prs_score);
 #else
     (void)sync;
 #endif
-}
-
-static int estimate_spectrum_cn_db(const float *fft_i,
-                                   const float *fft_q,
-                                   float *cn_db_out) {
-    const uint32_t inactive_low_start = 772u;
-    const uint32_t inactive_low_end = 1020u;
-    const uint32_t inactive_high_start = 1028u;
-    const uint32_t inactive_high_end = 1276u;
-    double active_power = 0.0;
-    double inactive_power = 0.0;
-    uint32_t active_count = 0u;
-    uint32_t inactive_count = 0u;
-    uint32_t bin;
-
-    if (fft_i == 0 || fft_q == 0 || cn_db_out == 0) {
-        return -1;
-    }
-
-    for (bin = 0u; bin < DAB_MODE_I_FFT_SAMPLES; ++bin) {
-        const double re = (double)fft_i[bin];
-        const double im = (double)fft_q[bin];
-        const double power = (re * re) + (im * im);
-        const int is_active =
-            (bin <= DAB_MODE_I_ACTIVE_CARRIER_HALF) ||
-            (bin >= (DAB_MODE_I_FFT_SAMPLES - DAB_MODE_I_ACTIVE_CARRIER_HALF));
-
-        if (bin == 1024u) {
-            continue;
-        }
-
-        if (is_active) {
-            active_power += power;
-            active_count++;
-            continue;
-        }
-
-        if ((bin >= inactive_low_start && bin <= inactive_low_end) ||
-            (bin >= inactive_high_start && bin <= inactive_high_end)) {
-            inactive_power += power;
-            inactive_count++;
-        }
-    }
-
-    if (active_count == 0u || inactive_count == 0u || inactive_power <= 0.0) {
-        return -1;
-    }
-
-    *cn_db_out = (float)(10.0 * log10((active_power / (double)active_count) /
-                                      (inactive_power / (double)inactive_count)));
-    return 0;
 }
 
 static void print_usage(const char *argv0) {
@@ -454,7 +403,7 @@ static void reset_runtime_state(dab_null_detect_t *detector,
         dab_msc_reset(msc);
     }
     if (history != 0) {
-        history->sample_count = 0u;
+        dab_sample_history_clear(history);
     }
     if (pending != 0) {
         *pending = (pending_candidate_t){0};
@@ -911,108 +860,25 @@ static int append_ref_samples_file(FILE *fp,
 }
 
 static int history_init(history_buffer_t *history, uint32_t capacity_samples) {
-    if (history == 0 || capacity_samples == 0u) {
-        return -1;
-    }
-    history->iq = (int16_t *)calloc((size_t)capacity_samples * 2u, sizeof(*history->iq));
-    if (history->iq == 0) {
-        return -1;
-    }
-    history->capacity_samples = capacity_samples;
-    history->sample_count = 0u;
-    history->start_sample_index = 0u;
-    return 0;
+    return dab_sample_history_init(history, capacity_samples);
 }
 
 static void history_destroy(history_buffer_t *history) {
-    if (history == 0) {
-        return;
-    }
-    free(history->iq);
-    history->iq = 0;
-    history->capacity_samples = 0u;
-    history->sample_count = 0u;
-    history->start_sample_index = 0u;
-}
-
-static void history_reset(history_buffer_t *history, const dab_sdr_block_view_t *block) {
-    uint32_t keep;
-
-    if (history == 0 || block == 0 || history->iq == 0 || block->iq_interleaved == 0) {
-        return;
-    }
-
-    keep = block->sample_count > history->capacity_samples ? history->capacity_samples : block->sample_count;
-    memcpy(history->iq,
-           block->iq_interleaved + (2u * (block->sample_count - keep)),
-           sizeof(*history->iq) * 2u * keep);
-    history->sample_count = keep;
-    history->start_sample_index = block->sample_index + (block->sample_count - keep);
+    dab_sample_history_destroy(history);
 }
 
 static void history_append(history_buffer_t *history, const dab_sdr_block_view_t *block) {
-    uint32_t drop;
-    uint32_t keep;
-    uint64_t expected_next;
-
-    if (history == 0 || block == 0 || history->iq == 0 || block->iq_interleaved == 0) {
-        return;
-    }
-    if (history->sample_count == 0u) {
-        history_reset(history, block);
-        return;
-    }
-
-    expected_next = history->start_sample_index + history->sample_count;
-    if (block->sample_index != expected_next) {
-        history_reset(history, block);
-        return;
-    }
-
-    keep = block->sample_count;
-    if (keep > history->capacity_samples) {
-        history_reset(history, block);
-        return;
-    }
-
-    if ((history->sample_count + keep) > history->capacity_samples) {
-        drop = (history->sample_count + keep) - history->capacity_samples;
-        memmove(history->iq,
-                history->iq + (2u * drop),
-                sizeof(*history->iq) * 2u * (history->sample_count - drop));
-        history->sample_count -= drop;
-        history->start_sample_index += drop;
-    }
-
-    memcpy(history->iq + (2u * history->sample_count),
-           block->iq_interleaved,
-           sizeof(*history->iq) * 2u * keep);
-    history->sample_count += keep;
+    (void)dab_sample_history_append(history, block);
 }
 
 static dab_sdr_block_view_t history_view(const history_buffer_t *history) {
-    dab_sdr_block_view_t view = {0};
-
-    if (history == 0) {
-        return view;
-    }
-    view.iq_interleaved = history->iq;
-    view.sample_count = history->sample_count;
-    view.sample_index = history->start_sample_index;
-    view.timestamp_ns = 0u;
-    return view;
+    return dab_sample_history_view(history);
 }
 
 static int history_contains_sample_range(const history_buffer_t *history,
                                          uint64_t start_sample,
                                          uint64_t end_sample) {
-    uint64_t history_end;
-
-    if (history == 0 || history->sample_count == 0u) {
-        return 0;
-    }
-    history_end = history->start_sample_index + history->sample_count;
-    return start_sample >= history->start_sample_index && end_sample <= history_end;
+    return dab_sample_history_contains_range(history, start_sample, end_sample);
 }
 
 #if defined(DAB_RECEIVE_NO_MAIN)
@@ -1315,14 +1181,23 @@ int main(int argc, char **argv) {
         fprintf(stderr, "sync init failed\n");
         return 2;
     }
-    if (dab_fic_init(&fic) != 0 || dab_msc_init(&msc) != 0) {
+    if (dab_fic_init(&fic) != 0) {
         fprintf(stderr, "fic/msc init failed\n");
         return 2;
+    }
+    if (dab_msc_init(&msc) != 0) {
+        fprintf(stderr, "fic/msc init failed\n");
+        dab_fic_destroy(&fic);
+        return 2;
+    }
+    if (selected_audio_sid_valid != 0u) {
+        dab_msc_set_service_filter(&msc, selected_audio_sid);
     }
 
     dab_ofdm_default_config(&ofdm_config);
     if (dab_ofdm_init(&ofdm, &ofdm_config) != 0) {
         fprintf(stderr, "ofdm init failed\n");
+        dab_fic_destroy(&fic);
         return 2;
     }
 
@@ -1818,7 +1693,18 @@ int main(int argc, char **argv) {
                         continue;
                     }
                     if (receiver_metrics_enabled) {
-                        if (estimate_spectrum_cn_db(fft_i, fft_q, &sync.state.spectrum_cn_db) == 0) {
+                        if (dab_prs_estimate_rf_level_dbfs_i16(&hist_view,
+                                                              prs_fft_start_sample,
+                                                              acquire_config.fft_samples,
+                                                              &sync.state.rf_level_dbfs) == 0) {
+                            sync.state.rf_level_valid = 1;
+                        } else {
+                            sync.state.rf_level_dbfs = 0.0f;
+                            sync.state.rf_level_valid = 0;
+                        }
+                        if (dab_prs_estimate_spectrum_cn_mode_i_f32(fft_i,
+                                                                   fft_q,
+                                                                   &sync.state.spectrum_cn_db) == 0) {
                             sync.state.spectrum_cn_valid = 1;
                         } else {
                             sync.state.spectrum_cn_db = 0.0f;
@@ -1843,6 +1729,8 @@ int main(int argc, char **argv) {
                         sync.state.receiver_snr_valid = 0;
                         sync.state.spectrum_cn_db = 0.0f;
                         sync.state.spectrum_cn_valid = 0;
+                        sync.state.rf_level_dbfs = 0.0f;
+                        sync.state.rf_level_valid = 0;
                     }
                     phase_correct_prs_for_plot(&ofdm, active_i, active_q, prs_plot_i, prs_plot_q);
                     if (prs_fft_gnuplot_fp != 0 &&
@@ -2182,12 +2070,14 @@ int main(int argc, char **argv) {
                                                     if (audio_component != 0) {
                                                         selected_audio_sid = audio_component->sid;
                                                         selected_audio_sid_valid = 1u;
+                                                        dab_msc_set_service_filter(&msc, selected_audio_sid);
                                                     }
                                                 }
                                                 if (audio_component != 0 &&
                                                     (!selected_audio_sid_valid || selected_audio_sid != audio_component->sid)) {
                                                     selected_audio_sid = audio_component->sid;
                                                     selected_audio_sid_valid = 1u;
+                                                    dab_msc_set_service_filter(&msc, selected_audio_sid);
                                                 }
                                                 if (selected_audio_sid_valid != 0) {
                                                     label = fic_repo_find_label(&fic.repo.current,
@@ -2389,6 +2279,7 @@ cleanup:
         dab_sdr_device_close(device);
     }
     history_destroy(&history);
+    dab_fic_destroy(&fic);
     free(frame_softbits);
     free(msc_softbits);
     free(fic_softbits);

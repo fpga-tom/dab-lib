@@ -10,18 +10,14 @@
 #include "dab/core/prs_acquire.h"
 #include "dab/core/prs_fft.h"
 #include "dab/core/prs_score.h"
+#include "dab/core/sample_history.h"
 #include "dab/core/sync.h"
 #include "dab/core/tframe.h"
 #include "dab/core/msc.h"
 #include "dab/simd/simd.h"
 #include "audio_playback.h"
 
-typedef struct {
-    int16_t *iq;
-    uint32_t capacity_samples;
-    uint32_t sample_count;
-    uint64_t start_sample_index;
-} history_buffer_t;
+typedef dab_sample_history_t history_buffer_t;
 
 typedef struct {
     int pending;
@@ -639,108 +635,25 @@ static int append_selected_stage_dump(FILE *fp,
 }
 
 static int history_init(history_buffer_t *history, uint32_t capacity_samples) {
-    if (history == 0 || capacity_samples == 0u) {
-        return -1;
-    }
-    history->iq = (int16_t *)calloc((size_t)capacity_samples * 2u, sizeof(*history->iq));
-    if (history->iq == 0) {
-        return -1;
-    }
-    history->capacity_samples = capacity_samples;
-    history->sample_count = 0u;
-    history->start_sample_index = 0u;
-    return 0;
+    return dab_sample_history_init(history, capacity_samples);
 }
 
 static void history_destroy(history_buffer_t *history) {
-    if (history == 0) {
-        return;
-    }
-    free(history->iq);
-    history->iq = 0;
-    history->capacity_samples = 0u;
-    history->sample_count = 0u;
-    history->start_sample_index = 0u;
-}
-
-static void history_reset(history_buffer_t *history, const dab_sdr_block_view_t *block) {
-    uint32_t keep;
-
-    if (history == 0 || block == 0 || history->iq == 0 || block->iq_interleaved == 0) {
-        return;
-    }
-
-    keep = block->sample_count > history->capacity_samples ? history->capacity_samples : block->sample_count;
-    memcpy(history->iq,
-           block->iq_interleaved + (2u * (block->sample_count - keep)),
-           sizeof(*history->iq) * 2u * keep);
-    history->sample_count = keep;
-    history->start_sample_index = block->sample_index + (block->sample_count - keep);
+    dab_sample_history_destroy(history);
 }
 
 static void history_append(history_buffer_t *history, const dab_sdr_block_view_t *block) {
-    uint32_t drop;
-    uint32_t keep;
-    uint64_t expected_next;
-
-    if (history == 0 || block == 0 || history->iq == 0 || block->iq_interleaved == 0) {
-        return;
-    }
-    if (history->sample_count == 0u) {
-        history_reset(history, block);
-        return;
-    }
-
-    expected_next = history->start_sample_index + history->sample_count;
-    if (block->sample_index != expected_next) {
-        history_reset(history, block);
-        return;
-    }
-
-    keep = block->sample_count;
-    if (keep > history->capacity_samples) {
-        history_reset(history, block);
-        return;
-    }
-
-    if ((history->sample_count + keep) > history->capacity_samples) {
-        drop = (history->sample_count + keep) - history->capacity_samples;
-        memmove(history->iq,
-                history->iq + (2u * drop),
-                sizeof(*history->iq) * 2u * (history->sample_count - drop));
-        history->sample_count -= drop;
-        history->start_sample_index += drop;
-    }
-
-    memcpy(history->iq + (2u * history->sample_count),
-           block->iq_interleaved,
-           sizeof(*history->iq) * 2u * keep);
-    history->sample_count += keep;
+    (void)dab_sample_history_append(history, block);
 }
 
 static dab_sdr_block_view_t history_view(const history_buffer_t *history) {
-    dab_sdr_block_view_t view = {0};
-
-    if (history == 0) {
-        return view;
-    }
-    view.iq_interleaved = history->iq;
-    view.sample_count = history->sample_count;
-    view.sample_index = history->start_sample_index;
-    view.timestamp_ns = 0u;
-    return view;
+    return dab_sample_history_view(history);
 }
 
 static int history_contains_sample_range(const history_buffer_t *history,
                                          uint64_t start_sample,
                                          uint64_t end_sample) {
-    uint64_t history_end;
-
-    if (history == 0 || history->sample_count == 0u) {
-        return 0;
-    }
-    history_end = history->start_sample_index + history->sample_count;
-    return start_sample >= history->start_sample_index && end_sample <= history_end;
+    return dab_sample_history_contains_range(history, start_sample, end_sample);
 }
 
 static int read_block(FILE *fp,
@@ -852,6 +765,8 @@ int main(int argc, char **argv) {
     uint32_t sample_rate = env_u32("DAB_SYNC_PROBE_SAMPLE_RATE", 2048000u);
     uint32_t audio_sid = 0u;
     int audio_sid_configured = env_u32_base0("DAB_SYNC_REPLAY_AUDIO_SID", &audio_sid) == 0;
+    uint32_t msc_filter_sid = 0u;
+    int msc_filter_sid_configured = env_u32_base0("DAB_SYNC_REPLAY_MSC_FILTER_SID", &msc_filter_sid) == 0;
     int audio_debug_enabled = env_i32("DAB_SYNC_REPLAY_AUDIO_DEBUG", 0);
     const char *dump_selected_sid_path = getenv("DAB_SYNC_REPLAY_DUMP_SID_PATH");
     const char *dump_selected_stage_path = getenv("DAB_SYNC_REPLAY_DUMP_STAGE_PATH");
@@ -948,14 +863,23 @@ int main(int argc, char **argv) {
         fprintf(stderr, "sync init failed\n");
         return 2;
     }
-    if (dab_fic_init(&fic) != 0 || dab_msc_init(&msc) != 0) {
+    if (dab_fic_init(&fic) != 0) {
         fprintf(stderr, "fic/msc init failed\n");
         return 2;
+    }
+    if (dab_msc_init(&msc) != 0) {
+        fprintf(stderr, "fic/msc init failed\n");
+        dab_fic_destroy(&fic);
+        return 2;
+    }
+    if (audio_sid_configured || msc_filter_sid_configured) {
+        dab_msc_set_service_filter(&msc, audio_sid_configured ? audio_sid : msc_filter_sid);
     }
 
     dab_ofdm_default_config(&ofdm_config);
     if (dab_ofdm_init(&ofdm, &ofdm_config) != 0) {
         fprintf(stderr, "ofdm init failed\n");
+        dab_fic_destroy(&fic);
         return 2;
     }
 
@@ -1705,6 +1629,7 @@ cleanup:
     free(iq_block);
     free(sample_scratch);
     history_destroy(&history);
+    dab_fic_destroy(&fic);
     free(frame_softbits);
     free(msc_softbits);
     free(fic_softbits);

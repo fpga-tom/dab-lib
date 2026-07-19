@@ -3,9 +3,18 @@
 #include <arm_neon.h>
 
 static void dab_neon_complex_i16_to_f32(float *dst_i, float *dst_q, const int16_t *src, uint32_t count) {
-    uint32_t i;
+    uint32_t i = 0u;
 
-    for (i = 0u; i < count; ++i) {
+    for (; i + 8u <= count; i += 8u) {
+        const int16x8x2_t iq = vld2q_s16(src + (2u * i));
+
+        vst1q_f32(dst_i + i, vcvtq_f32_s32(vmovl_s16(vget_low_s16(iq.val[0]))));
+        vst1q_f32(dst_i + i + 4u, vcvtq_f32_s32(vmovl_s16(vget_high_s16(iq.val[0]))));
+        vst1q_f32(dst_q + i, vcvtq_f32_s32(vmovl_s16(vget_low_s16(iq.val[1]))));
+        vst1q_f32(dst_q + i + 4u, vcvtq_f32_s32(vmovl_s16(vget_high_s16(iq.val[1]))));
+    }
+
+    for (; i < count; ++i) {
         dst_i[i] = (float)src[2u * i];
         dst_q[i] = (float)src[(2u * i) + 1u];
     }

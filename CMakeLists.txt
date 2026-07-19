@@ -2,7 +2,11 @@ cmake_minimum_required(VERSION 3.21)
 
 project(dab_lib C CXX)
 
-set(DAB_APP_VERSION "0.1.2")
+set(DAB_APP_VERSION "0.1.3")
+set(DAB_CAPTURE_BLOCK_COUNT 32 CACHE STRING "Preallocated IQ blocks per open SDR stream")
+if(DAB_CAPTURE_BLOCK_COUNT LESS 2)
+    message(FATAL_ERROR "DAB_CAPTURE_BLOCK_COUNT must be at least 2")
+endif()
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -16,7 +20,25 @@ option(DAB_BUILD_GUI "Build wxWidgets GUI prototype" ON)
 option(DAB_BUILD_TOOLS "Build command-line tools" ON)
 option(DAB_ENABLE_AVX2 "Enable AVX2 backend when supported" ON)
 option(DAB_ENABLE_NEON "Enable NEON backend when supported" ON)
+option(DAB_ENABLE_RELEASE_IPO "Enable interprocedural optimization in Release builds" ON)
 option(DAB_USE_BUNDLED_WINDOWS_DEPS "Use third-party libraries from libs/ on Windows" ON)
+
+if(MSVC)
+    string(REPLACE "/Ob2" "/Ob3" CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE}")
+    string(REPLACE "/Ob2" "/Ob3" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
+endif()
+
+if(DAB_ENABLE_RELEASE_IPO)
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT DAB_RELEASE_IPO_SUPPORTED
+                        OUTPUT DAB_RELEASE_IPO_ERROR
+                        LANGUAGES C CXX)
+    if(DAB_RELEASE_IPO_SUPPORTED)
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+    else()
+        message(WARNING "Release IPO is unavailable: ${DAB_RELEASE_IPO_ERROR}")
+    endif()
+endif()
 
 find_package(PkgConfig QUIET)
 
@@ -215,6 +237,7 @@ add_library(dab STATIC
     src/core/prs_template.c
     src/core/pc_queue.c
     src/core/receiver.c
+    src/core/sample_history.c
     src/core/sync.c
     src/core/tframe.c
     src/core/viterbi47_port.c
@@ -245,6 +268,7 @@ target_include_directories(dab
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+target_compile_definitions(dab PUBLIC DAB_CAPTURE_BLOCK_COUNT=${DAB_CAPTURE_BLOCK_COUNT})
 set_target_properties(dab PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 if(NOT WIN32)
@@ -317,6 +341,11 @@ if(DAB_BUILD_TOOLS)
 
     target_link_libraries(dab_sdrplay_probe PRIVATE dab)
 
+    add_executable(dab_simd_bench
+        tools/dab_simd_bench.c
+    )
+    target_link_libraries(dab_simd_bench PRIVATE dab)
+
     add_executable(dab_sdrplay_null_probe
         tools/sdrplay_null_probe.c
     )
@@ -328,6 +357,7 @@ if(DAB_BUILD_TOOLS)
     )
 
     target_link_libraries(dab_sdrplay_sync_probe PRIVATE dab)
+    dab_set_windows_stack_size(dab_sdrplay_sync_probe 8388608)
 
     add_executable(dab_sdrplay_audio
         tools/dab_sdrplay_audio.c
@@ -538,6 +568,7 @@ if(DAB_BUILD_TESTS)
         tests/test_sdrplay.c
         tests/test_rtlsdr_api.c
         tests/test_rtlsdr.c
+        tests/test_sample_history.c
         tests/test_pc_queue.c
         tests/test_simd.c
         tests/test_prs_acquire.c

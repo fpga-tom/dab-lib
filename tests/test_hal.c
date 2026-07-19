@@ -37,12 +37,14 @@ void test_hal_opens_and_configures_sdrplay_stub(void) {
     TEST_ASSERT(stream != 0);
     TEST_ASSERT(stream->vtbl->start(stream) == DAB_SDR_STATUS_OK);
     TEST_ASSERT(stream->vtbl->read(stream, &block0) == DAB_SDR_STATUS_OK);
-    TEST_ASSERT(block0.sample_count == 1024u);
+    TEST_ASSERT(block0.sample_count == DAB_IQ_BLOCK_SAMPLES);
     TEST_ASSERT(block0.iq_interleaved != 0);
     TEST_ASSERT(block0.iq_interleaved[0] == 0);
     TEST_ASSERT(block0.iq_interleaved[1] == 0);
+    TEST_ASSERT(block0.iq_interleaved[2u * (block0.sample_count - 1u)] == 16383);
+    TEST_ASSERT(block0.iq_interleaved[(2u * (block0.sample_count - 1u)) + 1u] == -16383);
     TEST_ASSERT(stream->vtbl->read(stream, &block1) == DAB_SDR_STATUS_OK);
-    TEST_ASSERT(block1.sample_count == 1024u);
+    TEST_ASSERT(block1.sample_count == DAB_IQ_BLOCK_SAMPLES);
     TEST_ASSERT(block1.sample_index >= block0.sample_index + block0.sample_count);
     TEST_ASSERT(block1.timestamp_ns >= block0.timestamp_ns);
     TEST_ASSERT(stream->vtbl->stop(stream) == DAB_SDR_STATUS_OK);

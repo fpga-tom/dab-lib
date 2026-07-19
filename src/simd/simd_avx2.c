@@ -3,9 +3,20 @@
 #include <immintrin.h>
 
 static void dab_avx2_complex_i16_to_f32(float *dst_i, float *dst_q, const int16_t *src, uint32_t count) {
-    uint32_t i;
+    const __m256i select_i = _mm256_set1_epi32(0x00000001);
+    const __m256i select_q = _mm256_set1_epi32(0x00010000);
+    uint32_t i = 0u;
 
-    for (i = 0u; i < count; ++i) {
+    for (; i + 8u <= count; i += 8u) {
+        const __m256i iq = _mm256_loadu_si256((const __m256i *)(src + (2u * i)));
+        const __m256i i32 = _mm256_madd_epi16(iq, select_i);
+        const __m256i q32 = _mm256_madd_epi16(iq, select_q);
+
+        _mm256_storeu_ps(dst_i + i, _mm256_cvtepi32_ps(i32));
+        _mm256_storeu_ps(dst_q + i, _mm256_cvtepi32_ps(q32));
+    }
+
+    for (; i < count; ++i) {
         dst_i[i] = (float)src[2u * i];
         dst_q[i] = (float)src[(2u * i) + 1u];
     }
