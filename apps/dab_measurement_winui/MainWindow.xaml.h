@@ -21,6 +21,7 @@ namespace winrt::DabMeasurementWinUI::implementation
         void RfMeasurements_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void RootLayout_SizeChanged(IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
         void RfWorkspace_SizeChanged(IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
+        void CirExpandButton_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void RfSpectrum_Loaded(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void RfSpectrumControls_SelectionChanged(IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
         void RfSpectrumCenter_ValueChanged(IInspectable const&, Microsoft::UI::Xaml::Controls::NumberBoxValueChangedEventArgs const&);
@@ -55,6 +56,7 @@ namespace winrt::DabMeasurementWinUI::implementation
         void UpdateRfHistoryVisuals();
         void UpdateRfContext();
         void ShowWorkspace(bool rf_measurements);
+        void SetCirPanelMaximized(bool maximized);
         void ApplyWorkspaceWidth(double root_width);
         void UpdateCpuUsage();
         void ApplyCatalog(dab_receive_catalog_t const& catalog);
@@ -66,6 +68,7 @@ namespace winrt::DabMeasurementWinUI::implementation
         void StartPendingServiceRestart();
         void ClearCatalogView();
         void UpdatePlots(dab::measurement::MeasurementFrame const& frame);
+        void UpdateCirPlot(dab::measurement::MeasurementFrame const& frame);
         void UpdateRfSpectrum(dab::measurement::MeasurementFrame const& frame);
         void RenderRfSpectrum();
         void AppendRfSpectrumWaterfall();
@@ -107,10 +110,20 @@ namespace winrt::DabMeasurementWinUI::implementation
         float m_latest_mer_db{ 0.0f };
         bool m_latest_mer_valid{ false };
         bool m_rf_workspace_active{ false };
+        bool m_cir_panel_maximized{ false };
         bool m_rf_was_locked{ false };
         uint64_t m_rf_lock_started_ns{ 0u };
         uint64_t m_last_process_time_100ns{ 0u };
         uint64_t m_last_system_time_100ns{ 0u };
+        static constexpr size_t cir_average_capacity = 8u;
+        std::array<std::array<float, DAB_RECEIVE_CIR_BIN_COUNT>, cir_average_capacity>
+            m_cir_power_history_linear{};
+        std::array<float, DAB_RECEIVE_CIR_BIN_COUNT> m_cir_power_sum_linear{};
+        size_t m_cir_power_history_write{ 0u };
+        size_t m_cir_power_history_count{ 0u };
+        uint64_t m_cir_frequency_hz{ 0u };
+        uint32_t m_cir_bin_count{ 0u };
+        float m_cir_sample_period_ns{ 0.0f };
         std::array<float, DAB_RECEIVE_SPECTRUM_BIN_COUNT> m_rf_spectrum_average{};
         std::array<float, DAB_RECEIVE_SPECTRUM_BIN_COUNT> m_rf_spectrum_peak{};
         uint32_t m_rf_spectrum_count{ 0u };

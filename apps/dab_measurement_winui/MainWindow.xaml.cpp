@@ -196,7 +196,9 @@ namespace winrt::DabMeasurementWinUI::implementation
         double const workspace_width = (std::max)(520.0, root_width - 150.0);
         if (ReceiverWorkspaceMain())
         {
-            ReceiverWorkspaceMain().Width(workspace_width);
+            ReceiverWorkspaceMain().Width(m_cir_panel_maximized
+                ? (std::max)(520.0, root_width - 20.0)
+                : workspace_width);
         }
         if (ReceiverTimelinePanel())
         {
@@ -218,6 +220,47 @@ namespace winrt::DabMeasurementWinUI::implementation
         {
             RfOverviewContent().Width(static_cast<double>(args.NewSize().Width) - 36.0);
         }
+    }
+
+    void MainWindow::CirExpandButton_Click(IInspectable const&, RoutedEventArgs const&)
+    {
+        SetCirPanelMaximized(!m_cir_panel_maximized);
+    }
+
+    void MainWindow::SetCirPanelMaximized(bool maximized)
+    {
+        if (m_cir_panel_maximized == maximized)
+        {
+            return;
+        }
+        m_cir_panel_maximized = maximized;
+
+        WorkspaceNavigationPanel().Visibility(maximized ? Visibility::Collapsed : Visibility::Visible);
+        ReceiverCatalogPanel().Visibility(maximized ? Visibility::Collapsed : Visibility::Visible);
+        ReceiverSpectrumPanel().Visibility(maximized ? Visibility::Collapsed : Visibility::Visible);
+        ReceiverKpiPanel().Visibility(maximized ? Visibility::Collapsed : Visibility::Visible);
+        ReceiverTimelinePanel().Visibility(maximized
+            ? Visibility::Collapsed
+            : (m_rf_workspace_active ? Visibility::Collapsed : Visibility::Visible));
+
+        ReceiverWorkspaceMain().Margin(maximized
+            ? Thickness{ 10.0, 10.0, 10.0, 10.0 }
+            : Thickness{ 140.0, 10.0, 10.0, 10.0 });
+        Grid::SetRowSpan(ReceiverWorkspaceMain(), maximized ? 2 : 1);
+        Grid::SetColumn(ReceiverCenterGrid(), maximized ? 0 : 1);
+        Grid::SetColumnSpan(ReceiverCenterGrid(), maximized ? 3 : 1);
+        Grid::SetRow(ReceiverAnalysisPanel(), maximized ? 0 : 1);
+        Grid::SetRowSpan(ReceiverAnalysisPanel(), maximized ? 2 : 1);
+
+        CirExpandIcon().Glyph(maximized ? L"\xE73F" : L"\xE740");
+        hstring const accessible_name = maximized
+            ? hstring{ L"Restore CIR panel" }
+            : hstring{ L"Maximize CIR panel" };
+        ToolTipService::SetToolTip(CirExpandButton(), box_value(accessible_name + L" (Ctrl+M)"));
+        Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(
+            CirExpandButton(),
+            accessible_name);
+        ApplyWorkspaceWidth(RootLayout().ActualWidth());
     }
 
     void MainWindow::RfSpectrum_Loaded(IInspectable const&, RoutedEventArgs const&)
@@ -922,6 +965,10 @@ namespace winrt::DabMeasurementWinUI::implementation
 
     void MainWindow::ShowWorkspace(bool rf_measurements)
     {
+        if (rf_measurements && m_cir_panel_maximized)
+        {
+            SetCirPanelMaximized(false);
+        }
         bool const changed = m_rf_workspace_active != rf_measurements;
         m_rf_workspace_active = rf_measurements;
         ReceiverWorkspaceMain().Visibility(rf_measurements ? Visibility::Collapsed : Visibility::Visible);
@@ -1412,6 +1459,244 @@ namespace winrt::DabMeasurementWinUI::implementation
         service_items.Append(service_placeholder);
         ServicesListView().SelectedIndex(-1);
         ApplySelectedServiceComponents();
+    }
+
+    void MainWindow::UpdateCirPlot(dab::measurement::MeasurementFrame const& frame)
+    {
+        uint32_t const count = (std::min)(frame.cir_bin_count,
+                                          static_cast<uint32_t>(DAB_RECEIVE_CIR_BIN_COUNT));
+        if (count == 0u || frame.cir_sample_period_ns <= 0.0f)
+        {
+            return;
+        }
+
+        bool const reset_average = m_cir_frequency_hz != frame.frequency_hz ||
+            m_cir_bin_count != count ||
+            std::abs(m_cir_sample_period_ns - frame.cir_sample_period_ns) > 0.001f;
+        if (reset_average)
+        {
+            m_cir_power_history_linear = {};
+            m_cir_power_sum_linear = {};
+            m_cir_power_history_write = 0u;
+            m_cir_power_history_count = 0u;
+            m_cir_frequency_hz = frame.frequency_hz;
+            m_cir_bin_count = count;
+            m_cir_sample_period_ns = frame.cir_sample_period_ns;
+        }
+
+        size_t const slot = m_cir_power_history_write;
+        bool const replacing = m_cir_power_history_count == cir_average_capacity;
+        for (uint32_t bin = 0u; bin < count; ++bin)
+        {
+            float const db = std::clamp(frame.cir_power_db[bin], -120.0f, 0.0f);
+            float const linear = std::pow(10.0f, db / 10.0f);
+            if (replacing)
+            {
+                m_cir_power_sum_linear[bin] -= m_cir_power_history_linear[slot][bin];
+            }
+            m_cir_power_history_linear[slot][bin] = linear;
+            m_cir_power_sum_linear[bin] += linear;
+        }
+        m_cir_power_history_write = (slot + 1u) % cir_average_capacity;
+        m_cir_power_history_count = (std::min)(m_cir_power_history_count + 1u,
+                                               cir_average_capacity);
+
+        std::array<float, DAB_RECEIVE_CIR_BIN_COUNT> level_db{};
+        uint32_t peak_bin = 0u;
+        float peak_power = 0.0f;
+        float const divisor = static_cast<float>(m_cir_power_history_count);
+        for (uint32_t bin = 0u; bin < count; ++bin)
+        {
+            float const average_power = m_cir_power_sum_linear[bin] / divisor;
+            if (average_power > peak_power)
+            {
+                peak_power = average_power;
+                peak_bin = bin;
+            }
+        }
+        peak_power = (std::max)(peak_power, 1.0e-12f);
+        for (uint32_t bin = 0u; bin < count; ++bin)
+        {
+            float const ratio = (m_cir_power_sum_linear[bin] / divisor) / peak_power;
+            level_db[bin] = ratio > 1.0e-12f
+                ? 10.0f * std::log10(ratio)
+                : -120.0f;
+        }
+
+        constexpr float plot_left = 58.0f;
+        constexpr float plot_top = 34.0f;
+        constexpr float plot_width = 820.0f;
+        constexpr float plot_height = 166.0f;
+        PointCollection cir_points;
+        for (uint32_t bin = 0u; bin < count; ++bin)
+        {
+            float const x = count > 1u
+                ? plot_left + plot_width * static_cast<float>(bin) /
+                    static_cast<float>(count - 1u)
+                : plot_left;
+            float const y = plot_top + std::clamp(-level_db[bin] / 60.0f,
+                                                  0.0f,
+                                                  1.0f) * plot_height;
+            cir_points.Append(Point{ x, y });
+        }
+        CirTrace().Points(cir_points);
+
+        std::vector<float> floor_samples;
+        floor_samples.reserve(count);
+        for (uint32_t bin = 0u; bin < count; ++bin)
+        {
+            if (std::abs(static_cast<int32_t>(bin) - static_cast<int32_t>(peak_bin)) > 6)
+            {
+                floor_samples.push_back(level_db[bin]);
+            }
+        }
+        float floor_db = -60.0f;
+        if (!floor_samples.empty())
+        {
+            size_t const middle = floor_samples.size() / 2u;
+            std::nth_element(floor_samples.begin(),
+                             floor_samples.begin() + middle,
+                             floor_samples.end());
+            floor_db = floor_samples[middle];
+        }
+        float const detection_threshold_db = std::clamp(floor_db + 8.0f, -35.0f, -10.0f);
+
+        struct CirPeak
+        {
+            uint32_t bin;
+            float level_db;
+        };
+        std::vector<CirPeak> candidates;
+        candidates.push_back(CirPeak{ peak_bin, level_db[peak_bin] });
+        for (uint32_t bin = 1u; bin + 1u < count; ++bin)
+        {
+            if (bin != peak_bin && level_db[bin] >= detection_threshold_db &&
+                level_db[bin] >= level_db[bin - 1u] &&
+                level_db[bin] > level_db[bin + 1u])
+            {
+                candidates.push_back(CirPeak{ bin, level_db[bin] });
+            }
+        }
+        std::sort(candidates.begin(), candidates.end(), [](CirPeak const& left, CirPeak const& right)
+        {
+            return left.level_db > right.level_db;
+        });
+
+        std::vector<CirPeak> selected;
+        for (auto const& candidate : candidates)
+        {
+            bool separated = true;
+            for (auto const& existing : selected)
+            {
+                if (std::abs(static_cast<int32_t>(candidate.bin) -
+                             static_cast<int32_t>(existing.bin)) < 6)
+                {
+                    separated = false;
+                    break;
+                }
+            }
+            if (separated)
+            {
+                selected.push_back(candidate);
+                if (selected.size() == 4u)
+                {
+                    break;
+                }
+            }
+        }
+        std::sort(selected.begin(), selected.end(), [](CirPeak const& left, CirPeak const& right)
+        {
+            return left.bin < right.bin;
+        });
+
+        auto markers = CirMarkerCanvas().Children();
+        markers.Clear();
+        auto const strongest_brush = SolidColorBrush(ColorHelper::FromArgb(255u, 255u, 200u, 87u));
+        auto const secondary_brush = SolidColorBrush(ColorHelper::FromArgb(255u, 84u, 226u, 255u));
+        uint32_t secondary_number = 0u;
+        std::wstring path_readout{ L"Detected: " };
+        for (size_t index = 0u; index < selected.size(); ++index)
+        {
+            auto const& path = selected[index];
+            bool const strongest = path.bin == peak_bin;
+            auto const brush = strongest ? strongest_brush : secondary_brush;
+            double const x = count > 1u
+                ? plot_left + plot_width * static_cast<double>(path.bin) /
+                    static_cast<double>(count - 1u)
+                : plot_left;
+            double const y = plot_top + std::clamp(-static_cast<double>(path.level_db) / 60.0,
+                                                   0.0,
+                                                   1.0) * plot_height;
+
+            Line marker_line;
+            marker_line.X1(x);
+            marker_line.X2(x);
+            marker_line.Y1(y + 5.0);
+            marker_line.Y2(plot_top + plot_height);
+            marker_line.Stroke(brush);
+            marker_line.StrokeThickness(strongest ? 1.5 : 1.0);
+            marker_line.Opacity(strongest ? 0.85 : 0.55);
+            markers.Append(marker_line);
+
+            Microsoft::UI::Xaml::Shapes::Ellipse marker_dot;
+            marker_dot.Width(strongest ? 7.0 : 6.0);
+            marker_dot.Height(strongest ? 7.0 : 6.0);
+            marker_dot.Fill(brush);
+            Canvas::SetLeft(marker_dot, x - (strongest ? 3.5 : 3.0));
+            Canvas::SetTop(marker_dot, y - (strongest ? 3.5 : 3.0));
+            markers.Append(marker_dot);
+
+            TextBlock label;
+            wchar_t label_text[16]{};
+            wchar_t path_text[80]{};
+            double const delay_us = static_cast<double>(path.bin) *
+                static_cast<double>(frame.cir_sample_period_ns) / 1000.0;
+            if (strongest)
+            {
+                swprintf_s(label_text, L"S");
+                swprintf_s(path_text, L"S %.2f µs  0.0 dB", delay_us);
+            }
+            else
+            {
+                ++secondary_number;
+                swprintf_s(label_text, L"P%u", secondary_number);
+                swprintf_s(path_text, L"P%u %.2f µs  %.1f dB",
+                           secondary_number,
+                           delay_us,
+                           static_cast<double>(path.level_db));
+            }
+            if (index != 0u)
+            {
+                path_readout += L"   ·   ";
+            }
+            path_readout += path_text;
+            label.Text(label_text);
+            label.FontFamily(FontFamily{ L"Consolas" });
+            label.FontSize(10.0);
+            label.Foreground(brush);
+            Canvas::SetLeft(label, std::clamp(x + 4.0, 62.0, 850.0));
+            Canvas::SetTop(label, plot_top + 3.0 + 12.0 * static_cast<double>(index % 3u));
+            markers.Append(label);
+        }
+        CirDetectedPathsText().Text(path_readout);
+
+        double const peak_delay_us = static_cast<double>(peak_bin) *
+            static_cast<double>(frame.cir_sample_period_ns) / 1000.0;
+        wchar_t status[128]{};
+        swprintf_s(status,
+                   L"Strongest tap %.2f µs (FFT-relative) · %zu/%zu-frame average",
+                   peak_delay_us,
+                   m_cir_power_history_count,
+                   cir_average_capacity);
+        CirStatusText().Text(status);
+
+        wchar_t summary[128]{};
+        swprintf_s(summary,
+                   L"%zu strongest candidate%s · floor %.1f dB",
+                   selected.size(),
+                   selected.size() == 1u ? L"" : L"s",
+                   static_cast<double>(floor_db));
+        CirPathSummaryText().Text(summary);
     }
 
     void MainWindow::UpdateRfSpectrum(dab::measurement::MeasurementFrame const& frame)
@@ -1957,43 +2242,7 @@ namespace winrt::DabMeasurementWinUI::implementation
 
         if (frame.cir_bin_count != 0u)
         {
-            PointCollection cir_points;
-            constexpr uint32_t display_points = 161u;
-            uint32_t peak_bin = 0u;
-            float peak_level = frame.cir_power_db[0u];
-            for (uint32_t bin = 1u; bin < frame.cir_bin_count; ++bin)
-            {
-                if (frame.cir_power_db[bin] > peak_level)
-                {
-                    peak_level = frame.cir_power_db[bin];
-                    peak_bin = bin;
-                }
-            }
-            for (uint32_t point = 0u; point < display_points; ++point)
-            {
-                uint32_t const begin = (point * frame.cir_bin_count) / display_points;
-                uint32_t const end = (std::max)(begin + 1u,
-                    ((point + 1u) * frame.cir_bin_count) / display_points);
-                float level = -120.0f;
-                for (uint32_t bin = begin; bin < (std::min)(end, frame.cir_bin_count); ++bin)
-                {
-                    level = (std::max)(level, frame.cir_power_db[bin]);
-                }
-                float const x = 800.0f * static_cast<float>(point) /
-                                static_cast<float>(display_points - 1u);
-                float const y = std::clamp(20.0f + (-level * 2.65f), 12.0f, 185.0f);
-                cir_points.Append(Point{ x, y });
-            }
-            CirTrace().Points(cir_points);
-
-            wchar_t cir_status[96]{};
-            double const peak_delay_us = static_cast<double>(peak_bin) *
-                                         static_cast<double>(frame.cir_sample_period_ns) / 1000.0;
-            swprintf_s(cir_status,
-                       L"main path %.2f µs · %u taps",
-                       peak_delay_us,
-                       frame.cir_bin_count);
-            CirStatusText().Text(cir_status);
+            UpdateCirPlot(frame);
         }
 
         if (frame.carrier_mer_count != 0u)

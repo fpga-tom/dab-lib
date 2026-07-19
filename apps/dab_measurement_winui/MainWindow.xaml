@@ -179,7 +179,8 @@
             </ScrollViewer>
         </Border>
 
-        <Border Grid.Row="2"
+        <Border x:Name="WorkspaceNavigationPanel"
+                Grid.Row="2"
                 Grid.RowSpan="2"
                 Width="120"
                 Margin="10"
@@ -227,7 +228,7 @@
                 <ColumnDefinition Width="175" MinWidth="160" />
             </Grid.ColumnDefinitions>
 
-            <Border Grid.Column="0" Style="{StaticResource PanelCardStyle}" Padding="14">
+            <Border x:Name="ReceiverCatalogPanel" Grid.Column="0" Style="{StaticResource PanelCardStyle}" Padding="14">
                 <Grid RowSpacing="6">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
@@ -271,13 +272,13 @@
                 </Grid>
             </Border>
 
-            <Grid Grid.Column="1" RowSpacing="10">
+            <Grid x:Name="ReceiverCenterGrid" Grid.Column="1" RowSpacing="10">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="3*" MinHeight="210" />
                     <RowDefinition Height="2*" MinHeight="140" />
                 </Grid.RowDefinitions>
 
-                <Border Grid.Row="0" Style="{StaticResource PanelCardStyle}">
+                <Border x:Name="ReceiverSpectrumPanel" Grid.Row="0" Style="{StaticResource PanelCardStyle}">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="44" />
@@ -331,8 +332,23 @@
                     </Grid>
                 </Border>
 
-                <Border Grid.Row="1" Style="{StaticResource PanelCardStyle}">
+                <Border x:Name="ReceiverAnalysisPanel" Grid.Row="1" Style="{StaticResource PanelCardStyle}">
                     <TabView IsAddTabButtonVisible="False" TabWidthMode="Equal">
+                        <TabView.TabStripFooter>
+                            <Button x:Name="CirExpandButton"
+                                    Width="34"
+                                    Height="30"
+                                    Margin="4,2,8,2"
+                                    Padding="0"
+                                    ToolTipService.ToolTip="Maximize CIR panel"
+                                    AutomationProperties.Name="Maximize CIR panel"
+                                    Click="CirExpandButton_Click">
+                                <Button.KeyboardAccelerators>
+                                    <KeyboardAccelerator Key="M" Modifiers="Control" />
+                                </Button.KeyboardAccelerators>
+                                <FontIcon x:Name="CirExpandIcon" Glyph="&#xE740;" FontSize="13" />
+                            </Button>
+                        </TabView.TabStripFooter>
                         <TabViewItem Header="Constellation" IsClosable="False">
                             <Grid Margin="10">
                                 <Viewbox Stretch="Uniform">
@@ -348,13 +364,72 @@
                             </Grid>
                         </TabViewItem>
                         <TabViewItem Header="CIR" IsClosable="False">
-                            <Viewbox Margin="10" Stretch="Fill">
-                                <Canvas Width="800" Height="210" Background="#FF07101B">
-                                    <Line X1="0" Y1="170" X2="800" Y2="170" Stroke="#334B6178" />
-                                    <Polyline x:Name="CirTrace" Stroke="{StaticResource MeasurementAccentBrush}" StrokeThickness="2" Points="0,180 800,180" />
-                                    <TextBlock x:Name="CirStatusText" Canvas.Left="12" Canvas.Top="12" Text="awaiting channel estimate" Foreground="{StaticResource MeasurementAccentBrush}" FontSize="11" />
-                                </Canvas>
-                            </Viewbox>
+                            <Grid Margin="10" RowSpacing="5">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <Viewbox Stretch="Fill">
+                                    <Canvas x:Name="CirCanvas" Width="900" Height="240" Background="#FF07101B">
+                                        <Line X1="58" Y1="34" X2="878" Y2="34" Stroke="#334B6178" />
+                                        <Line X1="58" Y1="89.33" X2="878" Y2="89.33" Stroke="#253D556E" />
+                                        <Line X1="58" Y1="144.67" X2="878" Y2="144.67" Stroke="#253D556E" />
+                                        <Line X1="58" Y1="200" X2="878" Y2="200" Stroke="#334B6178" />
+                                        <Line X1="58" Y1="34" X2="58" Y2="200" Stroke="#334B6178" />
+                                        <Line X1="263" Y1="34" X2="263" Y2="200" Stroke="#183D556E" />
+                                        <Line X1="468" Y1="34" X2="468" Y2="200" Stroke="#183D556E" />
+                                        <Line X1="673" Y1="34" X2="673" Y2="200" Stroke="#183D556E" />
+                                        <Line X1="878" Y1="34" X2="878" Y2="200" Stroke="#334B6178" />
+
+                                        <TextBlock Canvas.Left="10" Canvas.Top="26" Text="0 dB" FontFamily="Consolas" FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Canvas.Left="4" Canvas.Top="81" Text="−20 dB" FontFamily="Consolas" FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Canvas.Left="4" Canvas.Top="137" Text="−40 dB" FontFamily="Consolas" FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Canvas.Left="4" Canvas.Top="192" Text="−60 dB" FontFamily="Consolas" FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Canvas.Left="52" Canvas.Top="202" Text="0" FontFamily="Consolas" FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Canvas.Left="246" Canvas.Top="202" Text="62.5" FontFamily="Consolas" FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Canvas.Left="454" Canvas.Top="202" Text="125" FontFamily="Consolas" FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Canvas.Left="654" Canvas.Top="202" Text="187.5" FontFamily="Consolas" FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Canvas.Left="862" Canvas.Top="202" Text="250" FontFamily="Consolas" FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Canvas.Left="410" Canvas.Top="222" Text="Delay relative to FFT timing (µs)" FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
+
+                                        <Polyline x:Name="CirTrace"
+                                                  Stroke="{StaticResource MeasurementAccentBrush}"
+                                                  StrokeThickness="1.7"
+                                                  Points="58,200 878,200" />
+                                        <Canvas x:Name="CirMarkerCanvas" Width="900" Height="240" IsHitTestVisible="False" />
+                                        <TextBlock x:Name="CirStatusText"
+                                                   Canvas.Left="58"
+                                                   Canvas.Top="8"
+                                                   Text="Awaiting channel estimate"
+                                                   Foreground="{StaticResource MeasurementAccentBrush}"
+                                                   FontFamily="Consolas"
+                                                   FontSize="11" />
+                                        <TextBlock x:Name="CirPathSummaryText"
+                                                   Canvas.Left="580"
+                                                   Canvas.Top="8"
+                                                   Width="298"
+                                                   Text="No paths detected"
+                                                   TextAlignment="Right"
+                                                   Foreground="{StaticResource MutedTextBrush}"
+                                                   FontFamily="Consolas"
+                                                   FontSize="11" />
+                                    </Canvas>
+                                </Viewbox>
+                                <TextBlock Grid.Row="1"
+                                           x:Name="CirDetectedPathsText"
+                                           Text="Detected paths: awaiting channel estimate"
+                                           Foreground="{StaticResource MeasurementAccentBrush}"
+                                           FontFamily="Consolas"
+                                           FontSize="11"
+                                           TextTrimming="CharacterEllipsis"
+                                           HorizontalAlignment="Center" />
+                                <TextBlock Grid.Row="2"
+                                           Text="Hann-windowed channel estimate · 8-frame linear-power average · levels relative to strongest tap"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           FontSize="11"
+                                           HorizontalAlignment="Center" />
+                            </Grid>
                         </TabViewItem>
                         <TabViewItem Header="Carrier MER" IsClosable="False">
                             <Grid Margin="14" RowSpacing="8">
@@ -375,7 +450,7 @@
                 </Border>
             </Grid>
 
-            <Border Grid.Column="2" Style="{StaticResource PanelCardStyle}" Padding="12">
+            <Border x:Name="ReceiverKpiPanel" Grid.Column="2" Style="{StaticResource PanelCardStyle}" Padding="12">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Spacing="6">
                         <Grid>

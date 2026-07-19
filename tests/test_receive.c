@@ -340,6 +340,7 @@ void test_receive_measurement_builds_bounded_signal_payloads(void) {
     TEST_ASSERT(fabsf(fabsf(frame.constellation_i[0u]) - 0.7071067f) < 1.0e-4f);
     TEST_ASSERT(frame.cir_bin_count == DAB_RECEIVE_CIR_BIN_COUNT);
     TEST_ASSERT(fabsf(frame.cir_power_db[0u]) < 1.0e-4f);
+    TEST_ASSERT(frame.cir_power_db[16u] < -40.0f);
     TEST_ASSERT(frame.carrier_mer_count == DAB_RECEIVE_CARRIER_MER_COUNT);
     TEST_ASSERT(frame.carrier_mer_db[0u] > 50.0f);
     TEST_ASSERT(frame.carrier_mer_db[DAB_RECEIVE_CARRIER_MER_COUNT - 1u] > 50.0f);

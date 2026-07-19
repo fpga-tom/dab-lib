@@ -7,6 +7,7 @@ The current proof of concept includes:
 - receiver controls for device, the complete 5A–13F Band III channel plan, mapped centre frequency, gain, start, record, and markers;
 - live ensemble, service, and component navigation decoded from the tuned signal's FIC;
 - live spectrum, rolling waterfall, constellation, CIR, and per-carrier MER views;
+- a full-tap CIR diagnostic with Hann-windowed channel estimation, an exact 8-frame linear-power average, relative-delay/level axes, adaptive floor estimation, separated strongest/candidate-path markers, and an in-window maximize/restore view (`Ctrl+M`);
 - live KPI cards and receiver detail values;
 - a dedicated RF Measurements workspace with toolbar, navigation, View-menu, and live-summary entry points;
 - an RF Overview page with live ADC-referenced power, C/N, carrier MER, CFO, synchronization stability, overruns, receiver configuration, process CPU usage, and rolling 60-second traces;
@@ -40,6 +41,7 @@ Current proof-of-concept limitations:
 - selecting an audio service in the navigation list restarts the receiver session on the same channel with that explicit SID;
 - absolute input power remains uncalibrated, so RF power is correctly displayed in dBFS rather than dBm; sample-clock and ADC-clipping estimators are not available yet;
 - the high-rate callback is emitted after a complete synchronized DAB transmission frame; acquisition without frame synchronization produces scalar snapshots but no array payload;
+- CIR delays are relative to the receiver FFT timing reference and are not absolute transmitter propagation delays;
 - FFT size and window controls describe the native receiver FFT and are read-only; triggered raw-IQ capture remains disabled until the receiver pipeline exposes a raw sample recorder;
 - BER remains a FIC CRC-loss proxy; and
 - recording is not implemented, so the Record control is disabled.

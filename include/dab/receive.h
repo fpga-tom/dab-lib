@@ -93,6 +93,8 @@ enum {
  * must copy the arrays before returning.
  *
  * Spectrum bins are FFT-shifted from -sample_rate/2 to +sample_rate/2.
+ * CIR bins contain Hann-windowed channel impulse power, normalized to the
+ * strongest exported tap (0 dB), with one bin per input sample period.
  * Carrier MER entries 0..767 map to carriers -768..-1 and entries 768..1535
  * map to carriers +1..+768.
  */

@@ -389,6 +389,7 @@ int dab_receive_measurement_begin(dab_receive_measurement_state_t *state,
 
     for (i = 0u; i < DAB_MODE_I_ACTIVE_CARRIERS; ++i) {
         uint32_t fft_bin;
+        float window;
         const float equalizer_i = ofdm->channel_i[i];
         const float equalizer_q = ofdm->channel_q[i];
         const float denominator = (equalizer_i * equalizer_i) + (equalizer_q * equalizer_q);
@@ -399,8 +400,18 @@ int dab_receive_measurement_begin(dab_receive_measurement_state_t *state,
         fft_bin = i < DAB_MODE_I_ACTIVE_CARRIER_HALF
             ? DAB_MODE_I_FFT_SAMPLES - DAB_MODE_I_ACTIVE_CARRIER_HALF + i
             : i - DAB_MODE_I_ACTIVE_CARRIER_HALF;
-        state->cir_i[fft_bin] = equalizer_i / denominator;
-        state->cir_q[fft_bin] = -equalizer_q / denominator;
+        /*
+         * Taper the measured channel response at the active-band edges before
+         * the IFFT.  A rectangular 1536-carrier mask produces a sinc-shaped
+         * impulse with high sidelobes that can be mistaken for propagation
+         * paths.  The Hann taper trades a small amount of delay resolution for
+         * substantially cleaner path separation.
+         */
+        window = 0.5f - (0.5f * cosf(6.2831853071795864769f *
+                                     (float)i /
+                                     (float)(DAB_MODE_I_ACTIVE_CARRIERS - 1u)));
+        state->cir_i[fft_bin] = window * equalizer_i / denominator;
+        state->cir_q[fft_bin] = -window * equalizer_q / denominator;
     }
 
     if (dab_prs_fft_execute_complex_f32(fft, state->cir_i, state->cir_q, 1) != 0) {
