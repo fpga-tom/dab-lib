@@ -22,6 +22,7 @@
 #include "dab/hal/sdrplay_device.h"
 #if defined(DAB_RECEIVE_NO_MAIN)
 #include "dab/receive.h"
+#include "receive_snapshot_internal.h"
 #endif
 #include "dab/simd/simd.h"
 
@@ -206,6 +207,56 @@ static int receive_emit_status(dab_receive_callback_t callback,
     event.type = type;
     event.message = message;
     return callback(&event, user);
+}
+
+static uint32_t receive_dropped_blocks(const char *driver, const dab_sdr_stream_t *stream) {
+    if (stream == 0) {
+        return 0u;
+    }
+    return driver != 0 && strcmp(driver, "rtlsdr") == 0
+        ? dab_rtlsdr_stream_dropped_blocks(stream)
+        : dab_sdrplay_stream_dropped_blocks(stream);
+}
+
+static int receive_emit_snapshot(const dab_receive_config_t *config,
+                                 uint64_t *sequence,
+                                 const dab_sdr_block_view_t *block,
+                                 const dab_stream_config_t *stream_config,
+                                 uint64_t blocks_received,
+                                 const char *driver,
+                                 const dab_sdr_stream_t *stream,
+                                 const dab_sync_t *sync,
+                                 const dab_fic_state_t *fic,
+                                 const dab_msc_state_t *msc,
+                                 int selected_sid_valid,
+                                 uint32_t selected_sid) {
+    dab_receive_snapshot_t snapshot;
+    dab_msc_dabplus_debug_t msc_audio = {0};
+    const dab_msc_dabplus_debug_t *msc_audio_ptr = 0;
+
+    if (config == 0 || config->snapshot == 0 || sequence == 0 || block == 0 ||
+        stream_config == 0) {
+        return 0;
+    }
+
+    if (selected_sid_valid != 0 && msc != 0 &&
+        dab_msc_get_primary_dabplus_debug(msc, selected_sid, &msc_audio) == 0) {
+        msc_audio_ptr = &msc_audio;
+    }
+
+    (*sequence)++;
+    dab_receive_snapshot_build(&snapshot,
+                               *sequence,
+                               block->timestamp_ns,
+                               stream_config->center_freq_hz,
+                               stream_config->sample_rate,
+                               blocks_received,
+                               receive_dropped_blocks(driver, stream),
+                               sync,
+                               fic,
+                               msc,
+                               msc_audio_ptr);
+    return config->snapshot(&snapshot, config->snapshot_user);
 }
 #endif
 
@@ -994,8 +1045,10 @@ int dab_receiver_session_run(int argc, char **argv) {
 #endif
 #if defined(DAB_RECEIVE_NO_MAIN)
     uint64_t last_receive_generation = 0u;
+    uint64_t snapshot_sequence = 0u;
     uint8_t selected_sid_fallback_reported = 0u;
     uint8_t lock_reported = 0u;
+    uint8_t snapshot_pending = 0u;
 #endif
     uint64_t audio_timeout_samples = 0u;
     uint64_t samples_since_audio = 0u;
@@ -1015,6 +1068,9 @@ int dab_receiver_session_run(int argc, char **argv) {
 #if defined(DAB_RECEIVE_NO_MAIN)
     if (receive_config == 0 || receive_config->frequency_hz == 0u || receive_config->service_id == 0u) {
         return 2;
+    }
+    if (receive_config->snapshot != 0) {
+        receiver_metrics_enabled = 1;
     }
 #elif !defined(DAB_RECEIVER_SESSION_EMBEDDED)
     if (signal(SIGINT, on_signal_stop) == SIG_ERR || signal(SIGTERM, on_signal_stop) == SIG_ERR) {
@@ -1810,6 +1866,9 @@ int dab_receiver_session_run(int argc, char **argv) {
                                       sync.state.carrier_offset_bins);
                     }
                     publish_playback_status(&sync);
+#if defined(DAB_RECEIVE_NO_MAIN)
+                    snapshot_pending = 1u;
+#endif
 
                     {
                         dab_ofdm_buffers_t ofdm_buffers;
@@ -2254,6 +2313,26 @@ int dab_receiver_session_run(int argc, char **argv) {
             }
         }
 
+#if defined(DAB_RECEIVE_NO_MAIN)
+        if (snapshot_pending != 0u) {
+            if (receive_emit_snapshot(receive_config,
+                                      &snapshot_sequence,
+                                      &src_block,
+                                      &stream_config,
+                                      blocks_read,
+                                      params.driver,
+                                      stream,
+                                      &sync,
+                                      &fic,
+                                      &msc,
+                                      selected_audio_sid_valid,
+                                      selected_audio_sid) != 0) {
+                rc = -2;
+                goto cleanup;
+            }
+            snapshot_pending = 0u;
+        }
+#endif
         pending.pending = 0;
         pending.predicted = 0;
     }

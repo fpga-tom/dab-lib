@@ -599,6 +599,7 @@ if(DAB_BUILD_TESTS)
 
     target_link_libraries(dab_tests PRIVATE dab)
     target_include_directories(dab_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/receive
         ${CMAKE_CURRENT_SOURCE_DIR}/src/hal/sdrplay
         ${CMAKE_CURRENT_SOURCE_DIR}/src/hal/rtlsdr
     )

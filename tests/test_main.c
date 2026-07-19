@@ -56,6 +56,7 @@ void test_rtlsdr_device_specific_config_propagates_to_samples(void);
 void test_rtlsdr_rejects_invalid_device_specific_config(void);
 void test_receive_default_config_uses_rtlsdr_playback_defaults(void);
 void test_receive_service_rejects_incomplete_config_before_opening_device(void);
+void test_receive_snapshot_maps_receiver_measurements_and_counters(void);
 void test_simd_scalar_fallback(void);
 void test_simd_convert_and_dot(void);
 void test_simd_complex_convert_vector_and_tail(void);
@@ -140,6 +141,7 @@ int main(void) {
     test_rtlsdr_rejects_invalid_device_specific_config();
     test_receive_default_config_uses_rtlsdr_playback_defaults();
     test_receive_service_rejects_incomplete_config_before_opening_device();
+    test_receive_snapshot_maps_receiver_measurements_and_counters();
     test_simd_scalar_fallback();
     test_simd_convert_and_dot();
     test_simd_complex_convert_vector_and_tail();
