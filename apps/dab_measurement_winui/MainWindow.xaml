@@ -340,8 +340,8 @@
                                     Height="30"
                                     Margin="4,2,8,2"
                                     Padding="0"
-                                    ToolTipService.ToolTip="Maximize CIR panel"
-                                    AutomationProperties.Name="Maximize CIR panel"
+                                    ToolTipService.ToolTip="Maximize analysis panel"
+                                    AutomationProperties.Name="Maximize analysis panel"
                                     Click="CirExpandButton_Click">
                                 <Button.KeyboardAccelerators>
                                     <KeyboardAccelerator Key="M" Modifiers="Control" />
@@ -350,17 +350,43 @@
                             </Button>
                         </TabView.TabStripFooter>
                         <TabViewItem Header="Constellation" IsClosable="False">
-                            <Grid Margin="10">
+                            <Grid Margin="10" RowSpacing="4">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
                                 <Viewbox Stretch="Uniform">
-                                    <Canvas x:Name="ConstellationCanvas" Width="520" Height="220" Background="#FF07101B">
-                                        <Line X1="260" Y1="10" X2="260" Y2="210" Stroke="#334B6178" StrokeThickness="1" />
-                                        <Line X1="10" Y1="110" X2="510" Y2="110" Stroke="#334B6178" StrokeThickness="1" />
-                                        <Ellipse Canvas.Left="126" Canvas.Top="50" Width="7" Height="7" Fill="#FF54E2FF" />
-                                        <Ellipse Canvas.Left="388" Canvas.Top="50" Width="7" Height="7" Fill="#FF54E2FF" />
-                                        <Ellipse Canvas.Left="126" Canvas.Top="166" Width="7" Height="7" Fill="#FF54E2FF" />
-                                        <Ellipse Canvas.Left="388" Canvas.Top="166" Width="7" Height="7" Fill="#FF54E2FF" />
+                                    <Canvas x:Name="ConstellationCanvas" Width="280" Height="280" Background="#FF07101B">
+                                        <Rectangle Canvas.Left="30" Canvas.Top="20" Width="230" Height="230" Fill="#FF07101B" Stroke="#334B6178" StrokeThickness="1" />
+                                        <Line X1="49.17" Y1="20" X2="49.17" Y2="250" Stroke="#183D556E" StrokeThickness="1" />
+                                        <Line X1="240.83" Y1="20" X2="240.83" Y2="250" Stroke="#183D556E" StrokeThickness="1" />
+                                        <Line X1="30" Y1="39.17" X2="260" Y2="39.17" Stroke="#183D556E" StrokeThickness="1" />
+                                        <Line X1="30" Y1="230.83" X2="260" Y2="230.83" Stroke="#183D556E" StrokeThickness="1" />
+                                        <Line X1="145" Y1="20" X2="145" Y2="250" Stroke="#665A718A" StrokeThickness="1" />
+                                        <Line X1="30" Y1="135" X2="260" Y2="135" Stroke="#665A718A" StrokeThickness="1" />
+
+                                        <TextBlock Canvas.Left="42" Canvas.Top="252" Text="−1" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Canvas.Left="142" Canvas.Top="252" Text="0" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Canvas.Left="233" Canvas.Top="252" Text="+1" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Canvas.Left="4" Canvas.Top="31" Text="+1" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Canvas.Left="14" Canvas.Top="127" Text="0" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Canvas.Left="4" Canvas.Top="222" Text="−1" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Canvas.Left="264" Canvas.Top="126" Text="I" FontFamily="Consolas" FontSize="11" Foreground="{StaticResource MeasurementAccentBrush}" />
+                                        <TextBlock Canvas.Left="150" Canvas.Top="1" Text="Q" FontFamily="Consolas" FontSize="11" Foreground="{StaticResource MeasurementAccentBrush}" />
+
+                                        <Ellipse Canvas.Left="72.24" Canvas.Top="62.24" Width="10" Height="10" Fill="Transparent" Stroke="{StaticResource WarningBrush}" StrokeThickness="1.5" />
+                                        <Ellipse Canvas.Left="207.76" Canvas.Top="62.24" Width="10" Height="10" Fill="Transparent" Stroke="{StaticResource WarningBrush}" StrokeThickness="1.5" />
+                                        <Ellipse Canvas.Left="72.24" Canvas.Top="197.76" Width="10" Height="10" Fill="Transparent" Stroke="{StaticResource WarningBrush}" StrokeThickness="1.5" />
+                                        <Ellipse Canvas.Left="207.76" Canvas.Top="197.76" Width="10" Height="10" Fill="Transparent" Stroke="{StaticResource WarningBrush}" StrokeThickness="1.5" />
+                                        <Canvas x:Name="ConstellationPointCanvas" Width="280" Height="280" IsHitTestVisible="False" />
                                     </Canvas>
                                 </Viewbox>
+                                <TextBlock Grid.Row="1"
+                                           Text="Normalized I/Q · equal axes −1.2 … +1.2 · ideal QPSK targets ±0.707"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           FontFamily="Consolas"
+                                           FontSize="11"
+                                           HorizontalAlignment="Center" />
                             </Grid>
                         </TabViewItem>
                         <TabViewItem Header="CIR" IsClosable="False">

@@ -254,8 +254,8 @@ namespace winrt::DabMeasurementWinUI::implementation
 
         CirExpandIcon().Glyph(maximized ? L"\xE73F" : L"\xE740");
         hstring const accessible_name = maximized
-            ? hstring{ L"Restore CIR panel" }
-            : hstring{ L"Maximize CIR panel" };
+            ? hstring{ L"Restore analysis panel" }
+            : hstring{ L"Maximize analysis panel" };
         ToolTipService::SetToolTip(CirExpandButton(), box_value(accessible_name + L" (Ctrl+M)"));
         Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(
             CirExpandButton(),
@@ -2216,11 +2216,8 @@ namespace winrt::DabMeasurementWinUI::implementation
             }
         }
 
-        auto constellation = ConstellationCanvas().Children();
-        while (constellation.Size() > 2u)
-        {
-            constellation.RemoveAtEnd();
-        }
+        auto constellation = ConstellationPointCanvas().Children();
+        constellation.Clear();
         auto const dot_brush = SolidColorBrush(ColorHelper::FromArgb(185u, 84u, 226u, 255u));
         uint32_t const constellation_points = (std::min)(
             frame.constellation_point_count,
@@ -2229,14 +2226,29 @@ namespace winrt::DabMeasurementWinUI::implementation
         {
             uint32_t const source = (point * frame.constellation_point_count) /
                                     constellation_points;
-            double const x = std::clamp(260.0 + (180.0 * frame.constellation_i[source]), 10.0, 506.0);
-            double const y = std::clamp(110.0 - (82.0 * frame.constellation_q[source]), 10.0, 206.0);
+            constexpr double axis_min = -1.2;
+            constexpr double axis_max = 1.2;
+            constexpr double plot_left = 30.0;
+            constexpr double plot_top = 20.0;
+            constexpr double plot_size = 230.0;
+            double const normalized_i = std::clamp(
+                static_cast<double>(frame.constellation_i[source]),
+                axis_min,
+                axis_max);
+            double const normalized_q = std::clamp(
+                static_cast<double>(frame.constellation_q[source]),
+                axis_min,
+                axis_max);
+            double const x = plot_left +
+                (normalized_i - axis_min) / (axis_max - axis_min) * plot_size;
+            double const y = plot_top +
+                (axis_max - normalized_q) / (axis_max - axis_min) * plot_size;
             Microsoft::UI::Xaml::Shapes::Ellipse dot;
             dot.Width(3.0);
             dot.Height(3.0);
             dot.Fill(dot_brush);
-            Canvas::SetLeft(dot, x);
-            Canvas::SetTop(dot, y);
+            Canvas::SetLeft(dot, x - 1.5);
+            Canvas::SetTop(dot, y - 1.5);
             constellation.Append(dot);
         }
 

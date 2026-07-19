@@ -7,7 +7,9 @@ The current proof of concept includes:
 - receiver controls for device, the complete 5A–13F Band III channel plan, mapped centre frequency, gain, start, record, and markers;
 - live ensemble, service, and component navigation decoded from the tuned signal's FIC;
 - live spectrum, rolling waterfall, constellation, CIR, and per-carrier MER views;
-- a full-tap CIR diagnostic with Hann-windowed channel estimation, an exact 8-frame linear-power average, relative-delay/level axes, adaptive floor estimation, separated strongest/candidate-path markers, and an in-window maximize/restore view (`Ctrl+M`);
+- a square normalized constellation plot with equal `−1.2 … +1.2` I/Q axes and explicit ideal QPSK target rings;
+- a full-tap CIR diagnostic with Hann-windowed channel estimation, an exact 8-frame linear-power average, relative-delay/level axes, adaptive floor estimation, and separated strongest/candidate-path markers;
+- an in-window maximize/restore view shared by the constellation, CIR, and carrier-MER analysis tabs (`Ctrl+M`);
 - live KPI cards and receiver detail values;
 - a dedicated RF Measurements workspace with toolbar, navigation, View-menu, and live-summary entry points;
 - an RF Overview page with live ADC-referenced power, C/N, carrier MER, CFO, synchronization stability, overruns, receiver configuration, process CPU usage, and rolling 60-second traces;
