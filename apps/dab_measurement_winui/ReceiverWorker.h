@@ -25,7 +25,7 @@ namespace dab::measurement
     {
         std::string driver{ "sdrplay" };
         uint64_t frequency_hz{ 220352000ull };
-        uint32_t service_id{ 0x00001001u };
+        uint32_t service_id{ 0u };
         int gain_db{ 40 };
         bool agc_enabled{ false };
         int ppm_correction{ 0 };

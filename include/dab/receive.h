@@ -200,7 +200,7 @@ typedef int (*dab_receive_catalog_callback_t)(
 typedef struct {
     const char *driver;
     uint64_t frequency_hz;
-    uint32_t service_id;
+    uint32_t service_id; /* Zero selects the first decoded audio service. */
     int gain_db;
     int agc_enabled;
     int ppm_correction;

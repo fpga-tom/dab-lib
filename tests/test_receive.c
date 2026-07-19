@@ -21,6 +21,7 @@ void test_receive_default_config_uses_rtlsdr_playback_defaults(void) {
     TEST_ASSERT(config.agc_enabled == 1);
     TEST_ASSERT(config.android_usb_fd == -1);
     TEST_ASSERT(config.use_real_device == 1);
+    TEST_ASSERT(config.service_id == 0u);
     TEST_ASSERT(config.snapshot == 0);
     TEST_ASSERT(config.snapshot_user == 0);
     TEST_ASSERT(config.measurement == 0);
@@ -34,9 +35,6 @@ void test_receive_service_rejects_incomplete_config_before_opening_device(void) 
     dab_receive_config_t config;
 
     dab_receive_default_config(&config);
-    TEST_ASSERT(dab_receive_service(&config, 0, 0) == 2);
-
-    config.frequency_hz = 220352000u;
     TEST_ASSERT(dab_receive_service(&config, 0, 0) == 2);
 }
 
@@ -231,6 +229,12 @@ void test_receive_catalog_copies_fic_ensemble_services_and_components(void) {
     TEST_ASSERT(dab_receive_catalog_content_equal(&catalog, &same_content) != 0);
     same_content.services[0].component_count = 0u;
     TEST_ASSERT(dab_receive_catalog_content_equal(&catalog, &same_content) == 0);
+    TEST_ASSERT(dab_receive_catalog_is_regression(&catalog, &same_content) != 0);
+    same_content.services[0].component_count = catalog.services[0].component_count;
+    same_content.services[0].label[0] = '\0';
+    TEST_ASSERT(dab_receive_catalog_is_regression(&catalog, &same_content) != 0);
+    same_content.frequency_hz = 220352000u;
+    TEST_ASSERT(dab_receive_catalog_is_regression(&catalog, &same_content) == 0);
 }
 
 void test_receive_measurement_builds_bounded_signal_payloads(void) {

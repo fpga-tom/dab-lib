@@ -279,6 +279,7 @@ static int receive_emit_catalog(const dab_receive_config_t *config,
                                 dab_receive_catalog_t *current,
                                 dab_receive_catalog_t *candidate,
                                 uint64_t *sequence,
+                                uint32_t fic_frames_seen,
                                 uint64_t timestamp_ns,
                                 uint64_t frequency_hz,
                                 const dab_fic_database_t *database) {
@@ -287,13 +288,19 @@ static int receive_emit_catalog(const dab_receive_config_t *config,
         return 0;
     }
 
+    if (fic_frames_seen < 24u) {
+        return 0;
+    }
+
     dab_receive_catalog_build(candidate,
                               *sequence + 1u,
                               timestamp_ns,
                               frequency_hz,
                               database);
-    if (candidate->ensemble_id == 0u && candidate->service_count == 0u &&
-        candidate->ensemble_label[0] == '\0') {
+    if (candidate->ensemble_id == 0u || candidate->service_count == 0u) {
+        return 0;
+    }
+    if (dab_receive_catalog_is_regression(current, candidate)) {
         return 0;
     }
     if (dab_receive_catalog_content_equal(current, candidate)) {
@@ -1113,6 +1120,11 @@ int dab_receiver_session_run(int argc, char **argv) {
     uint32_t last_audio_fic_frames_seen = 0u;
     uint32_t last_audio_msc_frames_seen = 0u;
     uint32_t last_audio_tframe_symbol_index = 0u;
+#if defined(DAB_RECEIVE_NO_MAIN)
+    const int audio_recovery_enabled = 0;
+#else
+    const int audio_recovery_enabled = 1;
+#endif
     int rc = 1;
 #if defined(DAB_HAVE_AUDIO_PLAYBACK)
     dab_audio_playback_t audio = {0};
@@ -1122,7 +1134,7 @@ int dab_receiver_session_run(int argc, char **argv) {
 #endif
 
 #if defined(DAB_RECEIVE_NO_MAIN)
-    if (receive_config == 0 || receive_config->frequency_hz == 0u || receive_config->service_id == 0u) {
+    if (receive_config == 0 || receive_config->frequency_hz == 0u) {
         return 2;
     }
     if (receive_config->snapshot != 0 || receive_config->measurement != 0) {
@@ -1178,7 +1190,7 @@ int dab_receiver_session_run(int argc, char **argv) {
     rtlsdr_config.bias_tee_enabled = receive_config->bias_tee_enabled;
     rtlsdr_config.android_usb_fd = receive_config->android_usb_fd;
     selected_audio_sid = receive_config->service_id;
-    selected_audio_sid_valid = 1u;
+    selected_audio_sid_valid = (uint8_t)(receive_config->service_id != 0u);
     freq_set = 1u;
 #else
     {
@@ -1490,11 +1502,18 @@ int dab_receiver_session_run(int argc, char **argv) {
 #if defined(DAB_RECEIVE_NO_MAIN)
     {
         char status_message[128];
-        snprintf(status_message,
-                 sizeof(status_message),
-                 "Receiver started: %.3f MHz SID 0x%08x",
-                 (double)stream_config.center_freq_hz / 1000000.0,
-                 selected_audio_sid);
+        if (selected_audio_sid_valid != 0u) {
+            snprintf(status_message,
+                     sizeof(status_message),
+                     "Receiver started: %.3f MHz SID 0x%08x",
+                     (double)stream_config.center_freq_hz / 1000000.0,
+                     selected_audio_sid);
+        } else {
+            snprintf(status_message,
+                     sizeof(status_message),
+                     "Receiver started: %.3f MHz, automatic service selection",
+                     (double)stream_config.center_freq_hz / 1000000.0);
+        }
         if (receive_emit_status(receive_callback, receive_user, DAB_RECEIVE_EVENT_STATUS, status_message) != 0) {
             rc = -2;
             goto cleanup;
@@ -1593,7 +1612,8 @@ int dab_receiver_session_run(int argc, char **argv) {
             fprintf(stderr, "null detector failed at block %llu\n", (unsigned long long)blocks_read);
             goto cleanup;
         }
-        if (playing_reported != 0u && samples_since_audio >= audio_timeout_samples) {
+        if (audio_recovery_enabled != 0 &&
+            playing_reported != 0u && samples_since_audio >= audio_timeout_samples) {
 #if defined(DAB_HAVE_AUDIO_PLAYBACK)
             dab_msc_dabplus_debug_t audio_debug = {0};
 
@@ -1688,7 +1708,8 @@ int dab_receiver_session_run(int argc, char **argv) {
             prev_locked = 0u;
             continue;
         }
-        if (playing_reported == 0u &&
+        if (audio_recovery_enabled != 0 &&
+            playing_reported == 0u &&
             selected_audio_sid_valid != 0u &&
             sync.state.locked != 0 &&
             samples_since_audio >= audio_timeout_samples) {
@@ -2189,10 +2210,11 @@ int dab_receiver_session_run(int argc, char **argv) {
 #if defined(DAB_RECEIVE_NO_MAIN)
                                                 if (fic_result == 0 &&
                                                     receive_emit_catalog(receive_config,
-                                                                         catalog_current,
-                                                                         catalog_candidate,
-                                                                         &catalog_sequence,
-                                                                         src_block.timestamp_ns,
+                                                                        catalog_current,
+                                                                        catalog_candidate,
+                                                                        &catalog_sequence,
+                                                                        fic.frames_seen,
+                                                                        src_block.timestamp_ns,
                                                                          stream_config.center_freq_hz,
                                                                          &fic.repo.current) != 0) {
                                                     rc = -2;
@@ -2265,6 +2287,7 @@ int dab_receiver_session_run(int argc, char **argv) {
                                                         selected_audio_sid = fallback_component->sid;
                                                         selected_audio_sid_valid = 1u;
                                                         selected_sid_fallback_reported = 1u;
+                                                        samples_since_audio = 0u;
                                                         audio_component = fallback_component;
                                                     }
                                                 }
@@ -2275,6 +2298,7 @@ int dab_receiver_session_run(int argc, char **argv) {
                                                         selected_audio_sid = audio_component->sid;
                                                         selected_audio_sid_valid = 1u;
                                                         dab_msc_set_service_filter(&msc, selected_audio_sid);
+                                                        samples_since_audio = 0u;
                                                     }
                                                 }
                                                 if (audio_component != 0 &&
@@ -2282,6 +2306,7 @@ int dab_receiver_session_run(int argc, char **argv) {
                                                     selected_audio_sid = audio_component->sid;
                                                     selected_audio_sid_valid = 1u;
                                                     dab_msc_set_service_filter(&msc, selected_audio_sid);
+                                                    samples_since_audio = 0u;
                                                 }
                                                 if (selected_audio_sid_valid != 0) {
                                                     label = fic_repo_find_label(&fic.repo.current,

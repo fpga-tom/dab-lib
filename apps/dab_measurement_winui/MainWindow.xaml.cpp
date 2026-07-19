@@ -246,7 +246,7 @@ namespace winrt::DabMeasurementWinUI::implementation
         dab::measurement::ReceiverSettings settings;
         settings.driver = DeviceComboBox().SelectedIndex() == 1 ? "rtlsdr" : "sdrplay";
         settings.frequency_hz = static_cast<uint64_t>(std::llround(frequency_mhz * 1000000.0));
-        settings.service_id = 0x00001001u;
+        settings.service_id = 0u;
         settings.gain_db = static_cast<int>(std::clamp(std::lround(gain_value), 0l, 100l));
         settings.agc_enabled = false;
         settings.use_real_device = true;
@@ -351,15 +351,29 @@ namespace winrt::DabMeasurementWinUI::implementation
         DropValueText().Text(to_hstring(snapshot.dropped_blocks));
         StatusOverrunText().Text(snapshot.dropped_blocks == 0u ? L"no overruns" : L"overruns detected");
 
-        uint32_t const fib_total = snapshot.fic_blocks_decoded_last_frame * 3u;
-        CrcValueText().Text(fib_total != 0u
-            ? to_hstring(snapshot.fic_valid_fibs_last_frame) + L" / " + to_hstring(fib_total)
-            : hstring{ L"— / —" });
-        double const crc_ratio = fib_total != 0u
-            ? static_cast<double>(snapshot.fic_valid_fibs_last_frame) / static_cast<double>(fib_total)
+        constexpr uint32_t fibs_per_frame = 12u;
+        bool const have_fic_quality = snapshot.locked != 0 && snapshot.fic_frames_seen != 0u;
+        CrcValueText().Text(have_fic_quality
+            ? to_hstring(snapshot.fic_valid_fibs_last_frame) + L" / " + to_hstring(fibs_per_frame)
+            : hstring{ L"N/A" });
+        double const fic_quality = have_fic_quality
+            ? std::clamp(static_cast<double>(snapshot.fic_total_valid_fibs) /
+                         (static_cast<double>(snapshot.fic_frames_seen) *
+                          static_cast<double>(fibs_per_frame)),
+                         0.0,
+                         1.0)
             : 0.0;
-        FicProgress().Value(crc_ratio);
-        BerValueText().Text(fib_total == 0u ? L"—" : (crc_ratio >= 1.0 ? L"FIC clean" : L"CRC loss"));
+        FicProgress().Value(fic_quality);
+        if (have_fic_quality)
+        {
+            wchar_t quality_text[48]{};
+            swprintf_s(quality_text, L"FIC %.1f%%", fic_quality * 100.0);
+            BerValueText().Text(quality_text);
+        }
+        else
+        {
+            BerValueText().Text(L"N/A");
+        }
         SampleCounterText().Text(L"frame " + to_hstring(snapshot.sequence));
     }
 

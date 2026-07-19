@@ -34,7 +34,7 @@ The receiver controls currently open a real SDR device. The selected SDRplay or 
 
 Current proof-of-concept limitations:
 
-- the service ID is currently seeded with `0x00001001`; the reusable receiver session falls back to the first service discovered from FIC after its acquisition interval;
+- the reusable receiver selects the first decoded audio service automatically; explicit service selection from the navigation list is not wired to the audio decoder yet;
 - the high-rate callback is emitted after a complete synchronized DAB transmission frame; acquisition without frame synchronization produces scalar snapshots but no array payload;
 - BER remains a FIC CRC-loss proxy; and
 - recording is not implemented, so the Record control is disabled.

@@ -175,6 +175,57 @@ int dab_receive_catalog_content_equal(const dab_receive_catalog_t *left,
            memcmp(left->services, right->services, sizeof(left->services)) == 0;
 }
 
+static const dab_receive_service_info_t *receive_catalog_find_service(
+    const dab_receive_catalog_t *catalog,
+    uint32_t service_id,
+    uint8_t is_programme) {
+    uint32_t index;
+
+    if (catalog == 0) {
+        return 0;
+    }
+    for (index = 0u; index < catalog->service_count; ++index) {
+        const dab_receive_service_info_t *service = &catalog->services[index];
+        if (service->service_id == service_id && service->is_programme == is_programme) {
+            return service;
+        }
+    }
+    return 0;
+}
+
+int dab_receive_catalog_is_regression(const dab_receive_catalog_t *current,
+                                      const dab_receive_catalog_t *candidate) {
+    uint32_t index;
+
+    if (current == 0 || candidate == 0 || current->ensemble_id == 0u ||
+        current->frequency_hz != candidate->frequency_hz ||
+        current->ensemble_id != candidate->ensemble_id) {
+        return 0;
+    }
+    if (current->ensemble_label[0] != '\0' && candidate->ensemble_label[0] == '\0') {
+        return 1;
+    }
+    if (candidate->service_count < current->service_count) {
+        return 1;
+    }
+
+    for (index = 0u; index < current->service_count; ++index) {
+        const dab_receive_service_info_t *old_service = &current->services[index];
+        const dab_receive_service_info_t *new_service = receive_catalog_find_service(
+            candidate,
+            old_service->service_id,
+            old_service->is_programme);
+
+        if (new_service == 0 || new_service->component_count < old_service->component_count) {
+            return 1;
+        }
+        if (old_service->label[0] != '\0' && new_service->label[0] == '\0') {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 void dab_receive_snapshot_build(dab_receive_snapshot_t *snapshot,
                                 uint64_t sequence,
                                 uint64_t timestamp_ns,

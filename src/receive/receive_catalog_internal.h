@@ -15,4 +15,7 @@ void dab_receive_catalog_build(dab_receive_catalog_t *catalog,
 int dab_receive_catalog_content_equal(const dab_receive_catalog_t *left,
                                       const dab_receive_catalog_t *right);
 
+int dab_receive_catalog_is_regression(const dab_receive_catalog_t *current,
+                                      const dab_receive_catalog_t *candidate);
+
 #endif
