@@ -107,6 +107,7 @@
     <ClCompile Include="..\..\src\os\os_shared_lib.c" />
     <ClCompile Include="..\..\src\os\os_thread.c" />
     <ClCompile Include="..\..\src\os\os_time.c" />
+    <ClCompile Include="..\..\src\measurement\measurement_alarm.c" />
     <ClCompile Include="..\..\src\receive\receive.c" />
     <ClCompile Include="..\..\src\receive\receiver_session.c" />
     <ClCompile Include="..\..\src\scan\scan.c" />

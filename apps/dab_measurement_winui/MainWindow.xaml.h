@@ -5,6 +5,7 @@
 #include "MeasurementMailbox.h"
 #include "ReceiverWorker.h"
 #include "SnapshotMailbox.h"
+#include "dab/measurement_alarm.h"
 
 namespace winrt::DabMeasurementWinUI::implementation
 {
@@ -41,6 +42,16 @@ namespace winrt::DabMeasurementWinUI::implementation
         void RfSpectrumTuneToCursor_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void RfSpectrumResetView_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void RfChannelCirCanvas_PointerPressed(IInspectable const&, Microsoft::UI::Xaml::Input::PointerRoutedEventArgs const&);
+        void RfHistory_Loaded(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void RfHistoryPeriod_SelectionChanged(IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
+        void RfHistoryControls_Changed(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void RfHistoryPause_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void RfHistoryAnnotationCommit_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        winrt::fire_and_forget RfHistoryExportCsv_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void RfHistoryClearEvents_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void RfHistoryAlarmMeasurement_SelectionChanged(IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
+        void RfHistoryAlarmApply_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void RfHistoryAlarmEnable_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void AudioButton_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void RecordButton_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void MarkerButton_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -81,6 +92,18 @@ namespace winrt::DabMeasurementWinUI::implementation
         void UpdateRfChannelCir(dab::measurement::MeasurementFrame const& frame);
         void RenderRfChannelCirMarker();
         void ResetRfChannelDiagnostics();
+        void AppendRfLongHistory(dab_receive_snapshot_t const& snapshot);
+        void UpdateRfLongHistoryVisuals();
+        void ResetRfHistorySession();
+        void EvaluateRfAlarm(dab_receive_snapshot_t const& snapshot);
+        bool ApplyRfAlarmConfiguration(bool add_event);
+        void AddRfHistoryEvent(winrt::hstring const& severity,
+                               winrt::hstring const& measurement,
+                               winrt::hstring const& value,
+                               winrt::hstring const& description,
+                               uint64_t timestamp_ns = 0u);
+        void RefreshRfHistoryEventList();
+        uint64_t RfHistoryPeriodNs();
         void UpdateRfSpectrum(dab::measurement::MeasurementFrame const& frame);
         void RenderRfSpectrum();
         void AppendRfSpectrumWaterfall();
@@ -152,6 +175,42 @@ namespace winrt::DabMeasurementWinUI::implementation
         uint32_t m_rf_channel_cir_main_bin{ 0u };
         float m_rf_channel_cir_sample_period_ns{ 0.0f };
         int32_t m_rf_channel_cir_marker_delay_samples{ -1 };
+        struct RfHistorySample
+        {
+            uint64_t timestamp_ns{ 0u };
+            uint64_t wall_time_100ns{ 0u };
+            float power_dbfs{ 0.0f };
+            float mer_db{ 0.0f };
+            float cfo_hz{ 0.0f };
+            float clipping_percent{ 0.0f };
+            bool power_valid{ false };
+            bool mer_valid{ false };
+            bool cfo_valid{ false };
+            bool clipping_valid{ false };
+            bool locked{ false };
+        };
+        struct RfHistoryEvent
+        {
+            uint64_t timestamp_ns{ 0u };
+            uint64_t wall_time_100ns{ 0u };
+            std::wstring severity;
+            std::wstring measurement;
+            std::wstring value;
+            std::wstring description;
+        };
+        static constexpr size_t rf_long_history_capacity = 14400u;
+        std::array<RfHistorySample, rf_long_history_capacity> m_rf_long_history{};
+        size_t m_rf_long_history_write{ 0u };
+        size_t m_rf_long_history_count{ 0u };
+        std::vector<RfHistoryEvent> m_rf_history_events;
+        dab_measurement_alarm_state_t m_rf_alarm{};
+        int32_t m_rf_alarm_measurement_index{ 0 };
+        float m_rf_alarm_last_value{ 0.0f };
+        bool m_rf_alarm_last_value_valid{ false };
+        bool m_rf_alarm_enabled{ true };
+        bool m_rf_history_controls_ready{ false };
+        bool m_rf_history_display_paused{ false };
+        uint64_t m_rf_history_pause_timestamp_ns{ 0u };
         std::array<float, DAB_RECEIVE_SPECTRUM_BIN_COUNT> m_rf_spectrum_average{};
         std::array<float, DAB_RECEIVE_SPECTRUM_BIN_COUNT> m_rf_spectrum_peak{};
         uint32_t m_rf_spectrum_count{ 0u };

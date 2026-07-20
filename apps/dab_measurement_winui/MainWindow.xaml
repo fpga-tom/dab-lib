@@ -1756,8 +1756,252 @@
                         </StackPanel>
                     </ScrollViewer>
                 </TabViewItem>
-                <TabViewItem Header="History" IsClosable="False">
-                    <TextBlock Text="Long-term RF history and export will be added here." HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" />
+                <TabViewItem Header="History &amp; Alarms" IsClosable="False">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  Padding="12">
+                        <StackPanel x:Name="RfHistoryContent" Spacing="10" Loaded="RfHistory_Loaded">
+                            <Border Style="{StaticResource PanelCardStyle}" Padding="14,10">
+                                <StackPanel Spacing="9">
+                                    <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                                                  VerticalScrollBarVisibility="Disabled">
+                                        <StackPanel Orientation="Horizontal" Spacing="9" MinWidth="970">
+                                            <ComboBox x:Name="RfHistoryPeriodComboBox"
+                                                      Header="PERIOD"
+                                                      Width="150"
+                                                      SelectedIndex="1"
+                                                      SelectionChanged="RfHistoryPeriod_SelectionChanged">
+                                                <ComboBoxItem Content="Last 1 minute" Tag="60" />
+                                                <ComboBoxItem Content="Last 10 minutes" Tag="600" />
+                                                <ComboBoxItem Content="Last 30 minutes" Tag="1800" />
+                                                <ComboBoxItem Content="Last 1 hour" Tag="3600" />
+                                                <ComboBoxItem Content="Since start" Tag="0" />
+                                            </ComboBox>
+                                            <StackPanel>
+                                                <TextBlock Text="METRICS" Style="{StaticResource SectionTitleStyle}" />
+                                                <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,6,0,0">
+                                                    <ToggleButton x:Name="RfHistoryPowerButton" Content="Power" IsChecked="True" Click="RfHistoryControls_Changed" />
+                                                    <ToggleButton x:Name="RfHistoryMerButton" Content="MER" IsChecked="True" Click="RfHistoryControls_Changed" />
+                                                    <ToggleButton x:Name="RfHistoryCfoButton" Content="CFO" IsChecked="True" Click="RfHistoryControls_Changed" />
+                                                    <ToggleButton x:Name="RfHistoryClippingButton" Content="Clipping" IsChecked="True" Click="RfHistoryControls_Changed" />
+                                                </StackPanel>
+                                            </StackPanel>
+                                            <ToggleButton x:Name="RfHistoryPauseButton"
+                                                          Content="Pause display"
+                                                          Height="32"
+                                                          VerticalAlignment="Bottom"
+                                                          Click="RfHistoryPause_Click" />
+                                            <Button Content="Add annotation" Height="32" VerticalAlignment="Bottom">
+                                                <Button.Flyout>
+                                                    <Flyout x:Name="RfHistoryAnnotationFlyout">
+                                                        <StackPanel Width="330" Spacing="9">
+                                                            <TextBlock Text="Measurement annotation" FontSize="16" FontWeight="SemiBold" />
+                                                            <TextBox x:Name="RfHistoryAnnotationTextBox"
+                                                                     Header="NOTE"
+                                                                     PlaceholderText="Describe the observation or test change"
+                                                                     AcceptsReturn="True"
+                                                                     TextWrapping="Wrap"
+                                                                     MinHeight="72" />
+                                                            <Button Content="Add to timeline"
+                                                                    HorizontalAlignment="Right"
+                                                                    Click="RfHistoryAnnotationCommit_Click" />
+                                                        </StackPanel>
+                                                    </Flyout>
+                                                </Button.Flyout>
+                                            </Button>
+                                            <Button Content="Export CSV"
+                                                    Height="32"
+                                                    VerticalAlignment="Bottom"
+                                                    Click="RfHistoryExportCsv_Click"
+                                                    ToolTipService.ToolTip="Export samples in the selected period to the Downloads folder" />
+                                            <TextBlock x:Name="RfHistoryCaptureStatusText"
+                                                       Text="Collecting live samples"
+                                                       VerticalAlignment="Bottom"
+                                                       Margin="8,0,0,7"
+                                                       Foreground="{StaticResource MeasurementAccentBrush}" />
+                                        </StackPanel>
+                                    </ScrollViewer>
+                                    <InfoBar x:Name="RfHistoryAlarmBanner"
+                                             IsOpen="False"
+                                             IsClosable="False"
+                                             Severity="Warning"
+                                             Title="RF measurement alarm" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource PanelCardStyle}" Padding="14">
+                                <Grid RowSpacing="7">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="300" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Grid>
+                                        <StackPanel>
+                                            <TextBlock Text="Measurement timeline" FontSize="16" FontWeight="SemiBold" />
+                                            <TextBlock Text="Display pause does not stop acquisition or alarm evaluation"
+                                                       Foreground="{StaticResource MutedTextBrush}"
+                                                       FontSize="11" />
+                                        </StackPanel>
+                                        <TextBlock x:Name="RfHistoryWindowStatusText"
+                                                   Text="Last 10 minutes · awaiting samples"
+                                                   HorizontalAlignment="Right"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{StaticResource MutedTextBrush}"
+                                                   FontFamily="Consolas" />
+                                    </Grid>
+                                    <Border Grid.Row="1" BorderBrush="{StaticResource PanelStrokeBrush}" BorderThickness="1" Background="#FF07101B">
+                                        <Viewbox Stretch="Fill">
+                                            <Canvas Width="1000" Height="300" Background="#FF07101B">
+                                                <TextBlock Canvas.Left="8" Canvas.Top="19" Text="Power" Foreground="{StaticResource SpectrumBrush}" FontSize="11" />
+                                                <TextBlock x:Name="RfHistoryPowerAxisText" Canvas.Left="8" Canvas.Top="37" Text="&#x2212;100…0 dBFS" Foreground="{StaticResource MutedTextBrush}" FontFamily="Consolas" FontSize="9" />
+                                                <TextBlock Canvas.Left="8" Canvas.Top="84" Text="MER" Foreground="{StaticResource WarningBrush}" FontSize="11" />
+                                                <TextBlock Canvas.Left="8" Canvas.Top="102" Text="0…40 dB" Foreground="{StaticResource MutedTextBrush}" FontFamily="Consolas" FontSize="9" />
+                                                <TextBlock Canvas.Left="8" Canvas.Top="149" Text="CFO" Foreground="{StaticResource MeasurementAccentBrush}" FontSize="11" />
+                                                <TextBlock x:Name="RfHistoryCfoAxisText" Canvas.Left="8" Canvas.Top="167" Text="&#x00B1;50 Hz" Foreground="{StaticResource MutedTextBrush}" FontFamily="Consolas" FontSize="9" />
+                                                <TextBlock Canvas.Left="8" Canvas.Top="214" Text="Clipping" Foreground="#FFFF6B9A" FontSize="11" />
+                                                <TextBlock x:Name="RfHistoryClippingAxisText" Canvas.Left="8" Canvas.Top="232" Text="0…1 %" Foreground="{StaticResource MutedTextBrush}" FontFamily="Consolas" FontSize="9" />
+
+                                                <Line X1="90" Y1="10" X2="980" Y2="10" Stroke="#253D556E" />
+                                                <Line X1="90" Y1="65" X2="980" Y2="65" Stroke="#403D556E" />
+                                                <Line X1="90" Y1="75" X2="980" Y2="75" Stroke="#253D556E" />
+                                                <Line X1="90" Y1="130" X2="980" Y2="130" Stroke="#403D556E" />
+                                                <Line X1="90" Y1="140" X2="980" Y2="140" Stroke="#253D556E" />
+                                                <Line X1="90" Y1="195" X2="980" Y2="195" Stroke="#403D556E" />
+                                                <Line X1="90" Y1="205" X2="980" Y2="205" Stroke="#253D556E" />
+                                                <Line X1="90" Y1="260" X2="980" Y2="260" Stroke="#403D556E" />
+                                                <Line X1="312.5" Y1="10" X2="312.5" Y2="260" Stroke="#183D556E" />
+                                                <Line X1="535" Y1="10" X2="535" Y2="260" Stroke="#253D556E" />
+                                                <Line X1="757.5" Y1="10" X2="757.5" Y2="260" Stroke="#183D556E" />
+                                                <Polyline x:Name="RfLongHistoryPowerTrace" Stroke="{StaticResource SpectrumBrush}" StrokeThickness="1.8" Points="90,65 980,65" />
+                                                <Polyline x:Name="RfLongHistoryMerTrace" Stroke="{StaticResource WarningBrush}" StrokeThickness="1.8" Points="90,130 980,130" />
+                                                <Polyline x:Name="RfLongHistoryCfoTrace" Stroke="{StaticResource MeasurementAccentBrush}" StrokeThickness="1.8" Points="90,167.5 980,167.5" />
+                                                <Polyline x:Name="RfLongHistoryClippingTrace" Stroke="#FFFF6B9A" StrokeThickness="1.8" Points="90,260 980,260" />
+                                                <Canvas x:Name="RfHistoryEventMarkerCanvas" Width="1000" Height="300" IsHitTestVisible="False" />
+                                                <TextBlock x:Name="RfHistoryAxisLeftText" Canvas.Left="90" Canvas.Top="270" Text="10 min ago" Foreground="{StaticResource MutedTextBrush}" FontFamily="Consolas" FontSize="10" />
+                                                <TextBlock x:Name="RfHistoryAxisCenterText" Canvas.Left="510" Canvas.Top="270" Text="5 min ago" Foreground="{StaticResource MutedTextBrush}" FontFamily="Consolas" FontSize="10" />
+                                                <TextBlock Canvas.Left="956" Canvas.Top="270" Text="now" Foreground="{StaticResource MutedTextBrush}" FontFamily="Consolas" FontSize="10" />
+                                            </Canvas>
+                                        </Viewbox>
+                                    </Border>
+                                    <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="14">
+                                        <StackPanel Orientation="Horizontal" Spacing="5"><Rectangle Width="15" Height="3" Fill="{StaticResource SpectrumBrush}" /><TextBlock Text="Power dBFS" FontSize="10" /></StackPanel>
+                                        <StackPanel Orientation="Horizontal" Spacing="5"><Rectangle Width="15" Height="3" Fill="{StaticResource WarningBrush}" /><TextBlock Text="MER dB" FontSize="10" /></StackPanel>
+                                        <StackPanel Orientation="Horizontal" Spacing="5"><Rectangle Width="15" Height="3" Fill="{StaticResource MeasurementAccentBrush}" /><TextBlock Text="CFO Hz" FontSize="10" /></StackPanel>
+                                        <StackPanel Orientation="Horizontal" Spacing="5"><Rectangle Width="15" Height="3" Fill="#FFFF6B9A" /><TextBlock Text="Clipping %" FontSize="10" /></StackPanel>
+                                        <TextBlock Text="▲ event / annotation" Foreground="{StaticResource MutedTextBrush}" FontSize="10" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
+                            <Border Style="{StaticResource PanelCardStyle}" Padding="14">
+                                <Grid RowSpacing="8">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="170" />
+                                    </Grid.RowDefinitions>
+                                    <Grid>
+                                        <TextBlock Text="Alarms, receiver events and annotations" FontSize="16" FontWeight="SemiBold" />
+                                        <Button Content="Clear events"
+                                                HorizontalAlignment="Right"
+                                                Click="RfHistoryClearEvents_Click" />
+                                    </Grid>
+                                    <Grid Grid.Row="1" Margin="12,0" ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="92" />
+                                            <ColumnDefinition Width="92" />
+                                            <ColumnDefinition Width="190" />
+                                            <ColumnDefinition Width="135" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="TIME" Style="{StaticResource SectionTitleStyle}" />
+                                        <TextBlock Grid.Column="1" Text="SEVERITY" Style="{StaticResource SectionTitleStyle}" />
+                                        <TextBlock Grid.Column="2" Text="MEASUREMENT" Style="{StaticResource SectionTitleStyle}" />
+                                        <TextBlock Grid.Column="3" Text="VALUE" Style="{StaticResource SectionTitleStyle}" />
+                                        <TextBlock Grid.Column="4" Text="DESCRIPTION" Style="{StaticResource SectionTitleStyle}" />
+                                    </Grid>
+                                    <ListView Grid.Row="2"
+                                              x:Name="RfHistoryEventList"
+                                              SelectionMode="None"
+                                              IsItemClickEnabled="False"
+                                              HorizontalContentAlignment="Stretch" />
+                                </Grid>
+                            </Border>
+
+                            <Border Style="{StaticResource PanelCardStyle}" Padding="14">
+                                <Grid ColumnSpacing="22">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="3*" />
+                                        <ColumnDefinition Width="2*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Spacing="9">
+                                        <Grid>
+                                            <StackPanel>
+                                                <TextBlock Text="Alarm configuration" FontSize="16" FontWeight="SemiBold" />
+                                                <TextBlock Text="Minimum duration filters short excursions; recovery threshold supplies hysteresis."
+                                                           Foreground="{StaticResource MutedTextBrush}"
+                                                           FontSize="11" />
+                                            </StackPanel>
+                                            <ToggleButton x:Name="RfHistoryAlarmEnableButton"
+                                                          Content="Alarm enabled"
+                                                          IsChecked="True"
+                                                          HorizontalAlignment="Right"
+                                                          Click="RfHistoryAlarmEnable_Click" />
+                                        </Grid>
+                                        <Grid ColumnSpacing="9">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="150" />
+                                                <ColumnDefinition Width="125" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <ComboBox x:Name="RfHistoryAlarmMeasurementComboBox"
+                                                      Header="MEASUREMENT"
+                                                      SelectedIndex="0"
+                                                      SelectionChanged="RfHistoryAlarmMeasurement_SelectionChanged">
+                                                <ComboBoxItem Content="MER" />
+                                                <ComboBoxItem Content="Power (dBFS)" />
+                                                <ComboBoxItem Content="CFO magnitude" />
+                                                <ComboBoxItem Content="Clipping" />
+                                            </ComboBox>
+                                            <ComboBox Grid.Column="1" x:Name="RfHistoryAlarmConditionComboBox" Header="CONDITION" SelectedIndex="0">
+                                                <ComboBoxItem Content="Less than" />
+                                                <ComboBoxItem Content="Greater than" />
+                                            </ComboBox>
+                                            <NumberBox Grid.Column="2" x:Name="RfHistoryAlarmThresholdBox" Header="THRESHOLD" Value="12" SmallChange="0.5" SpinButtonPlacementMode="Compact" />
+                                            <NumberBox Grid.Column="3" x:Name="RfHistoryAlarmDurationBox" Header="DURATION (s)" Value="3" Minimum="0" Maximum="3600" SmallChange="0.5" SpinButtonPlacementMode="Compact" />
+                                            <NumberBox Grid.Column="4" x:Name="RfHistoryAlarmRecoveryBox" Header="RECOVERY" Value="14" SmallChange="0.5" SpinButtonPlacementMode="Compact" />
+                                        </Grid>
+                                        <Grid>
+                                            <TextBlock x:Name="RfHistoryAlarmStateText"
+                                                       Text="Armed: MER &lt; 12 dB for 3 s · recovery ≥ 14 dB"
+                                                       Foreground="{StaticResource MeasurementAccentBrush}"
+                                                       FontFamily="Consolas"
+                                                       VerticalAlignment="Center" />
+                                            <Button Content="Apply configuration"
+                                                    HorizontalAlignment="Right"
+                                                    Click="RfHistoryAlarmApply_Click" />
+                                        </Grid>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Spacing="7">
+                                        <TextBlock Text="Actions" FontSize="16" FontWeight="SemiBold" />
+                                        <CheckBox x:Name="RfHistoryAlarmAddEventCheckBox" Content="Add event" IsChecked="True" />
+                                        <CheckBox Content="Capture IQ"
+                                                  IsEnabled="False"
+                                                  ToolTipService.ToolTip="Raw IQ capture is not exposed by the receiver pipeline yet" />
+                                        <CheckBox x:Name="RfHistoryAlarmNotificationCheckBox" Content="Show in-app notification" IsChecked="True" />
+                                        <CheckBox Content="Play sound" IsEnabled="False" ToolTipService.ToolTip="Alarm audio output is not implemented" />
+                                        <TextBlock Text="Unavailable actions remain disabled until the raw-IQ recorder and alarm audio backend are present."
+                                                   Foreground="{StaticResource MutedTextBrush}"
+                                                   FontSize="10"
+                                                   TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
                 </TabViewItem>
             </TabView>
         </Grid>

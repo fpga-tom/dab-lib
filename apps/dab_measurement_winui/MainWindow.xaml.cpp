@@ -122,6 +122,84 @@ namespace
         return result.QuadPart;
     }
 
+    uint64_t current_wall_time_100ns()
+    {
+        FILETIME value{};
+        GetSystemTimeAsFileTime(&value);
+        return file_time_value(value);
+    }
+
+    FILETIME file_time_from_value(uint64_t value)
+    {
+        ULARGE_INTEGER source{};
+        source.QuadPart = value;
+        FILETIME result{};
+        result.dwLowDateTime = source.LowPart;
+        result.dwHighDateTime = source.HighPart;
+        return result;
+    }
+
+    hstring history_clock_text(uint64_t wall_time_100ns)
+    {
+        FILETIME const utc = file_time_from_value(wall_time_100ns);
+        FILETIME local{};
+        SYSTEMTIME time{};
+        if (!FileTimeToLocalFileTime(&utc, &local) || !FileTimeToSystemTime(&local, &time))
+        {
+            return L"--:--:--";
+        }
+        wchar_t buffer[24]{};
+        swprintf_s(buffer, L"%02u:%02u:%02u", time.wHour, time.wMinute, time.wSecond);
+        return hstring{ buffer };
+    }
+
+    std::wstring history_iso_utc(uint64_t wall_time_100ns)
+    {
+        FILETIME const utc = file_time_from_value(wall_time_100ns);
+        SYSTEMTIME time{};
+        if (!FileTimeToSystemTime(&utc, &time))
+        {
+            return {};
+        }
+        wchar_t buffer[40]{};
+        swprintf_s(buffer,
+                   L"%04u-%02u-%02uT%02u:%02u:%02u.%03uZ",
+                   time.wYear,
+                   time.wMonth,
+                   time.wDay,
+                   time.wHour,
+                   time.wMinute,
+                   time.wSecond,
+                   time.wMilliseconds);
+        return buffer;
+    }
+
+    hstring relative_history_text(uint64_t duration_ns)
+    {
+        uint64_t const seconds = duration_ns / 1000000000ull;
+        wchar_t buffer[40]{};
+        if (seconds < 120u)
+        {
+            swprintf_s(buffer, L"%llu s ago", static_cast<unsigned long long>(seconds));
+        }
+        else if (seconds < 7200u)
+        {
+            swprintf_s(buffer, L"%llu min ago",
+                       static_cast<unsigned long long>((seconds + 30u) / 60u));
+        }
+        else
+        {
+            swprintf_s(buffer, L"%.1f h ago", static_cast<double>(seconds) / 3600.0);
+        }
+        return hstring{ buffer };
+    }
+
+    bool toggle_is_checked(ToggleButton const& button)
+    {
+        auto const checked = button.IsChecked();
+        return checked && checked.Value();
+    }
+
     template <size_t Capacity>
     PointCollection history_points(std::array<float, Capacity> const& values,
                                    size_t write_index,
@@ -898,6 +976,7 @@ namespace winrt::DabMeasurementWinUI::implementation
             m_rf_was_locked = false;
             m_rf_lock_started_ns = 0u;
             UpdateRfHistoryVisuals();
+            ResetRfHistorySession();
         }
         ResetRfSyncDiagnostics();
         ResetRfChannelDiagnostics();
@@ -1355,6 +1434,8 @@ namespace winrt::DabMeasurementWinUI::implementation
         float const missing = (std::numeric_limits<float>::quiet_NaN)();
         AppendRfHistory(snapshot.adc_level_valid ? snapshot.adc_level_dbfs : missing,
                         snapshot.cn_valid ? snapshot.cn_db : missing);
+        AppendRfLongHistory(snapshot);
+        EvaluateRfAlarm(snapshot);
     }
 
     void MainWindow::UpdateRfInputHistogram(dab_receive_snapshot_t const& snapshot)
@@ -1444,17 +1525,34 @@ namespace winrt::DabMeasurementWinUI::implementation
             hstring const time = local_clock_text();
             RfSyncLastLossText().Text(time);
             AddRfSyncEvent(L"Frame lock lost");
+            AddRfHistoryEvent(L"Warning",
+                              L"Synchronisation",
+                              L"Lost",
+                              L"Frame lock lost; reacquisition in progress",
+                              snapshot.timestamp_ns);
         }
         if (snapshot.sync_reacquisition_count > m_rf_sync_last_reacquisition_count)
         {
             AddRfSyncEvent(hstring{ L"Frame lock reacquired after " } +
                            format_float(snapshot.sync_acquisition_time_ms, L" ms", 1));
+            AddRfHistoryEvent(L"Info",
+                              L"Synchronisation",
+                              L"Recovered",
+                              hstring{ L"Reacquired in " } +
+                                  format_float(snapshot.sync_acquisition_time_ms, L" ms", 1),
+                              snapshot.timestamp_ns);
         }
         if (locked && !m_rf_sync_seen_lock)
         {
             m_rf_sync_seen_lock = true;
             AddRfSyncEvent(hstring{ L"Initial frame lock acquired after " } +
                            format_float(snapshot.sync_acquisition_time_ms, L" ms", 1));
+            AddRfHistoryEvent(L"Info",
+                              L"Synchronisation",
+                              L"Locked",
+                              hstring{ L"Initial lock in " } +
+                                  format_float(snapshot.sync_acquisition_time_ms, L" ms", 1),
+                              snapshot.timestamp_ns);
         }
         m_rf_sync_last_loss_count = snapshot.sync_loss_count;
         m_rf_sync_last_reacquisition_count = snapshot.sync_reacquisition_count;
@@ -1637,6 +1735,718 @@ namespace winrt::DabMeasurementWinUI::implementation
                                                40.0f,
                                                100.0f,
                                                24.0f));
+    }
+
+    void MainWindow::RfHistory_Loaded(IInspectable const&, RoutedEventArgs const&)
+    {
+        if (m_rf_history_controls_ready)
+        {
+            return;
+        }
+        m_rf_history_controls_ready = true;
+        ApplyRfAlarmConfiguration(false);
+        RefreshRfHistoryEventList();
+        UpdateRfLongHistoryVisuals();
+    }
+
+    void MainWindow::RfHistoryPeriod_SelectionChanged(IInspectable const&,
+                                                       SelectionChangedEventArgs const&)
+    {
+        if (m_rf_history_controls_ready)
+        {
+            UpdateRfLongHistoryVisuals();
+        }
+    }
+
+    void MainWindow::RfHistoryControls_Changed(IInspectable const&, RoutedEventArgs const&)
+    {
+        if (m_rf_history_controls_ready)
+        {
+            UpdateRfLongHistoryVisuals();
+        }
+    }
+
+    void MainWindow::RfHistoryPause_Click(IInspectable const&, RoutedEventArgs const&)
+    {
+        m_rf_history_display_paused = toggle_is_checked(RfHistoryPauseButton());
+        if (m_rf_history_display_paused && m_rf_long_history_count != 0u)
+        {
+            size_t const latest = (m_rf_long_history_write + rf_long_history_capacity - 1u) %
+                                  rf_long_history_capacity;
+            m_rf_history_pause_timestamp_ns = m_rf_long_history[latest].timestamp_ns;
+        }
+        else
+        {
+            m_rf_history_pause_timestamp_ns = 0u;
+        }
+        RfHistoryPauseButton().Content(box_value(m_rf_history_display_paused
+            ? hstring{ L"Resume display" }
+            : hstring{ L"Pause display" }));
+        RfHistoryCaptureStatusText().Text(m_rf_history_display_paused
+            ? L"Display paused · capture and alarms remain live"
+            : L"Collecting live samples");
+        UpdateRfLongHistoryVisuals();
+    }
+
+    uint64_t MainWindow::RfHistoryPeriodNs()
+    {
+        auto const selected = RfHistoryPeriodComboBox().SelectedItem().try_as<ComboBoxItem>();
+        if (!selected || !selected.Tag())
+        {
+            return 600000000000ull;
+        }
+        auto const tag = unbox_value<hstring>(selected.Tag());
+        wchar_t* end = nullptr;
+        uint64_t const seconds = std::wcstoull(tag.c_str(), &end, 10);
+        return end != tag.c_str() ? seconds * 1000000000ull : 600000000000ull;
+    }
+
+    void MainWindow::AppendRfLongHistory(dab_receive_snapshot_t const& snapshot)
+    {
+        RfHistorySample sample{};
+        sample.timestamp_ns = snapshot.timestamp_ns != 0u
+            ? snapshot.timestamp_ns
+            : m_tick * 250000000ull;
+        sample.wall_time_100ns = current_wall_time_100ns();
+        sample.power_dbfs = snapshot.adc_level_dbfs;
+        sample.mer_db = m_latest_mer_db;
+        sample.cfo_hz = snapshot.cfo_hz;
+        sample.clipping_percent = snapshot.adc_clipping_percent;
+        sample.power_valid = snapshot.adc_level_valid != 0;
+        sample.mer_valid = snapshot.locked != 0 && m_latest_mer_valid;
+        sample.cfo_valid = snapshot.cfo_valid != 0;
+        sample.clipping_valid = snapshot.adc_window_sample_count != 0u;
+        sample.locked = snapshot.locked != 0;
+        m_rf_long_history[m_rf_long_history_write] = sample;
+        m_rf_long_history_write = (m_rf_long_history_write + 1u) % rf_long_history_capacity;
+        m_rf_long_history_count = (std::min)(m_rf_long_history_count + 1u,
+                                              rf_long_history_capacity);
+        if (!m_rf_history_display_paused)
+        {
+            UpdateRfLongHistoryVisuals();
+        }
+    }
+
+    void MainWindow::UpdateRfLongHistoryVisuals()
+    {
+        if (!m_rf_history_controls_ready)
+        {
+            return;
+        }
+
+        RfLongHistoryPowerTrace().Visibility(toggle_is_checked(RfHistoryPowerButton())
+            ? Visibility::Visible : Visibility::Collapsed);
+        RfLongHistoryMerTrace().Visibility(toggle_is_checked(RfHistoryMerButton())
+            ? Visibility::Visible : Visibility::Collapsed);
+        RfLongHistoryCfoTrace().Visibility(toggle_is_checked(RfHistoryCfoButton())
+            ? Visibility::Visible : Visibility::Collapsed);
+        RfLongHistoryClippingTrace().Visibility(toggle_is_checked(RfHistoryClippingButton())
+            ? Visibility::Visible : Visibility::Collapsed);
+
+        if (m_rf_long_history_count == 0u)
+        {
+            RfHistoryWindowStatusText().Text(L"Awaiting receiver samples");
+            RfHistoryEventMarkerCanvas().Children().Clear();
+            return;
+        }
+
+        size_t const oldest = (m_rf_long_history_write + rf_long_history_capacity -
+                               m_rf_long_history_count) % rf_long_history_capacity;
+        size_t const newest = (m_rf_long_history_write + rf_long_history_capacity - 1u) %
+                              rf_long_history_capacity;
+        uint64_t const end_ns = m_rf_history_display_paused &&
+            m_rf_history_pause_timestamp_ns != 0u
+            ? m_rf_history_pause_timestamp_ns
+            : m_rf_long_history[newest].timestamp_ns;
+        uint64_t const period_ns = RfHistoryPeriodNs();
+        uint64_t start_ns = period_ns != 0u && end_ns > period_ns
+            ? end_ns - period_ns
+            : m_rf_long_history[oldest].timestamp_ns;
+        if (start_ns > end_ns)
+        {
+            start_ns = end_ns;
+        }
+        uint64_t const span_ns = (std::max)(end_ns - start_ns, 1ull);
+
+        float cfo_range = 50.0f;
+        float clipping_range = 1.0f;
+        size_t visible_samples = 0u;
+        for (size_t offset = 0u; offset < m_rf_long_history_count; ++offset)
+        {
+            auto const& sample = m_rf_long_history[(oldest + offset) % rf_long_history_capacity];
+            if (sample.timestamp_ns < start_ns || sample.timestamp_ns > end_ns)
+            {
+                continue;
+            }
+            ++visible_samples;
+            if (sample.cfo_valid && std::isfinite(sample.cfo_hz))
+            {
+                cfo_range = (std::max)(cfo_range, std::fabs(sample.cfo_hz) * 1.10f);
+            }
+            if (sample.clipping_valid && std::isfinite(sample.clipping_percent))
+            {
+                clipping_range = (std::max)(clipping_range, sample.clipping_percent * 1.15f);
+            }
+        }
+        cfo_range = std::ceil(cfo_range / 50.0f) * 50.0f;
+        clipping_range = std::ceil(clipping_range * 10.0f) / 10.0f;
+
+        auto build_points = [&](uint32_t metric,
+                                float minimum,
+                                float maximum,
+                                float lane_top) -> PointCollection
+        {
+            PointCollection points;
+            for (size_t offset = 0u; offset < m_rf_long_history_count; ++offset)
+            {
+                auto const& sample = m_rf_long_history[(oldest + offset) % rf_long_history_capacity];
+                if (sample.timestamp_ns < start_ns || sample.timestamp_ns > end_ns)
+                {
+                    continue;
+                }
+                bool valid = false;
+                float value = 0.0f;
+                switch (metric)
+                {
+                case 0u:
+                    valid = sample.power_valid;
+                    value = sample.power_dbfs;
+                    break;
+                case 1u:
+                    valid = sample.mer_valid;
+                    value = sample.mer_db;
+                    break;
+                case 2u:
+                    valid = sample.cfo_valid;
+                    value = sample.cfo_hz;
+                    break;
+                default:
+                    valid = sample.clipping_valid;
+                    value = sample.clipping_percent;
+                    break;
+                }
+                if (!valid || !std::isfinite(value))
+                {
+                    continue;
+                }
+                float const x = 90.0f + 890.0f * static_cast<float>(
+                    static_cast<double>(sample.timestamp_ns - start_ns) /
+                    static_cast<double>(span_ns));
+                float const normalized = std::clamp((value - minimum) /
+                                                     (maximum - minimum),
+                                                     0.0f,
+                                                     1.0f);
+                float const y = lane_top + (1.0f - normalized) * 55.0f;
+                points.Append(Point{ x, y });
+            }
+            return points;
+        };
+
+        RfLongHistoryPowerTrace().Points(build_points(0u, -100.0f, 0.0f, 10.0f));
+        RfLongHistoryMerTrace().Points(build_points(1u, 0.0f, 40.0f, 75.0f));
+        RfLongHistoryCfoTrace().Points(build_points(2u, -cfo_range, cfo_range, 140.0f));
+        RfLongHistoryClippingTrace().Points(build_points(3u, 0.0f, clipping_range, 205.0f));
+        RfHistoryCfoAxisText().Text(L"±" + format_float(cfo_range, L" Hz", 0));
+        RfHistoryClippingAxisText().Text(L"0…" + format_float(clipping_range, L" %", 1));
+
+        auto markers = RfHistoryEventMarkerCanvas().Children();
+        markers.Clear();
+        auto const warning_brush = SolidColorBrush(ColorHelper::FromArgb(220u, 255u, 200u, 87u));
+        auto const annotation_brush = SolidColorBrush(ColorHelper::FromArgb(220u, 84u, 226u, 255u));
+        for (auto const& event : m_rf_history_events)
+        {
+            if (event.timestamp_ns < start_ns || event.timestamp_ns > end_ns ||
+                (event.severity != L"Warning" && event.severity != L"Annotation"))
+            {
+                continue;
+            }
+            double const x = 90.0 + 890.0 * static_cast<double>(event.timestamp_ns - start_ns) /
+                static_cast<double>(span_ns);
+            auto const brush = event.severity == L"Warning" ? warning_brush : annotation_brush;
+            Line line;
+            line.X1(x);
+            line.X2(x);
+            line.Y1(10.0);
+            line.Y2(260.0);
+            line.Stroke(brush);
+            line.StrokeThickness(1.0);
+            line.Opacity(0.45);
+            markers.Append(line);
+            PointCollection triangle_points;
+            triangle_points.Append(Point{ static_cast<float>(x - 5.0), 267.0f });
+            triangle_points.Append(Point{ static_cast<float>(x + 5.0), 267.0f });
+            triangle_points.Append(Point{ static_cast<float>(x), 259.0f });
+            Microsoft::UI::Xaml::Shapes::Polygon triangle;
+            triangle.Points(triangle_points);
+            triangle.Fill(brush);
+            markers.Append(triangle);
+        }
+
+        RfHistoryAxisLeftText().Text(relative_history_text(span_ns));
+        RfHistoryAxisCenterText().Text(relative_history_text(span_ns / 2u));
+        auto const selected = RfHistoryPeriodComboBox().SelectedItem().try_as<ComboBoxItem>();
+        hstring const period_label = selected
+            ? unbox_value<hstring>(selected.Content())
+            : hstring{ L"Selected period" };
+        RfHistoryWindowStatusText().Text(period_label + L" · " +
+            to_hstring(visible_samples) + L" samples" +
+            (m_rf_history_display_paused ? L" · paused" : L""));
+    }
+
+    void MainWindow::ResetRfHistorySession()
+    {
+        m_rf_long_history = {};
+        m_rf_long_history_write = 0u;
+        m_rf_long_history_count = 0u;
+        m_rf_history_events.clear();
+        m_rf_history_display_paused = false;
+        m_rf_history_pause_timestamp_ns = 0u;
+        if (RfHistoryPauseButton())
+        {
+            RfHistoryPauseButton().IsChecked(false);
+            RfHistoryPauseButton().Content(box_value(L"Pause display"));
+        }
+        dab_measurement_alarm_reset(&m_rf_alarm);
+        m_rf_alarm_last_value_valid = false;
+        RfHistoryAlarmBanner().IsOpen(false);
+        AddRfHistoryEvent(L"Info", L"Receiver", L"Started", L"New RF history session");
+        ApplyRfAlarmConfiguration(false);
+        UpdateRfLongHistoryVisuals();
+    }
+
+    void MainWindow::AddRfHistoryEvent(hstring const& severity,
+                                       hstring const& measurement,
+                                       hstring const& value,
+                                       hstring const& description,
+                                       uint64_t timestamp_ns)
+    {
+        RfHistoryEvent event{};
+        if (timestamp_ns == 0u && m_rf_long_history_count != 0u)
+        {
+            size_t const newest = (m_rf_long_history_write + rf_long_history_capacity - 1u) %
+                                  rf_long_history_capacity;
+            timestamp_ns = m_rf_long_history[newest].timestamp_ns;
+        }
+        event.timestamp_ns = timestamp_ns != 0u ? timestamp_ns : m_tick * 250000000ull;
+        event.wall_time_100ns = current_wall_time_100ns();
+        event.severity = severity.c_str();
+        event.measurement = measurement.c_str();
+        event.value = value.c_str();
+        event.description = description.c_str();
+        m_rf_history_events.push_back(std::move(event));
+        if (m_rf_history_events.size() > 250u)
+        {
+            m_rf_history_events.erase(m_rf_history_events.begin());
+        }
+        RefreshRfHistoryEventList();
+        if (!m_rf_history_display_paused)
+        {
+            UpdateRfLongHistoryVisuals();
+        }
+    }
+
+    void MainWindow::RefreshRfHistoryEventList()
+    {
+        if (!RfHistoryEventList())
+        {
+            return;
+        }
+        auto items = RfHistoryEventList().Items();
+        items.Clear();
+        for (auto iterator = m_rf_history_events.rbegin();
+             iterator != m_rf_history_events.rend();
+             ++iterator)
+        {
+            auto const& event = *iterator;
+            hstring const time = history_clock_text(event.wall_time_100ns);
+            wchar_t row_text[768]{};
+            swprintf_s(row_text,
+                       L"%-11ls %-11.11ls %-23.23ls %-16.16ls %ls",
+                       time.c_str(),
+                       event.severity.c_str(),
+                       event.measurement.c_str(),
+                       event.value.c_str(),
+                       event.description.c_str());
+            TextBlock row;
+            row.Text(row_text);
+            row.FontFamily(FontFamily{ L"Consolas" });
+            row.FontSize(12.0);
+            row.TextWrapping(TextWrapping::NoWrap);
+            if (event.severity == L"Warning")
+            {
+                row.Foreground(Application::Current().Resources().Lookup(
+                    box_value(hstring{ L"WarningBrush" })).as<Brush>());
+            }
+            else if (event.severity == L"Annotation")
+            {
+                row.Foreground(Application::Current().Resources().Lookup(
+                    box_value(hstring{ L"SpectrumBrush" })).as<Brush>());
+            }
+            items.Append(row);
+        }
+    }
+
+    bool MainWindow::ApplyRfAlarmConfiguration(bool add_event)
+    {
+        double const threshold = RfHistoryAlarmThresholdBox().Value();
+        double const recovery = RfHistoryAlarmRecoveryBox().Value();
+        double const duration_seconds = RfHistoryAlarmDurationBox().Value();
+        int32_t const condition_index = RfHistoryAlarmConditionComboBox().SelectedIndex();
+        if (!std::isfinite(threshold) || !std::isfinite(recovery) ||
+            !std::isfinite(duration_seconds) || duration_seconds < 0.0 ||
+            (condition_index == 0 && recovery <= threshold) ||
+            (condition_index != 0 && recovery >= threshold))
+        {
+            RfHistoryAlarmStateText().Text(condition_index == 0
+                ? L"Configuration error: recovery must be above the trigger threshold"
+                : L"Configuration error: recovery must be below the trigger threshold");
+            RfHistoryAlarmStateText().Foreground(Application::Current().Resources().Lookup(
+                box_value(hstring{ L"WarningBrush" })).as<Brush>());
+            return false;
+        }
+
+        dab_measurement_alarm_config_t config{};
+        config.condition = condition_index == 0
+            ? DAB_MEASUREMENT_ALARM_LESS_THAN
+            : DAB_MEASUREMENT_ALARM_GREATER_THAN;
+        config.threshold = static_cast<float>(threshold);
+        config.recovery_threshold = static_cast<float>(recovery);
+        config.minimum_duration_ns = static_cast<uint64_t>(
+            std::llround(duration_seconds * 1000000000.0));
+        dab_measurement_alarm_configure(&m_rf_alarm, &config);
+        m_rf_alarm_measurement_index = RfHistoryAlarmMeasurementComboBox().SelectedIndex();
+        m_rf_alarm_enabled = toggle_is_checked(RfHistoryAlarmEnableButton());
+        m_rf_alarm_last_value_valid = false;
+        RfHistoryAlarmBanner().IsOpen(false);
+
+        std::array<wchar_t const*, 4> const names{ L"MER", L"Power", L"CFO magnitude", L"Clipping" };
+        std::array<wchar_t const*, 4> const units{ L"dB", L"dBFS", L"Hz", L"%" };
+        size_t const index = static_cast<size_t>(std::clamp(m_rf_alarm_measurement_index, 0, 3));
+        wchar_t state_text[180]{};
+        swprintf_s(state_text,
+                   L"%ls: %ls %ls %.2f %ls for %.1f s · recovery %ls %.2f %ls",
+                   m_rf_alarm_enabled ? L"Armed" : L"Disabled",
+                   names[index],
+                   condition_index == 0 ? L"<" : L">",
+                   threshold,
+                   units[index],
+                   duration_seconds,
+                   condition_index == 0 ? L"≥" : L"≤",
+                   recovery,
+                   units[index]);
+        RfHistoryAlarmStateText().Text(state_text);
+        RfHistoryAlarmStateText().Foreground(Application::Current().Resources().Lookup(
+            box_value(hstring{ m_rf_alarm_enabled ? L"MeasurementAccentBrush" : L"MutedTextBrush" })).as<Brush>());
+        RfHistoryAlarmEnableButton().Content(box_value(m_rf_alarm_enabled
+            ? hstring{ L"Alarm enabled" }
+            : hstring{ L"Alarm disabled" }));
+        if (add_event)
+        {
+            AddRfHistoryEvent(L"Info",
+                              L"Alarm configuration",
+                              m_rf_alarm_enabled ? L"Enabled" : L"Disabled",
+                              state_text);
+        }
+        return true;
+    }
+
+    void MainWindow::RfHistoryAlarmMeasurement_SelectionChanged(
+        IInspectable const&,
+        SelectionChangedEventArgs const&)
+    {
+        if (!m_rf_history_controls_ready)
+        {
+            return;
+        }
+        switch (RfHistoryAlarmMeasurementComboBox().SelectedIndex())
+        {
+        case 0:
+            RfHistoryAlarmConditionComboBox().SelectedIndex(0);
+            RfHistoryAlarmThresholdBox().Value(12.0);
+            RfHistoryAlarmRecoveryBox().Value(14.0);
+            break;
+        case 1:
+            RfHistoryAlarmConditionComboBox().SelectedIndex(0);
+            RfHistoryAlarmThresholdBox().Value(-90.0);
+            RfHistoryAlarmRecoveryBox().Value(-85.0);
+            break;
+        case 2:
+            RfHistoryAlarmConditionComboBox().SelectedIndex(1);
+            RfHistoryAlarmThresholdBox().Value(100.0);
+            RfHistoryAlarmRecoveryBox().Value(50.0);
+            break;
+        default:
+            RfHistoryAlarmConditionComboBox().SelectedIndex(1);
+            RfHistoryAlarmThresholdBox().Value(0.10);
+            RfHistoryAlarmRecoveryBox().Value(0.01);
+            break;
+        }
+    }
+
+    void MainWindow::RfHistoryAlarmApply_Click(IInspectable const&, RoutedEventArgs const&)
+    {
+        ApplyRfAlarmConfiguration(true);
+    }
+
+    void MainWindow::RfHistoryAlarmEnable_Click(IInspectable const&, RoutedEventArgs const&)
+    {
+        m_rf_alarm_enabled = toggle_is_checked(RfHistoryAlarmEnableButton());
+        if (m_rf_alarm_enabled)
+        {
+            ApplyRfAlarmConfiguration(true);
+        }
+        else
+        {
+            dab_measurement_alarm_reset(&m_rf_alarm);
+            RfHistoryAlarmBanner().IsOpen(false);
+            RfHistoryAlarmEnableButton().Content(box_value(L"Alarm disabled"));
+            RfHistoryAlarmStateText().Text(L"Disabled · history capture continues");
+            RfHistoryAlarmStateText().Foreground(Application::Current().Resources().Lookup(
+                box_value(hstring{ L"MutedTextBrush" })).as<Brush>());
+            AddRfHistoryEvent(L"Info", L"Alarm configuration", L"Disabled",
+                              L"Threshold evaluation stopped; history capture continues");
+        }
+    }
+
+    void MainWindow::EvaluateRfAlarm(dab_receive_snapshot_t const& snapshot)
+    {
+        if (!m_rf_alarm_enabled)
+        {
+            return;
+        }
+        bool valid = false;
+        float value = 0.0f;
+        std::array<wchar_t const*, 4> const names{ L"MER", L"Power", L"CFO magnitude", L"Clipping" };
+        std::array<wchar_t const*, 4> const units{ L"dB", L"dBFS", L"Hz", L"%" };
+        size_t const index = static_cast<size_t>(std::clamp(m_rf_alarm_measurement_index, 0, 3));
+        switch (index)
+        {
+        case 0u:
+            valid = snapshot.locked != 0 && m_latest_mer_valid;
+            value = m_latest_mer_db;
+            break;
+        case 1u:
+            valid = snapshot.adc_level_valid != 0;
+            value = snapshot.adc_level_dbfs;
+            break;
+        case 2u:
+            valid = snapshot.cfo_valid != 0;
+            value = std::fabs(snapshot.cfo_hz);
+            break;
+        default:
+            valid = snapshot.adc_window_sample_count != 0u;
+            value = snapshot.adc_clipping_percent;
+            break;
+        }
+        m_rf_alarm_last_value = value;
+        m_rf_alarm_last_value_valid = valid;
+        uint64_t const timestamp_ns = snapshot.timestamp_ns != 0u
+            ? snapshot.timestamp_ns
+            : m_tick * 250000000ull;
+        bool const was_pending = m_rf_alarm.pending != 0;
+        auto const event = dab_measurement_alarm_update(&m_rf_alarm,
+                                                         timestamp_ns,
+                                                         valid ? 1 : 0,
+                                                         value);
+        wchar_t value_text[64]{};
+        swprintf_s(value_text, L"%.2f %ls", static_cast<double>(value), units[index]);
+        auto const event_checked = RfHistoryAlarmAddEventCheckBox().IsChecked();
+        bool const add_event = event_checked && event_checked.Value();
+        auto const notification_checked = RfHistoryAlarmNotificationCheckBox().IsChecked();
+        bool const show_notification = notification_checked && notification_checked.Value();
+
+        if (event == DAB_MEASUREMENT_ALARM_TRIGGERED)
+        {
+            wchar_t description[180]{};
+            swprintf_s(description,
+                       L"%ls %.2f %ls for at least %.1f s",
+                       m_rf_alarm.config.condition == DAB_MEASUREMENT_ALARM_LESS_THAN
+                           ? L"Below" : L"Above",
+                       static_cast<double>(m_rf_alarm.config.threshold),
+                       units[index],
+                       static_cast<double>(m_rf_alarm.config.minimum_duration_ns) / 1000000000.0);
+            if (add_event)
+            {
+                AddRfHistoryEvent(L"Warning", names[index], value_text, description, timestamp_ns);
+            }
+            AddTimelineEvent(hstring{ L"RF alarm · " } + names[index] + L" " + value_text);
+            if (show_notification)
+            {
+                RfHistoryAlarmBanner().Title(hstring{ names[index] } + L" alarm active");
+                RfHistoryAlarmBanner().Message(hstring{ value_text } + L" · " + description);
+                RfHistoryAlarmBanner().Severity(InfoBarSeverity::Warning);
+                RfHistoryAlarmBanner().IsOpen(true);
+            }
+            RfHistoryAlarmStateText().Text(hstring{ L"ACTIVE · " } + names[index] + L" " + value_text);
+            RfHistoryAlarmStateText().Foreground(Application::Current().Resources().Lookup(
+                box_value(hstring{ L"WarningBrush" })).as<Brush>());
+        }
+        else if (event == DAB_MEASUREMENT_ALARM_RECOVERED)
+        {
+            wchar_t description[160]{};
+            swprintf_s(description,
+                       L"Recovered at %ls %.2f %ls",
+                       m_rf_alarm.config.condition == DAB_MEASUREMENT_ALARM_LESS_THAN
+                           ? L"≥" : L"≤",
+                       static_cast<double>(m_rf_alarm.config.recovery_threshold),
+                       units[index]);
+            if (add_event)
+            {
+                AddRfHistoryEvent(L"Info", names[index], value_text, description, timestamp_ns);
+            }
+            RfHistoryAlarmBanner().IsOpen(false);
+            RfHistoryAlarmStateText().Text(hstring{ L"Recovered · " } + names[index] + L" " + value_text);
+            RfHistoryAlarmStateText().Foreground(Application::Current().Resources().Lookup(
+                box_value(hstring{ L"MeasurementAccentBrush" })).as<Brush>());
+        }
+        else if (m_rf_alarm.pending && valid)
+        {
+            double const elapsed = static_cast<double>(timestamp_ns - m_rf_alarm.pending_since_ns) /
+                                   1000000000.0;
+            double const required = static_cast<double>(m_rf_alarm.config.minimum_duration_ns) /
+                                    1000000000.0;
+            wchar_t pending_text[140]{};
+            swprintf_s(pending_text,
+                       L"Pending · %ls %ls · %.1f / %.1f s",
+                       names[index],
+                       value_text,
+                       elapsed,
+                       required);
+            RfHistoryAlarmStateText().Text(pending_text);
+            RfHistoryAlarmStateText().Foreground(Application::Current().Resources().Lookup(
+                box_value(hstring{ L"WarningBrush" })).as<Brush>());
+        }
+        else if (was_pending && !m_rf_alarm.active)
+        {
+            wchar_t armed_text[140]{};
+            swprintf_s(armed_text,
+                       L"Armed · %ls %ls %.2f %ls for %.1f s",
+                       names[index],
+                       m_rf_alarm.config.condition == DAB_MEASUREMENT_ALARM_LESS_THAN
+                           ? L"<" : L">",
+                       static_cast<double>(m_rf_alarm.config.threshold),
+                       units[index],
+                       static_cast<double>(m_rf_alarm.config.minimum_duration_ns) / 1000000000.0);
+            RfHistoryAlarmStateText().Text(armed_text);
+            RfHistoryAlarmStateText().Foreground(Application::Current().Resources().Lookup(
+                box_value(hstring{ L"MeasurementAccentBrush" })).as<Brush>());
+        }
+    }
+
+    void MainWindow::RfHistoryAnnotationCommit_Click(IInspectable const&, RoutedEventArgs const&)
+    {
+        std::wstring note{ RfHistoryAnnotationTextBox().Text().c_str() };
+        size_t const first = note.find_first_not_of(L" \t\r\n");
+        size_t const last = note.find_last_not_of(L" \t\r\n");
+        if (first == std::wstring::npos)
+        {
+            return;
+        }
+        note = note.substr(first, last - first + 1u);
+        AddRfHistoryEvent(L"Annotation", L"Operator", L"Marker", hstring{ note });
+        AddTimelineEvent(hstring{ L"RF annotation · " } + note);
+        RfHistoryAnnotationTextBox().Text(L"");
+        RfHistoryAnnotationFlyout().Hide();
+    }
+
+    void MainWindow::RfHistoryClearEvents_Click(IInspectable const&, RoutedEventArgs const&)
+    {
+        m_rf_history_events.clear();
+        RefreshRfHistoryEventList();
+        UpdateRfLongHistoryVisuals();
+        AddTimelineEvent(L"RF history events cleared");
+    }
+
+    winrt::fire_and_forget MainWindow::RfHistoryExportCsv_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        auto lifetime = get_strong();
+        try
+        {
+            if (m_rf_long_history_count == 0u)
+            {
+                RfHistoryCaptureStatusText().Text(L"No history samples to export");
+                co_return;
+            }
+            size_t const oldest = (m_rf_long_history_write + rf_long_history_capacity -
+                                   m_rf_long_history_count) % rf_long_history_capacity;
+            size_t const newest = (m_rf_long_history_write + rf_long_history_capacity - 1u) %
+                                  rf_long_history_capacity;
+            uint64_t const end_ns = m_rf_history_display_paused &&
+                m_rf_history_pause_timestamp_ns != 0u
+                ? m_rf_history_pause_timestamp_ns
+                : m_rf_long_history[newest].timestamp_ns;
+            uint64_t const period_ns = RfHistoryPeriodNs();
+            uint64_t const start_ns = period_ns != 0u && end_ns > period_ns
+                ? end_ns - period_ns
+                : m_rf_long_history[oldest].timestamp_ns;
+            std::wstring csv = L"timestamp_utc,elapsed_s,power_dbfs,mer_db,cfo_hz,clipping_percent,sync_locked\r\n";
+            uint64_t first_sample_ns = 0u;
+            size_t exported = 0u;
+            auto value_field = [](bool valid, float value, int precision) -> std::wstring
+            {
+                if (!valid || !std::isfinite(value))
+                {
+                    return {};
+                }
+                wchar_t buffer[48]{};
+                swprintf_s(buffer, L"%.*f", precision, static_cast<double>(value));
+                return buffer;
+            };
+            for (size_t offset = 0u; offset < m_rf_long_history_count; ++offset)
+            {
+                auto const& sample = m_rf_long_history[(oldest + offset) % rf_long_history_capacity];
+                if (sample.timestamp_ns < start_ns || sample.timestamp_ns > end_ns)
+                {
+                    continue;
+                }
+                if (first_sample_ns == 0u)
+                {
+                    first_sample_ns = sample.timestamp_ns;
+                }
+                wchar_t elapsed[48]{};
+                swprintf_s(elapsed,
+                           L"%.3f",
+                           static_cast<double>(sample.timestamp_ns - first_sample_ns) / 1000000000.0);
+                csv += history_iso_utc(sample.wall_time_100ns) + L"," + elapsed + L"," +
+                    value_field(sample.power_valid, sample.power_dbfs, 3) + L"," +
+                    value_field(sample.mer_valid, sample.mer_db, 3) + L"," +
+                    value_field(sample.cfo_valid, sample.cfo_hz, 3) + L"," +
+                    value_field(sample.clipping_valid, sample.clipping_percent, 6) + L"," +
+                    (sample.locked ? L"1" : L"0") + L"\r\n";
+                ++exported;
+            }
+
+            using namespace Windows::Storage;
+            SYSTEMTIME now{};
+            GetLocalTime(&now);
+            wchar_t filename[80]{};
+            swprintf_s(filename,
+                       L"DAB_RF_History_%04u%02u%02u_%02u%02u%02u.csv",
+                       now.wYear,
+                       now.wMonth,
+                       now.wDay,
+                       now.wHour,
+                       now.wMinute,
+                       now.wSecond);
+            auto const file = co_await DownloadsFolder::CreateFileAsync(
+                filename,
+                CreationCollisionOption::GenerateUniqueName);
+            co_await FileIO::WriteTextAsync(file, hstring{ csv });
+            RfHistoryCaptureStatusText().Text(
+                L"Exported " + to_hstring(exported) + L" samples · " + file.Path());
+            AddRfHistoryEvent(L"Info",
+                              L"CSV export",
+                              to_hstring(exported) + L" samples",
+                              file.Path());
+            AddTimelineEvent(L"RF history CSV saved to " + file.Path());
+        }
+        catch (hresult_error const& error)
+        {
+            RfHistoryCaptureStatusText().Text(L"CSV export failed · " + error.message());
+            AddTimelineEvent(L"RF history CSV export failed: " + error.message());
+        }
     }
 
     void MainWindow::ApplySnapshot(dab_receive_snapshot_t const& snapshot)

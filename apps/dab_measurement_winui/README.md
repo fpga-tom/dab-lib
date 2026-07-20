@@ -14,6 +14,7 @@ The current proof of concept includes:
 - a dedicated RF Measurements workspace with toolbar, navigation, View-menu, and live-summary entry points;
 - an RF Overview page with live ADC-referenced power, C/N, carrier MER, CFO, synchronization stability, overruns, receiver configuration, process CPU usage, and rolling 60-second traces;
 - an RF Spectrum page driven by the native 2048-bin/1 kHz receiver FFT, with display averaging, peak hold, reference and scale controls, waterfall, dual/delta markers, cursor readout, wheel zoom, drag pan, double-click reset, freeze, tune-at-cursor, and PNG capture to the Pictures library;
+- an RF History & Alarms page with one-hour bounded timestamped history, selectable power/MER/CFO/clipping traces, display pause, annotations, event markers, CSV export, and a configurable duration-plus-hysteresis alarm evaluator;
 - event/annotation timeline and receiver status bar;
 - a thread-safe latest-snapshot mailbox compatible with `dab_receive_config_t.snapshot`;
 - a UI-owned receiver worker that runs `dab_receive_service` on a dedicated thread;
@@ -41,7 +42,7 @@ The receiver controls currently open a real SDR device. The selected SDRplay or 
 Current proof-of-concept limitations:
 
 - selecting an audio service in the navigation list restarts the receiver session on the same channel with that explicit SID;
-- absolute input power remains uncalibrated, so RF power is correctly displayed in dBFS rather than dBm; sample-clock and ADC-clipping estimators are not available yet;
+- absolute input power remains uncalibrated, so RF power is correctly displayed in dBFS rather than dBm;
 - the high-rate callback is emitted after a complete synchronized DAB transmission frame; acquisition without frame synchronization produces scalar snapshots but no array payload;
 - CIR delays are relative to the receiver FFT timing reference and are not absolute transmitter propagation delays;
 - FFT size and window controls describe the native receiver FFT and are read-only; triggered raw-IQ capture remains disabled until the receiver pipeline exposes a raw sample recorder;

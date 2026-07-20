@@ -47,6 +47,8 @@ void test_msc_component_kind_classifies_transport_mode(void);
 void test_msc_find_primary_component_payload_exposes_decoded_cifs(void);
 void test_msc_ingest_component_payload_builds_dabplus_superframe(void);
 void test_msc_build_layout_and_payload_preserve_packet_metadata(void);
+void test_measurement_alarm_requires_duration_and_recovery_hysteresis(void);
+void test_measurement_alarm_short_violation_does_not_accumulate(void);
 void test_os_shared_lib_rejects_missing_library(void);
 void test_sdrplay_api_reports_unusable_when_not_loaded(void);
 void test_sdrplay_device_specific_config_propagates_to_samples(void);
@@ -136,6 +138,8 @@ int main(void) {
     test_msc_find_primary_component_payload_exposes_decoded_cifs();
     test_msc_ingest_component_payload_builds_dabplus_superframe();
     test_msc_build_layout_and_payload_preserve_packet_metadata();
+    test_measurement_alarm_requires_duration_and_recovery_hysteresis();
+    test_measurement_alarm_short_violation_does_not_accumulate();
     test_os_shared_lib_rejects_missing_library();
     test_sdrplay_api_reports_unusable_when_not_loaded();
     test_sdrplay_device_specific_config_propagates_to_samples();
