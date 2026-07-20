@@ -8,6 +8,7 @@ void test_sync_acquires_and_tracks(void) {
     dab_sync_t sync;
     dab_sync_config_t config;
     dab_null_event_t event;
+    uint32_t frame;
 
     dab_sync_default_config(&config);
     config.expected_frame_samples = 196608u;
@@ -24,6 +25,8 @@ void test_sync_acquires_and_tracks(void) {
     dab_sync_on_null_candidate(&sync, &event);
     TEST_ASSERT(sync.state.mode == DAB_SYNC_MODE_ACQUIRE);
     TEST_ASSERT(sync.state.locked == 0);
+    TEST_ASSERT(sync.state.null_confidence_valid == 1);
+    TEST_ASSERT(fabsf(sync.state.null_confidence - 0.9f) <= 1.0e-6f);
 
     TEST_ASSERT(dab_sync_on_prs_acquire(&sync, 101000u, 0.90f, -12, 2) == 1);
     TEST_ASSERT(sync.state.mode == DAB_SYNC_MODE_TRACK);
@@ -38,7 +41,22 @@ void test_sync_acquires_and_tracks(void) {
     TEST_ASSERT(sync.state.frame_start_sample == 297620u);
     TEST_ASSERT(sync.state.timing_error_samples == 12);
     TEST_ASSERT(sync.state.fine_freq_error_hz > 0.0f);
+    TEST_ASSERT(fabsf(sync.state.residual_freq_error_hz -
+                      (3.5f - sync.state.coarse_freq_error_hz)) <= 1.0e-6f);
     TEST_ASSERT(sync.state.carrier_offset_bins == 1);
+    TEST_ASSERT(sync.state.sample_clock_frame_count == 1u);
+    TEST_ASSERT(sync.state.sample_clock_error_valid == 0);
+
+    for (frame = 1u; frame < 8u; ++frame) {
+        TEST_ASSERT(dab_sync_on_prs_track(&sync,
+                                           dab_sync_predict_next_frame_start(&sync),
+                                           0.80f,
+                                           sync.state.coarse_freq_error_hz,
+                                           0) == 1);
+    }
+    TEST_ASSERT(sync.state.sample_clock_frame_count == 8u);
+    TEST_ASSERT(sync.state.sample_clock_error_valid == 1);
+    TEST_ASSERT(fabsf(sync.state.sample_clock_error_ppm - 7.6293945f) < 1.0e-4f);
 }
 
 void test_sync_falls_back_to_acquire_after_bad_tracking(void) {

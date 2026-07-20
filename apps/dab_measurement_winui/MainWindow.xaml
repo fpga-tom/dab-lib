@@ -1327,7 +1327,193 @@
                     </ScrollViewer>
                 </TabViewItem>
                 <TabViewItem Header="Frequency &amp; Sync" IsClosable="False">
-                    <TextBlock Text="Frequency and synchronization diagnostics will be added here." HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" />
+                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  Padding="12">
+                        <StackPanel Spacing="10">
+                            <Border Style="{StaticResource PanelCardStyle}" Padding="16,13">
+                                <Grid ColumnSpacing="18">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="Synchronisation state" FontSize="16" FontWeight="SemiBold" />
+                                        <StackPanel Orientation="Horizontal" Spacing="9" Margin="0,8,0,0">
+                                            <Ellipse x:Name="RfSyncStateIndicator" Width="11" Height="11" Fill="{StaticResource MutedTextBrush}" VerticalAlignment="Center" />
+                                            <TextBlock x:Name="RfSyncStateText" Text="IDLE" FontFamily="Consolas" FontSize="21" FontWeight="SemiBold" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center" MinWidth="150">
+                                        <TextBlock Text="LOCK DURATION" Style="{StaticResource SectionTitleStyle}" />
+                                        <TextBlock x:Name="RfSyncLockDurationText" Text="00:00:00" FontFamily="Consolas" FontSize="17" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2" VerticalAlignment="Center" MinWidth="130">
+                                        <TextBlock Text="REACQUISITIONS" Style="{StaticResource SectionTitleStyle}" />
+                                        <TextBlock x:Name="RfSyncReacquisitionText" Text="0" FontFamily="Consolas" FontSize="17" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="3" VerticalAlignment="Center" MinWidth="110">
+                                        <TextBlock Text="SYNC LOSSES" Style="{StaticResource SectionTitleStyle}" />
+                                        <TextBlock x:Name="RfSyncLossCountText" Text="0" FontFamily="Consolas" FontSize="17" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0" Style="{StaticResource PanelCardStyle}" Padding="16">
+                                    <Grid RowSpacing="9" ColumnSpacing="18">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.ColumnSpan="2" Text="Carrier frequency" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,4" />
+                                        <TextBlock Grid.Row="1" Text="Coarse CFO" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="1" Grid.Column="1" x:Name="RfSyncCoarseCfoText" Text="— Hz" FontFamily="Consolas" FontSize="15" />
+                                        <TextBlock Grid.Row="2" Text="Fine CFO" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="2" Grid.Column="1" x:Name="RfSyncFineCfoText" Text="— Hz" FontFamily="Consolas" />
+                                        <TextBlock Grid.Row="3" Text="Residual CFO" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="3" Grid.Column="1" x:Name="RfSyncResidualCfoText" Text="— Hz" FontFamily="Consolas" />
+                                        <TextBlock Grid.Row="4" Text="CFO drift" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="4" Grid.Column="1" x:Name="RfSyncCfoDriftText" Text="— Hz/min" FontFamily="Consolas" />
+                                        <TextBlock Grid.Row="5" Text="Integer carrier offset" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="5" Grid.Column="1" x:Name="RfSyncCarrierOffsetText" Text="— bins" FontFamily="Consolas" />
+                                    </Grid>
+                                </Border>
+
+                                <Border Grid.Column="1" Style="{StaticResource PanelCardStyle}" Padding="16">
+                                    <Grid RowSpacing="9" ColumnSpacing="18">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.ColumnSpan="2" Text="Sampling clock" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,4" />
+                                        <TextBlock Grid.Row="1" Text="Estimated error" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="1" Grid.Column="1" x:Name="RfSyncClockErrorText" Text="— ppm" FontFamily="Consolas" FontSize="15" />
+                                        <TextBlock Grid.Row="2" Text="Suggested correction" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="2" Grid.Column="1" x:Name="RfSyncClockCorrectionText" Text="— ppm" FontFamily="Consolas" />
+                                        <TextBlock Grid.Row="3" Text="Drift" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="3" Grid.Column="1" x:Name="RfSyncClockDriftText" Text="— ppm/min" FontFamily="Consolas" />
+                                        <TextBlock Grid.Row="4" Text="Estimator frames" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="4" Grid.Column="1" x:Name="RfSyncClockFramesText" Text="0" FontFamily="Consolas" />
+                                        <TextBlock Grid.Row="5" Text="Method" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="5" Grid.Column="1" Text="Frame-period average" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                    </Grid>
+                                </Border>
+                            </Grid>
+
+                            <Border Style="{StaticResource PanelCardStyle}" Padding="16">
+                                <Grid RowSpacing="7">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="220" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Grid ColumnSpacing="14">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="CFO history — last 60 seconds" FontSize="16" FontWeight="SemiBold" />
+                                            <TextBlock Text="PI correction, frame innovation and post-update residual"
+                                                       Foreground="{StaticResource MutedTextBrush}"
+                                                       FontSize="11" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                                            <StackPanel Orientation="Horizontal" Spacing="5"><Rectangle Width="15" Height="3" Fill="{StaticResource SpectrumBrush}" /><TextBlock Text="Coarse" FontSize="11" /></StackPanel>
+                                            <StackPanel Orientation="Horizontal" Spacing="5"><Rectangle Width="15" Height="3" Fill="{StaticResource WarningBrush}" /><TextBlock Text="Fine" FontSize="11" /></StackPanel>
+                                            <StackPanel Orientation="Horizontal" Spacing="5"><Rectangle Width="15" Height="3" Fill="{StaticResource MeasurementAccentBrush}" /><TextBlock Text="Residual" FontSize="11" /></StackPanel>
+                                        </StackPanel>
+                                    </Grid>
+                                    <Grid Grid.Row="1" ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="72" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid>
+                                            <TextBlock x:Name="RfSyncCfoAxisTopText" Text="+500 Hz" HorizontalAlignment="Right" FontFamily="Consolas" FontSize="11" />
+                                            <TextBlock Text="0 Hz" HorizontalAlignment="Right" VerticalAlignment="Center" FontFamily="Consolas" FontSize="11" />
+                                            <TextBlock x:Name="RfSyncCfoAxisBottomText" Text="−500 Hz" HorizontalAlignment="Right" VerticalAlignment="Bottom" FontFamily="Consolas" FontSize="11" />
+                                        </Grid>
+                                        <Border Grid.Column="1" BorderBrush="{StaticResource PanelStrokeBrush}" BorderThickness="1" Background="#FF07101B">
+                                            <Viewbox Stretch="Fill">
+                                                <Canvas Width="900" Height="220" Background="#FF07101B">
+                                                    <Line X1="0" Y1="55" X2="900" Y2="55" Stroke="#203D556E" />
+                                                    <Line x:Name="RfSyncCfoZeroLine" X1="0" Y1="110" X2="900" Y2="110" Stroke="#503D556E" />
+                                                    <Line X1="0" Y1="165" X2="900" Y2="165" Stroke="#203D556E" />
+                                                    <Polyline x:Name="RfSyncCoarseHistoryTrace" Stroke="{StaticResource SpectrumBrush}" StrokeThickness="2" Points="0,110 900,110" />
+                                                    <Polyline x:Name="RfSyncFineHistoryTrace" Stroke="{StaticResource WarningBrush}" StrokeThickness="1.5" Points="0,110 900,110" />
+                                                    <Polyline x:Name="RfSyncResidualHistoryTrace" Stroke="{StaticResource MeasurementAccentBrush}" StrokeThickness="1.5" Points="0,110 900,110" />
+                                                </Canvas>
+                                            </Viewbox>
+                                        </Border>
+                                    </Grid>
+                                    <Grid Grid.Row="2" Margin="80,0,0,0">
+                                        <TextBlock Text="60 s ago" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                        <TextBlock Text="now" Foreground="{StaticResource MutedTextBrush}" FontSize="11" HorizontalAlignment="Right" />
+                                    </Grid>
+                                </Grid>
+                            </Border>
+
+                            <Border Style="{StaticResource PanelCardStyle}" Padding="16">
+                                <StackPanel Spacing="11">
+                                    <TextBlock Text="Synchronisation diagnostics" FontSize="16" FontWeight="SemiBold" />
+                                    <Grid ColumnSpacing="22" RowSpacing="10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <StackPanel Grid.Column="0"><TextBlock Text="NULL CONFIDENCE" Style="{StaticResource SectionTitleStyle}" /><TextBlock x:Name="RfSyncNullConfidenceText" Text="—" FontFamily="Consolas" FontSize="17" /><TextBlock Text="1 − minimum power ratio" Foreground="{StaticResource MutedTextBrush}" FontSize="10" /></StackPanel>
+                                        <StackPanel Grid.Column="1"><TextBlock Text="CP CORRELATION PEAK" Style="{StaticResource SectionTitleStyle}" /><TextBlock x:Name="RfSyncCpCorrelationText" Text="—" FontFamily="Consolas" FontSize="17" /><TextBlock Text="Timing/CFO search" Foreground="{StaticResource MutedTextBrush}" FontSize="10" /></StackPanel>
+                                        <StackPanel Grid.Column="2"><TextBlock Text="PRS CORRELATION" Style="{StaticResource SectionTitleStyle}" /><TextBlock x:Name="RfSyncPrsCorrelationText" Text="—" FontFamily="Consolas" FontSize="17" /><TextBlock Text="Frame-lock confirmation" Foreground="{StaticResource MutedTextBrush}" FontSize="10" /></StackPanel>
+                                        <StackPanel Grid.Column="3"><TextBlock Text="FFT TIMING OFFSET" Style="{StaticResource SectionTitleStyle}" /><TextBlock x:Name="RfSyncFftTimingText" Text="— samples" FontFamily="Consolas" FontSize="17" /><TextBlock x:Name="RfSyncFrameTimingText" Text="Frame error — samples" Foreground="{StaticResource MutedTextBrush}" FontSize="10" /></StackPanel>
+                                        <StackPanel Grid.Row="1" Grid.Column="0"><TextBlock Text="ACQUISITION TIME" Style="{StaticResource SectionTitleStyle}" /><TextBlock x:Name="RfSyncAcquisitionText" Text="— ms" FontFamily="Consolas" /></StackPanel>
+                                        <StackPanel Grid.Row="1" Grid.Column="1"><TextBlock Text="LAST SYNC LOSS" Style="{StaticResource SectionTitleStyle}" /><TextBlock x:Name="RfSyncLastLossText" Text="None this session" FontFamily="Consolas" /></StackPanel>
+                                        <StackPanel Grid.Row="1" Grid.Column="2"><TextBlock Text="GOOD / BAD FRAMES" Style="{StaticResource SectionTitleStyle}" /><TextBlock x:Name="RfSyncFrameCountsText" Text="0 / 0" FontFamily="Consolas" /></StackPanel>
+                                        <StackPanel Grid.Row="1" Grid.Column="3"><TextBlock Text="TRACKING STATE" Style="{StaticResource SectionTitleStyle}" /><TextBlock x:Name="RfSyncTrackingText" Text="Idle" FontFamily="Consolas" /></StackPanel>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource PanelCardStyle}" Padding="16,12">
+                                <Grid RowSpacing="8">
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="110" /></Grid.RowDefinitions>
+                                    <TextBlock Text="Synchronisation loss timeline" FontSize="16" FontWeight="SemiBold" />
+                                    <ListView Grid.Row="1" x:Name="RfSyncEventList" SelectionMode="None" IsItemClickEnabled="False">
+                                        <ListViewItem Content="No synchronisation events in this session" />
+                                    </ListView>
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
                 </TabViewItem>
                 <TabViewItem Header="Channel/CIR" IsClosable="False">
                     <TextBlock Text="Channel impulse response analysis will be added here." HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" />

@@ -93,9 +93,24 @@ typedef struct {
     int cfo_valid;
     float cfo_hz;
     float fine_cfo_hz;
+    float residual_cfo_hz;
     int32_t carrier_offset_bins;
     int timing_valid;
     int32_t timing_error_samples;
+    int fft_timing_valid;
+    float fft_timing_offset_samples;
+    int null_confidence_valid;
+    float null_confidence;
+    int cp_correlation_valid;
+    float cp_correlation_peak;
+    int sample_clock_error_valid;
+    float sample_clock_error_ppm;
+    uint32_t sample_clock_frame_count;
+    int sync_acquisition_time_valid;
+    float sync_acquisition_time_ms;
+    uint64_t sync_lock_duration_ns;
+    uint32_t sync_loss_count;
+    uint32_t sync_reacquisition_count;
 
     uint32_t fic_frames_seen;
     uint32_t fic_blocks_decoded_last_frame;

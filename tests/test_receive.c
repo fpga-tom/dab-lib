@@ -61,8 +61,18 @@ void test_receive_snapshot_maps_receiver_measurements_and_counters(void) {
     sync.state.receiver_snr_db = 17.75f;
     sync.state.coarse_freq_error_hz = -123.5f;
     sync.state.fine_freq_error_hz = 4.25f;
+    sync.state.residual_freq_error_hz = 0.75f;
     sync.state.carrier_offset_bins = -2;
     sync.state.timing_error_samples = 7;
+    sync.state.fft_timing_valid = 1;
+    sync.state.fft_timing_offset_samples = 1.25f;
+    sync.state.null_confidence_valid = 1;
+    sync.state.null_confidence = 0.97f;
+    sync.state.cp_correlation_valid = 1;
+    sync.state.cp_correlation_peak = 0.91f;
+    sync.state.sample_clock_error_valid = 1;
+    sync.state.sample_clock_error_ppm = -0.42f;
+    sync.state.sample_clock_frame_count = 18u;
 
     fic.frames_seen = 21u;
     fic.fic_blocks_decoded_last_frame = 3u;
@@ -115,9 +125,19 @@ void test_receive_snapshot_maps_receiver_measurements_and_counters(void) {
     TEST_ASSERT(snapshot.cfo_valid == 1);
     TEST_ASSERT(snapshot.cfo_hz == -123.5f);
     TEST_ASSERT(snapshot.fine_cfo_hz == 4.25f);
+    TEST_ASSERT(snapshot.residual_cfo_hz == 0.75f);
     TEST_ASSERT(snapshot.carrier_offset_bins == -2);
     TEST_ASSERT(snapshot.timing_valid == 1);
     TEST_ASSERT(snapshot.timing_error_samples == 7);
+    TEST_ASSERT(snapshot.fft_timing_valid == 1);
+    TEST_ASSERT(snapshot.fft_timing_offset_samples == 1.25f);
+    TEST_ASSERT(snapshot.null_confidence_valid == 1);
+    TEST_ASSERT(snapshot.null_confidence == 0.97f);
+    TEST_ASSERT(snapshot.cp_correlation_valid == 1);
+    TEST_ASSERT(snapshot.cp_correlation_peak == 0.91f);
+    TEST_ASSERT(snapshot.sample_clock_error_valid == 1);
+    TEST_ASSERT(snapshot.sample_clock_error_ppm == -0.42f);
+    TEST_ASSERT(snapshot.sample_clock_frame_count == 18u);
     TEST_ASSERT(snapshot.fic_frames_seen == 21u);
     TEST_ASSERT(snapshot.fic_blocks_decoded_last_frame == 3u);
     TEST_ASSERT(snapshot.fic_valid_fibs_last_frame == 9u);

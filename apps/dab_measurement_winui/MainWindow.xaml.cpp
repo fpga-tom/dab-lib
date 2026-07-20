@@ -40,6 +40,27 @@ namespace
         return hstring{ buffer };
     }
 
+    hstring format_duration(uint64_t duration_ns)
+    {
+        uint64_t const seconds = duration_ns / 1000000000ull;
+        wchar_t buffer[40]{};
+        swprintf_s(buffer,
+                   L"%02llu:%02llu:%02llu",
+                   static_cast<unsigned long long>(seconds / 3600ull),
+                   static_cast<unsigned long long>((seconds / 60ull) % 60ull),
+                   static_cast<unsigned long long>(seconds % 60ull));
+        return hstring{ buffer };
+    }
+
+    hstring local_clock_text()
+    {
+        SYSTEMTIME now{};
+        GetLocalTime(&now);
+        wchar_t buffer[24]{};
+        swprintf_s(buffer, L"%02u:%02u:%02u", now.wHour, now.wMinute, now.wSecond);
+        return hstring{ buffer };
+    }
+
     hstring status_text(std::string const& value)
     {
         return winrt::to_hstring(value);
@@ -155,6 +176,62 @@ namespace
             points.Append(Point{ x, y });
         }
         return points;
+    }
+
+    template <size_t Capacity>
+    bool timed_history_slope(std::array<float, Capacity> const& values,
+                             std::array<uint64_t, Capacity> const& timestamps,
+                             size_t write_index,
+                             size_t count,
+                             float& per_minute)
+    {
+        if (count < 4u)
+        {
+            return false;
+        }
+
+        size_t const first = (write_index + Capacity - count) % Capacity;
+        uint64_t origin = 0u;
+        double sum_x = 0.0;
+        double sum_y = 0.0;
+        double sum_xx = 0.0;
+        double sum_xy = 0.0;
+        uint32_t used = 0u;
+        double last_x = 0.0;
+        for (size_t point = 0u; point < count; ++point)
+        {
+            size_t const index = (first + point) % Capacity;
+            float const value = values[index];
+            uint64_t const timestamp = timestamps[index];
+            if (!std::isfinite(value) || timestamp == 0u)
+            {
+                continue;
+            }
+            if (origin == 0u)
+            {
+                origin = timestamp;
+            }
+            if (timestamp < origin)
+            {
+                continue;
+            }
+            double const x = static_cast<double>(timestamp - origin) / 1000000000.0;
+            sum_x += x;
+            sum_y += value;
+            sum_xx += x * x;
+            sum_xy += x * value;
+            last_x = x;
+            ++used;
+        }
+        double const denominator = static_cast<double>(used) * sum_xx - sum_x * sum_x;
+        if (used < 4u || last_x < 2.0 || std::abs(denominator) < 1.0e-9)
+        {
+            return false;
+        }
+        double const slope_per_second =
+            (static_cast<double>(used) * sum_xy - sum_x * sum_y) / denominator;
+        per_minute = static_cast<float>(slope_per_second * 60.0);
+        return std::isfinite(per_minute);
     }
 }
 
@@ -822,6 +899,7 @@ namespace winrt::DabMeasurementWinUI::implementation
             m_rf_lock_started_ns = 0u;
             UpdateRfHistoryVisuals();
         }
+        ResetRfSyncDiagnostics();
         m_active_service_id = settings.service_id;
         SetReceiverControlsEnabled(false);
         StartButton().IsEnabled(true);
@@ -949,6 +1027,10 @@ namespace winrt::DabMeasurementWinUI::implementation
             RfLiveBadgeText().Text(L"IDLE");
             RfStatusValueText().Text(L"IDLE");
             RfStatusDetailText().Text(L"Receiver stopped");
+            RfSyncStateText().Text(L"IDLE");
+            RfSyncTrackingText().Text(L"Idle");
+            RfSyncStateIndicator().Fill(Application::Current().Resources().Lookup(
+                box_value(hstring{ L"MutedTextBrush" })).as<Brush>());
             m_rf_was_locked = false;
             m_rf_lock_started_ns = 0u;
             SetReceiverControlsEnabled(true);
@@ -961,6 +1043,10 @@ namespace winrt::DabMeasurementWinUI::implementation
             RfLiveBadgeText().Text(L"ERROR");
             RfStatusValueText().Text(L"ERROR");
             RfStatusDetailText().Text(status_text(status.message));
+            RfSyncStateText().Text(L"ERROR");
+            RfSyncTrackingText().Text(L"Receiver error");
+            RfSyncStateIndicator().Fill(Application::Current().Resources().Lookup(
+                box_value(hstring{ L"WarningBrush" })).as<Brush>());
             SetReceiverControlsEnabled(true);
             StartButton().IsEnabled(true);
             StartButtonLabel().Text(L"Start");
@@ -1112,7 +1198,7 @@ namespace winrt::DabMeasurementWinUI::implementation
             ? format_float(snapshot.cfo_hz, L" Hz")
             : hstring{ L"— Hz" });
         RfResidualCfoText().Text(snapshot.cfo_valid
-            ? hstring{ L"Residual " } + format_float(snapshot.fine_cfo_hz, L" Hz")
+            ? hstring{ L"Residual " } + format_float(snapshot.residual_cfo_hz, L" Hz")
             : hstring{ L"Residual — Hz" });
         RfOverrunValueText().Text(to_hstring(snapshot.dropped_blocks));
         RfConfigSampleRateText().Text(snapshot.sample_rate_hz != 0u
@@ -1222,6 +1308,7 @@ namespace winrt::DabMeasurementWinUI::implementation
                            2)
             : hstring{ L"— ms" });
         UpdateRfInputHistogram(snapshot);
+        ApplyRfSyncSnapshot(snapshot);
 
         if (have_rf_input && snapshot.adc_clipped_sample_count != 0u)
         {
@@ -1285,6 +1372,212 @@ namespace winrt::DabMeasurementWinUI::implementation
                                                          maximum,
                                                          720.0f,
                                                          220.0f));
+    }
+
+    void MainWindow::ApplyRfSyncSnapshot(dab_receive_snapshot_t const& snapshot)
+    {
+        AppendRfSyncHistory(snapshot);
+
+        bool const locked = snapshot.locked != 0;
+        RfSyncStateText().Text(locked ? L"FRAME LOCKED" : L"ACQUIRING");
+        RfSyncTrackingText().Text(locked ? L"Frame tracking" : L"PRS acquisition");
+        RfSyncStateIndicator().Fill(Application::Current().Resources().Lookup(
+            box_value(hstring{ locked ? L"MeasurementAccentBrush" : L"WarningBrush" })).as<Brush>());
+        RfSyncLockDurationText().Text(locked
+            ? format_duration(snapshot.sync_lock_duration_ns)
+            : hstring{ L"00:00:00" });
+        RfSyncReacquisitionText().Text(to_hstring(snapshot.sync_reacquisition_count));
+        RfSyncLossCountText().Text(to_hstring(snapshot.sync_loss_count));
+
+        RfSyncCoarseCfoText().Text(snapshot.cfo_valid
+            ? format_signed_float(snapshot.cfo_hz, L" Hz", 1)
+            : hstring{ L"— Hz" });
+        RfSyncFineCfoText().Text(snapshot.cfo_valid
+            ? format_signed_float(snapshot.fine_cfo_hz, L" Hz", 1)
+            : hstring{ L"— Hz" });
+        RfSyncResidualCfoText().Text(snapshot.cfo_valid
+            ? format_signed_float(snapshot.residual_cfo_hz, L" Hz", 1)
+            : hstring{ L"— Hz" });
+        RfSyncCarrierOffsetText().Text(snapshot.cfo_valid
+            ? format_signed_float(static_cast<float>(snapshot.carrier_offset_bins), L" bins", 0)
+            : hstring{ L"— bins" });
+
+        RfSyncClockErrorText().Text(snapshot.sample_clock_error_valid
+            ? format_signed_float(snapshot.sample_clock_error_ppm, L" ppm", 3)
+            : hstring{ L"Estimating…" });
+        RfSyncClockCorrectionText().Text(snapshot.sample_clock_error_valid
+            ? format_signed_float(-snapshot.sample_clock_error_ppm, L" ppm", 3)
+            : hstring{ L"— ppm" });
+        RfSyncClockFramesText().Text(to_hstring(snapshot.sample_clock_frame_count));
+        RfSampleClockValueText().Text(snapshot.sample_clock_error_valid
+            ? format_signed_float(snapshot.sample_clock_error_ppm, L" ppm", 3)
+            : hstring{ L"— ppm" });
+        RfSampleClockDetailText().Text(snapshot.sample_clock_error_valid
+            ? hstring{ L"Suggested correction " } +
+              format_signed_float(-snapshot.sample_clock_error_ppm, L" ppm", 3)
+            : hstring{ L"Estimating from frame period" });
+
+        RfSyncNullConfidenceText().Text(snapshot.null_confidence_valid
+            ? format_float(snapshot.null_confidence, L"", 3)
+            : hstring{ L"—" });
+        RfSyncCpCorrelationText().Text(snapshot.cp_correlation_valid
+            ? format_float(snapshot.cp_correlation_peak, L"", 3)
+            : hstring{ L"—" });
+        RfSyncPrsCorrelationText().Text(snapshot.prs_valid
+            ? format_float(snapshot.prs_score, L"", 3)
+            : hstring{ L"—" });
+        RfSyncFftTimingText().Text(snapshot.fft_timing_valid
+            ? format_signed_float(snapshot.fft_timing_offset_samples, L" samples", 2)
+            : hstring{ L"— samples" });
+        RfSyncFrameTimingText().Text(snapshot.timing_valid
+            ? hstring{ L"Frame error " } + format_integer(snapshot.timing_error_samples, L" samples")
+            : hstring{ L"Frame error — samples" });
+        RfSyncAcquisitionText().Text(snapshot.sync_acquisition_time_valid
+            ? format_float(snapshot.sync_acquisition_time_ms, L" ms", 1)
+            : hstring{ L"In progress" });
+        RfSyncFrameCountsText().Text(to_hstring(snapshot.good_frames) + L" / " +
+                                     to_hstring(snapshot.bad_frames));
+
+        if (snapshot.sync_loss_count > m_rf_sync_last_loss_count)
+        {
+            hstring const time = local_clock_text();
+            RfSyncLastLossText().Text(time);
+            AddRfSyncEvent(L"Frame lock lost");
+        }
+        if (snapshot.sync_reacquisition_count > m_rf_sync_last_reacquisition_count)
+        {
+            AddRfSyncEvent(hstring{ L"Frame lock reacquired after " } +
+                           format_float(snapshot.sync_acquisition_time_ms, L" ms", 1));
+        }
+        if (locked && !m_rf_sync_seen_lock)
+        {
+            m_rf_sync_seen_lock = true;
+            AddRfSyncEvent(hstring{ L"Initial frame lock acquired after " } +
+                           format_float(snapshot.sync_acquisition_time_ms, L" ms", 1));
+        }
+        m_rf_sync_last_loss_count = snapshot.sync_loss_count;
+        m_rf_sync_last_reacquisition_count = snapshot.sync_reacquisition_count;
+    }
+
+    void MainWindow::AppendRfSyncHistory(dab_receive_snapshot_t const& snapshot)
+    {
+        float const missing = (std::numeric_limits<float>::quiet_NaN)();
+        m_rf_sync_coarse_history[m_rf_sync_history_write] = snapshot.cfo_valid
+            ? snapshot.cfo_hz : missing;
+        m_rf_sync_fine_history[m_rf_sync_history_write] = snapshot.cfo_valid
+            ? snapshot.fine_cfo_hz : missing;
+        m_rf_sync_residual_history[m_rf_sync_history_write] = snapshot.cfo_valid
+            ? snapshot.residual_cfo_hz : missing;
+        m_rf_sync_clock_history[m_rf_sync_history_write] = snapshot.sample_clock_error_valid
+            ? snapshot.sample_clock_error_ppm : missing;
+        m_rf_sync_timestamp_history[m_rf_sync_history_write] = snapshot.timestamp_ns != 0u
+            ? snapshot.timestamp_ns
+            : m_tick * 250000000ull;
+        m_rf_sync_history_write = (m_rf_sync_history_write + 1u) % rf_sync_history_capacity;
+        m_rf_sync_history_count = (std::min)(m_rf_sync_history_count + 1u,
+                                             rf_sync_history_capacity);
+        UpdateRfSyncHistoryVisuals();
+    }
+
+    void MainWindow::UpdateRfSyncHistoryVisuals()
+    {
+        float maximum = 0.0f;
+        size_t const first = (m_rf_sync_history_write + rf_sync_history_capacity -
+                              m_rf_sync_history_count) % rf_sync_history_capacity;
+        for (size_t point = 0u; point < m_rf_sync_history_count; ++point)
+        {
+            size_t const index = (first + point) % rf_sync_history_capacity;
+            if (std::isfinite(m_rf_sync_coarse_history[index]))
+            {
+                maximum = (std::max)(maximum, std::fabs(m_rf_sync_coarse_history[index]));
+            }
+            if (std::isfinite(m_rf_sync_fine_history[index]))
+            {
+                maximum = (std::max)(maximum, std::fabs(m_rf_sync_fine_history[index]));
+            }
+            if (std::isfinite(m_rf_sync_residual_history[index]))
+            {
+                maximum = (std::max)(maximum, std::fabs(m_rf_sync_residual_history[index]));
+            }
+        }
+        float const range = (std::max)(50.0f,
+            std::ceil((maximum * 1.10f) / 50.0f) * 50.0f);
+        RfSyncCoarseHistoryTrace().Points(history_points(m_rf_sync_coarse_history,
+                                                         m_rf_sync_history_write,
+                                                         m_rf_sync_history_count,
+                                                         -range,
+                                                         range,
+                                                         900.0f,
+                                                         220.0f));
+        RfSyncFineHistoryTrace().Points(history_points(m_rf_sync_fine_history,
+                                                       m_rf_sync_history_write,
+                                                       m_rf_sync_history_count,
+                                                       -range,
+                                                       range,
+                                                       900.0f,
+                                                       220.0f));
+        RfSyncResidualHistoryTrace().Points(history_points(m_rf_sync_residual_history,
+                                                           m_rf_sync_history_write,
+                                                           m_rf_sync_history_count,
+                                                           -range,
+                                                           range,
+                                                           900.0f,
+                                                           220.0f));
+        RfSyncCfoAxisTopText().Text(format_signed_float(range, L" Hz", 0));
+        RfSyncCfoAxisBottomText().Text(format_signed_float(-range, L" Hz", 0));
+
+        float drift = 0.0f;
+        RfSyncCfoDriftText().Text(timed_history_slope(m_rf_sync_coarse_history,
+                                                      m_rf_sync_timestamp_history,
+                                                      m_rf_sync_history_write,
+                                                      m_rf_sync_history_count,
+                                                      drift)
+            ? format_signed_float(drift, L" Hz/min", 2)
+            : hstring{ L"— Hz/min" });
+        RfSyncClockDriftText().Text(timed_history_slope(m_rf_sync_clock_history,
+                                                        m_rf_sync_timestamp_history,
+                                                        m_rf_sync_history_write,
+                                                        m_rf_sync_history_count,
+                                                        drift)
+            ? format_signed_float(drift, L" ppm/min", 3)
+            : hstring{ L"— ppm/min" });
+    }
+
+    void MainWindow::ResetRfSyncDiagnostics()
+    {
+        float const missing = (std::numeric_limits<float>::quiet_NaN)();
+        m_rf_sync_coarse_history.fill(missing);
+        m_rf_sync_fine_history.fill(missing);
+        m_rf_sync_residual_history.fill(missing);
+        m_rf_sync_clock_history.fill(missing);
+        m_rf_sync_timestamp_history.fill(0u);
+        m_rf_sync_history_write = 0u;
+        m_rf_sync_history_count = 0u;
+        m_rf_sync_last_loss_count = 0u;
+        m_rf_sync_last_reacquisition_count = 0u;
+        m_rf_sync_seen_lock = false;
+        RfSyncStateText().Text(L"ACQUIRING");
+        RfSyncTrackingText().Text(L"Opening receiver");
+        RfSyncStateIndicator().Fill(Application::Current().Resources().Lookup(
+            box_value(hstring{ L"WarningBrush" })).as<Brush>());
+        RfSyncLockDurationText().Text(L"00:00:00");
+        RfSyncReacquisitionText().Text(L"0");
+        RfSyncLossCountText().Text(L"0");
+        RfSyncLastLossText().Text(L"None this session");
+        RfSyncEventList().Items().Clear();
+        AddRfSyncEvent(L"Receiver started — acquiring frame lock");
+        UpdateRfSyncHistoryVisuals();
+    }
+
+    void MainWindow::AddRfSyncEvent(hstring const& message)
+    {
+        auto items = RfSyncEventList().Items();
+        items.Append(box_value(local_clock_text() + L"  ·  " + message));
+        while (items.Size() > 10u)
+        {
+            items.RemoveAt(0u);
+        }
+        RfSyncEventList().ScrollIntoView(items.GetAt(items.Size() - 1u));
     }
 
     void MainWindow::AppendRfHistory(float power_dbfs, float cn_db)

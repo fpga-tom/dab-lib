@@ -53,6 +53,15 @@ typedef struct {
 } pending_candidate_t;
 
 typedef struct {
+    uint64_t acquisition_started_ns;
+    uint64_t last_acquisition_duration_ns;
+    uint64_t lock_started_ns;
+    uint32_t loss_count;
+    uint32_t reacquisition_count;
+    int ever_locked;
+} receive_sync_diagnostics_t;
+
+typedef struct {
     char magic[8];
     uint32_t symbol_count;
     int8_t softbits[DAB_TFRAME_FIC_SYMBOLS][2][1536];
@@ -261,6 +270,7 @@ static int receive_emit_snapshot(const dab_receive_config_t *config,
                                  uint64_t input_block_interval_ns,
                                  uint64_t processing_latency_ns,
                                  uint32_t processing_late_count,
+                                 const receive_sync_diagnostics_t *sync_diagnostics,
                                  int selected_sid_valid,
                                  uint32_t selected_sid) {
     dab_receive_snapshot_t snapshot;
@@ -328,6 +338,20 @@ static int receive_emit_snapshot(const dab_receive_config_t *config,
     snapshot.input_block_interval_ns = input_block_interval_ns;
     snapshot.processing_latency_ns = processing_latency_ns;
     snapshot.processing_late_count = processing_late_count;
+    if (sync_diagnostics != 0) {
+        const uint64_t now_ns = dab_time_monotonic_ns();
+        snapshot.sync_acquisition_time_valid =
+            sync_diagnostics->last_acquisition_duration_ns != 0u;
+        snapshot.sync_acquisition_time_ms =
+            (float)((double)sync_diagnostics->last_acquisition_duration_ns / 1000000.0);
+        snapshot.sync_loss_count = sync_diagnostics->loss_count;
+        snapshot.sync_reacquisition_count = sync_diagnostics->reacquisition_count;
+        if (sync != 0 && sync->state.locked != 0 &&
+            sync_diagnostics->lock_started_ns != 0u &&
+            now_ns >= sync_diagnostics->lock_started_ns) {
+            snapshot.sync_lock_duration_ns = now_ns - sync_diagnostics->lock_started_ns;
+        }
+    }
     return config->snapshot(&snapshot, config->snapshot_user);
 }
 
@@ -1169,6 +1193,7 @@ int dab_receiver_session_run(int argc, char **argv) {
     uint8_t selected_sid_fallback_reported = 0u;
     uint8_t lock_reported = 0u;
     uint8_t snapshot_pending = 0u;
+    receive_sync_diagnostics_t sync_diagnostics = {0};
     dab_receive_measurement_state_t *measurement_state = 0;
     uint64_t measurement_sequence = 0u;
     uint64_t measurement_frame_start_sample = 0u;
@@ -1585,6 +1610,9 @@ int dab_receiver_session_run(int argc, char **argv) {
     }
 #endif
 
+#if defined(DAB_RECEIVE_NO_MAIN)
+    sync_diagnostics.acquisition_started_ns = dab_time_monotonic_ns();
+#endif
     while (g_stop_requested == 0) {
         dab_sdr_block_view_t hist_view;
         const uint8_t locked_now = (uint8_t)(sync.state.locked != 0);
@@ -2002,19 +2030,51 @@ int dab_receiver_session_run(int argc, char **argv) {
                                   sync.state.mode,
                                   sync.state.locked);
 
-                    if (sync.state.locked) {
-                        sync_rc = dab_sync_on_prs_track(&sync,
-                                                        prs_fft_start_sample,
-                                                        ref_score.score,
-                                                        coarse.coarse_freq_error_hz,
-                                                        ref_score.carrier_offset_bins);
-                    } else {
-                        dab_sync_on_null_candidate(&sync, &pending.event);
-                        sync_rc = dab_sync_on_prs_acquire(&sync,
-                                                          prs_fft_start_sample,
-                                                          ref_score.score,
-                                                          coarse.coarse_freq_error_hz,
-                                                          ref_score.carrier_offset_bins);
+                    {
+#if defined(DAB_RECEIVE_NO_MAIN)
+                        const int locked_before_update = sync.state.locked;
+#endif
+
+                        sync.state.cp_correlation_peak = coarse.prs_score;
+                        sync.state.cp_correlation_valid = 1;
+                        sync.state.fft_timing_offset_samples = ref_score.fine_timing_error_samples;
+                        sync.state.fft_timing_valid = 1;
+                        if (sync.state.locked) {
+                            sync_rc = dab_sync_on_prs_track(&sync,
+                                                            prs_fft_start_sample,
+                                                            ref_score.score,
+                                                            coarse.coarse_freq_error_hz,
+                                                            ref_score.carrier_offset_bins);
+                        } else {
+                            dab_sync_on_null_candidate(&sync, &pending.event);
+                            sync_rc = dab_sync_on_prs_acquire(&sync,
+                                                              prs_fft_start_sample,
+                                                              ref_score.score,
+                                                              coarse.coarse_freq_error_hz,
+                                                              ref_score.carrier_offset_bins);
+                        }
+
+#if defined(DAB_RECEIVE_NO_MAIN)
+                        {
+                            const uint64_t sync_now_ns = dab_time_monotonic_ns();
+                            if (locked_before_update == 0 && sync.state.locked != 0) {
+                                if (sync_diagnostics.acquisition_started_ns != 0u &&
+                                    sync_now_ns >= sync_diagnostics.acquisition_started_ns) {
+                                    sync_diagnostics.last_acquisition_duration_ns =
+                                        sync_now_ns - sync_diagnostics.acquisition_started_ns;
+                                }
+                                if (sync_diagnostics.ever_locked != 0) {
+                                    sync_diagnostics.reacquisition_count++;
+                                }
+                                sync_diagnostics.ever_locked = 1;
+                                sync_diagnostics.lock_started_ns = sync_now_ns;
+                            } else if (locked_before_update != 0 && sync.state.locked == 0) {
+                                sync_diagnostics.loss_count++;
+                                sync_diagnostics.acquisition_started_ns = sync_now_ns;
+                                sync_diagnostics.lock_started_ns = 0u;
+                            }
+                        }
+#endif
                     }
 
                     if (!sync.state.locked) {
@@ -2593,6 +2653,7 @@ int dab_receiver_session_run(int argc, char **argv) {
                                       input_block_interval_ns,
                                       processing_latency_ns,
                                       processing_late_count,
+                                      &sync_diagnostics,
                                       selected_audio_sid_valid,
                                       selected_audio_sid) != 0) {
                 rc = -2;

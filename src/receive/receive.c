@@ -304,9 +304,19 @@ void dab_receive_snapshot_build(dab_receive_snapshot_t *snapshot,
         snapshot->cfo_valid = have_sync_measurement;
         snapshot->cfo_hz = sync->state.coarse_freq_error_hz;
         snapshot->fine_cfo_hz = sync->state.fine_freq_error_hz;
+        snapshot->residual_cfo_hz = sync->state.residual_freq_error_hz;
         snapshot->carrier_offset_bins = sync->state.carrier_offset_bins;
         snapshot->timing_valid = have_sync_measurement;
         snapshot->timing_error_samples = sync->state.timing_error_samples;
+        snapshot->fft_timing_valid = sync->state.fft_timing_valid;
+        snapshot->fft_timing_offset_samples = sync->state.fft_timing_offset_samples;
+        snapshot->null_confidence_valid = sync->state.null_confidence_valid;
+        snapshot->null_confidence = sync->state.null_confidence;
+        snapshot->cp_correlation_valid = sync->state.cp_correlation_valid;
+        snapshot->cp_correlation_peak = sync->state.cp_correlation_peak;
+        snapshot->sample_clock_error_valid = sync->state.sample_clock_error_valid;
+        snapshot->sample_clock_error_ppm = sync->state.sample_clock_error_ppm;
+        snapshot->sample_clock_frame_count = sync->state.sample_clock_frame_count;
     }
 
     if (fic != 0) {
