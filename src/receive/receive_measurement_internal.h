@@ -15,6 +15,8 @@ typedef struct {
     float constellation_q[DAB_RECEIVE_CONSTELLATION_POINT_CAPACITY];
     uint32_t constellation_count;
     float cir_power_db[DAB_RECEIVE_CIR_BIN_COUNT];
+    float channel_magnitude_db[DAB_RECEIVE_CHANNEL_RESPONSE_COUNT];
+    float channel_phase_deg[DAB_RECEIVE_CHANNEL_RESPONSE_COUNT];
     double carrier_error_sum[DAB_RECEIVE_CARRIER_MER_COUNT];
     uint32_t carrier_symbol_count[DAB_RECEIVE_CARRIER_MER_COUNT];
     float carrier_mer_db[DAB_RECEIVE_CARRIER_MER_COUNT];

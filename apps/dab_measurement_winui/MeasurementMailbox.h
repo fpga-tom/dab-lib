@@ -25,6 +25,9 @@ namespace dab::measurement
         uint32_t cir_bin_count{ 0 };
         float cir_sample_period_ns{ 0.0f };
         std::array<float, DAB_RECEIVE_CIR_BIN_COUNT> cir_power_db{};
+        uint32_t channel_response_count{ 0 };
+        std::array<float, DAB_RECEIVE_CHANNEL_RESPONSE_COUNT> channel_magnitude_db{};
+        std::array<float, DAB_RECEIVE_CHANNEL_RESPONSE_COUNT> channel_phase_deg{};
         uint32_t carrier_mer_count{ 0 };
         int32_t first_carrier{ 0 };
         uint32_t negative_carrier_count{ 0 };

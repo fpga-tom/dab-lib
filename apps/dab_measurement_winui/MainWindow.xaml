@@ -1516,7 +1516,245 @@
                     </ScrollViewer>
                 </TabViewItem>
                 <TabViewItem Header="Channel/CIR" IsClosable="False">
-                    <TextBlock Text="Channel impulse response analysis will be added here." HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" />
+                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  Padding="12">
+                        <StackPanel Spacing="10">
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+
+                                <Border Grid.Column="0" Style="{StaticResource PanelCardStyle}" Padding="14">
+                                    <Grid RowSpacing="8">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="340" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="Channel frequency response" FontSize="16" FontWeight="SemiBold" />
+                                            <TextBlock Text="PRS-derived response by physical carrier"
+                                                       Foreground="{StaticResource MutedTextBrush}"
+                                                       FontSize="11" />
+                                        </StackPanel>
+                                        <Viewbox Grid.Row="1" Stretch="Fill">
+                                            <Canvas Width="650" Height="340" Background="#FF07101B">
+                                                <TextBlock Canvas.Left="48" Canvas.Top="1" Text="Magnitude (dB relative to mean power)" FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
+                                                <Line X1="48" Y1="20" X2="632" Y2="20" Stroke="#253D556E" />
+                                                <Line X1="48" Y1="53" X2="632" Y2="53" Stroke="#403D556E" />
+                                                <Line X1="48" Y1="86" X2="632" Y2="86" Stroke="#253D556E" />
+                                                <Line X1="48" Y1="119" X2="632" Y2="119" Stroke="#253D556E" />
+                                                <TextBlock Canvas.Left="6" Canvas.Top="13" Text="+10" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Canvas.Left="18" Canvas.Top="46" Text="0" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Canvas.Left="6" Canvas.Top="79" Text="&#x2212;10" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Canvas.Left="6" Canvas.Top="112" Text="&#x2212;20" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                                <Polyline x:Name="RfChannelMagnitudeTrace" Stroke="{StaticResource SpectrumBrush}" StrokeThickness="1.6" Points="48,53 632,53" />
+
+                                                <TextBlock Canvas.Left="48" Canvas.Top="128" Text="Phase (wrapped degrees)" FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
+                                                <Line X1="48" Y1="148" X2="632" Y2="148" Stroke="#253D556E" />
+                                                <Line X1="48" Y1="181" X2="632" Y2="181" Stroke="#403D556E" />
+                                                <Line X1="48" Y1="214" X2="632" Y2="214" Stroke="#253D556E" />
+                                                <TextBlock Canvas.Left="2" Canvas.Top="141" Text="+180" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Canvas.Left="18" Canvas.Top="174" Text="0" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Canvas.Left="2" Canvas.Top="207" Text="&#x2212;180" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                                <Polyline x:Name="RfChannelPhaseTrace" Stroke="{StaticResource MeasurementAccentBrush}" StrokeThickness="1.3" Points="48,181 632,181" />
+
+                                                <TextBlock Canvas.Left="48" Canvas.Top="223" Text="MER per carrier (dB)" FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
+                                                <Line X1="48" Y1="243" X2="632" Y2="243" Stroke="#253D556E" />
+                                                <Line X1="48" Y1="276" X2="632" Y2="276" Stroke="#403D556E" />
+                                                <Line X1="48" Y1="309" X2="632" Y2="309" Stroke="#253D556E" />
+                                                <TextBlock Canvas.Left="12" Canvas.Top="236" Text="40" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Canvas.Left="12" Canvas.Top="269" Text="20" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Canvas.Left="18" Canvas.Top="302" Text="0" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                                <Polyline x:Name="RfChannelMerTrace" Stroke="{StaticResource WarningBrush}" StrokeThickness="1.5" Points="48,309 632,309" />
+
+                                                <TextBlock Canvas.Left="45" Canvas.Top="320" Text="&#x2212;768" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Canvas.Left="332" Canvas.Top="320" Text="carrier 0" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Canvas.Left="602" Canvas.Top="320" Text="+768" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                            </Canvas>
+                                        </Viewbox>
+                                        <TextBlock Grid.Row="2"
+                                                   x:Name="RfChannelResponseStatusText"
+                                                   Text="Awaiting synchronized PRS channel estimate"
+                                                   Foreground="{StaticResource MutedTextBrush}"
+                                                   FontFamily="Consolas"
+                                                   FontSize="11" />
+                                    </Grid>
+                                </Border>
+
+                                <Border Grid.Column="1" Style="{StaticResource PanelCardStyle}" Padding="14">
+                                    <Grid RowSpacing="8">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="250" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <Grid>
+                                            <StackPanel>
+                                                <TextBlock Text="Channel impulse response" FontSize="16" FontWeight="SemiBold" />
+                                                <TextBlock Text="Delay and level relative to the strongest resolved path"
+                                                           Foreground="{StaticResource MutedTextBrush}"
+                                                           FontSize="11" />
+                                            </StackPanel>
+                                            <TextBlock x:Name="RfChannelCirAverageText"
+                                                       Text="8-frame linear-power average"
+                                                       HorizontalAlignment="Right"
+                                                       VerticalAlignment="Center"
+                                                       Foreground="{StaticResource MutedTextBrush}"
+                                                       FontFamily="Consolas"
+                                                       FontSize="10" />
+                                        </Grid>
+                                        <Viewbox Grid.Row="1" Stretch="Fill">
+                                            <Canvas x:Name="RfChannelCirCanvas"
+                                                    Width="650"
+                                                    Height="250"
+                                                    Background="#FF07101B"
+                                                    PointerPressed="RfChannelCirCanvas_PointerPressed">
+                                                <Line X1="52" Y1="30" X2="632" Y2="30" Stroke="#403D556E" />
+                                                <Line X1="52" Y1="83.3" X2="632" Y2="83.3" Stroke="#253D556E" />
+                                                <Line X1="52" Y1="136.7" X2="632" Y2="136.7" Stroke="#253D556E" />
+                                                <Line X1="52" Y1="190" X2="632" Y2="190" Stroke="#403D556E" />
+                                                <Line X1="52" Y1="30" X2="52" Y2="190" Stroke="#403D556E" />
+                                                <Line X1="197" Y1="30" X2="197" Y2="190" Stroke="#183D556E" />
+                                                <Line X1="342" Y1="30" X2="342" Y2="190" Stroke="#183D556E" />
+                                                <Line X1="487" Y1="30" X2="487" Y2="190" Stroke="#183D556E" />
+                                                <Line X1="632" Y1="30" X2="632" Y2="190" Stroke="#403D556E" />
+                                                <TextBlock Canvas.Left="9" Canvas.Top="23" Text="0 dB" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Canvas.Left="3" Canvas.Top="76" Text="&#x2212;20" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Canvas.Left="3" Canvas.Top="130" Text="&#x2212;40" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Canvas.Left="3" Canvas.Top="183" Text="&#x2212;60" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Canvas.Left="49" Canvas.Top="194" Text="0" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Canvas.Left="184" Canvas.Top="194" Text="62.5" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Canvas.Left="328" Canvas.Top="194" Text="125" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Canvas.Left="471" Canvas.Top="194" Text="187.5" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Canvas.Left="612" Canvas.Top="194" Text="250" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Canvas.Left="275" Canvas.Top="218" Text="Excess delay (&#x00B5;s)" FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
+                                                <Polyline x:Name="RfChannelCirTrace" Stroke="{StaticResource MeasurementAccentBrush}" StrokeThickness="1.7" Points="52,190 632,190" />
+                                                <Canvas x:Name="RfChannelCirAutoMarkerCanvas" Width="650" Height="250" IsHitTestVisible="False" />
+                                                <Canvas x:Name="RfChannelCirUserMarkerCanvas" Width="650" Height="250" IsHitTestVisible="False" />
+                                            </Canvas>
+                                        </Viewbox>
+                                        <Grid Grid.Row="2" ColumnSpacing="10">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Padding="9,7" Background="{StaticResource PanelRaisedBrush}" CornerRadius="5">
+                                                <StackPanel>
+                                                    <TextBlock Text="MAIN PATH" Style="{StaticResource SectionTitleStyle}" />
+                                                    <TextBlock x:Name="RfChannelMainPathText" Text="Awaiting CIR" FontFamily="Consolas" />
+                                                </StackPanel>
+                                            </Border>
+                                            <Border Grid.Column="1" Padding="9,7" Background="{StaticResource PanelRaisedBrush}" CornerRadius="5">
+                                                <StackPanel>
+                                                    <TextBlock Text="RESOLVED ECHOES" Style="{StaticResource SectionTitleStyle}" />
+                                                    <TextBlock x:Name="RfChannelEcho1Text" Text="None detected" FontFamily="Consolas" />
+                                                    <TextBlock x:Name="RfChannelEcho2Text" Text="" FontFamily="Consolas" />
+                                                    <TextBlock x:Name="RfChannelEcho3Text" Text="" FontFamily="Consolas" />
+                                                </StackPanel>
+                                            </Border>
+                                        </Grid>
+                                        <Border Grid.Row="3"
+                                                x:Name="RfChannelCirMarkerPanel"
+                                                Padding="9,7"
+                                                Background="#2935D0BA"
+                                                BorderBrush="{StaticResource MeasurementAccentBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="5"
+                                                Visibility="Collapsed">
+                                            <Grid ColumnSpacing="16">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="MARKER" Style="{StaticResource SectionTitleStyle}" VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="1" x:Name="RfChannelMarkerSamplesText" Text="0 samples" FontFamily="Consolas" />
+                                                <TextBlock Grid.Column="2" x:Name="RfChannelMarkerDelayText" Text="0.00 &#x00B5;s" FontFamily="Consolas" />
+                                                <TextBlock Grid.Column="3" x:Name="RfChannelMarkerPowerText" Text="0.0 dB" FontFamily="Consolas" />
+                                                <TextBlock Grid.Column="4" x:Name="RfChannelMarkerDistanceText" Text="0.00 km path difference" FontFamily="Consolas" />
+                                            </Grid>
+                                        </Border>
+                                    </Grid>
+                                </Border>
+                            </Grid>
+
+                            <Border Style="{StaticResource PanelCardStyle}" Padding="14">
+                                <Grid RowSpacing="8">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="92" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Grid>
+                                        <TextBlock Text="Guard interval and echo energy" FontSize="16" FontWeight="SemiBold" />
+                                        <TextBlock x:Name="RfChannelGuardStatusText"
+                                                   Text="Mode I guard interval: 504 samples / 246.09 &#x00B5;s"
+                                                   HorizontalAlignment="Right"
+                                                   Foreground="{StaticResource MutedTextBrush}"
+                                                   FontFamily="Consolas"
+                                                   FontSize="11" />
+                                    </Grid>
+                                    <Viewbox Grid.Row="1" Stretch="Fill">
+                                        <Canvas Width="1000" Height="92">
+                                            <TextBlock Canvas.Left="44" Canvas.Top="1" Text="0 &#x00B5;s" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                            <TextBlock Canvas.Left="890" Canvas.Top="1" Text="246.09 &#x00B5;s" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                            <Rectangle Canvas.Left="50" Canvas.Top="31" Width="900" Height="14" Fill="#1F35D0BA" Stroke="{StaticResource MeasurementAccentBrush}" StrokeThickness="1" RadiusX="4" RadiusY="4" />
+                                            <Line X1="50" Y1="24" X2="50" Y2="53" Stroke="{StaticResource MeasurementAccentBrush}" StrokeThickness="2" />
+                                            <Line X1="950" Y1="24" X2="950" Y2="53" Stroke="{StaticResource MeasurementAccentBrush}" StrokeThickness="2" />
+                                            <Canvas x:Name="RfChannelGuardMarkerCanvas" Width="1000" Height="92" IsHitTestVisible="False" />
+                                            <TextBlock Canvas.Left="50" Canvas.Top="61" Text="Main path" FontSize="10" Foreground="{StaticResource MeasurementAccentBrush}" />
+                                            <TextBlock Canvas.Left="860" Canvas.Top="61" Text="Guard limit" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                        </Canvas>
+                                    </Viewbox>
+                                    <TextBlock Grid.Row="2"
+                                               Text="Echoes beyond the guard interval can create inter-symbol interference; percentage uses linear CIR energy."
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               FontSize="11" />
+                                </Grid>
+                            </Border>
+
+                            <Border Style="{StaticResource PanelCardStyle}" Padding="14,11">
+                                <Grid ColumnSpacing="18">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="OVERALL MER" Style="{StaticResource SectionTitleStyle}" />
+                                        <TextBlock x:Name="RfChannelOverallMerText" Text="&#x2014; dB" FontFamily="Consolas" FontSize="18" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock Text="MINIMUM CARRIER MER" Style="{StaticResource SectionTitleStyle}" />
+                                        <TextBlock x:Name="RfChannelMinimumMerText" Text="&#x2014; dB" FontFamily="Consolas" FontSize="18" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="NOTCHED CARRIERS" Style="{StaticResource SectionTitleStyle}" />
+                                        <TextBlock x:Name="RfChannelNotchedCarrierText" Text="0" FontFamily="Consolas" FontSize="18" />
+                                        <TextBlock Text="below &#x2212;12 dB response" Foreground="{StaticResource MutedTextBrush}" FontSize="10" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="3">
+                                        <TextBlock Text="SELECTIVE FADING" Style="{StaticResource SectionTitleStyle}" />
+                                        <TextBlock x:Name="RfChannelFadingText" Text="Awaiting response" FontFamily="Consolas" FontSize="18" />
+                                        <TextBlock x:Name="RfChannelFadingSpreadText" Text="p90&#x2212;p10 &#x2014; dB" Foreground="{StaticResource MutedTextBrush}" FontSize="10" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="4">
+                                        <TextBlock Text="OUTSIDE GUARD" Style="{StaticResource SectionTitleStyle}" />
+                                        <TextBlock x:Name="RfChannelOutsideGuardText" Text="&#x2014; %" FontFamily="Consolas" FontSize="18" />
+                                        <TextBlock x:Name="RfChannelOutsideGuardDbText" Text="&#x2014; dB energy ratio" Foreground="{StaticResource MutedTextBrush}" FontSize="10" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
                 </TabViewItem>
                 <TabViewItem Header="History" IsClosable="False">
                     <TextBlock Text="Long-term RF history and export will be added here." HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" />

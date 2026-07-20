@@ -137,6 +137,7 @@ enum {
     DAB_RECEIVE_SPECTRUM_BIN_COUNT = 2048u,
     DAB_RECEIVE_CONSTELLATION_POINT_CAPACITY = 512u,
     DAB_RECEIVE_CIR_BIN_COUNT = 512u,
+    DAB_RECEIVE_CHANNEL_RESPONSE_COUNT = 1536u,
     DAB_RECEIVE_CARRIER_MER_COUNT = 1536u
 };
 
@@ -150,6 +151,9 @@ enum {
  * unit average complex power; ideal QPSK components are +/-1/sqrt(2).
  * CIR bins contain Hann-windowed channel impulse power, normalized to the
  * strongest exported tap (0 dB), with one bin per input sample period.
+ * Channel response entries contain the PRS-derived channel magnitude,
+ * normalized to mean active-carrier power (0 dB), and wrapped phase in
+ * degrees. Entries use the same physical-carrier mapping as carrier MER.
  * Carrier MER entries 0..767 map to carriers -768..-1 and entries 768..1535
  * map to carriers +1..+768.
  */
@@ -172,6 +176,10 @@ typedef struct {
     const float *cir_power_db;
     uint32_t cir_bin_count;
     float cir_sample_period_ns;
+
+    const float *channel_magnitude_db;
+    const float *channel_phase_deg;
+    uint32_t channel_response_count;
 
     const float *carrier_mer_db;
     uint32_t carrier_mer_count;

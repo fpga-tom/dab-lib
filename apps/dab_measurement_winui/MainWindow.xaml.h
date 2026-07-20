@@ -40,6 +40,7 @@ namespace winrt::DabMeasurementWinUI::implementation
         void RfSpectrumCanvas_DoubleTapped(IInspectable const&, Microsoft::UI::Xaml::Input::DoubleTappedRoutedEventArgs const&);
         void RfSpectrumTuneToCursor_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void RfSpectrumResetView_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void RfChannelCirCanvas_PointerPressed(IInspectable const&, Microsoft::UI::Xaml::Input::PointerRoutedEventArgs const&);
         void AudioButton_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void RecordButton_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void MarkerButton_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -75,6 +76,11 @@ namespace winrt::DabMeasurementWinUI::implementation
         void ClearCatalogView();
         void UpdatePlots(dab::measurement::MeasurementFrame const& frame);
         void UpdateCirPlot(dab::measurement::MeasurementFrame const& frame);
+        void UpdateRfChannel(dab::measurement::MeasurementFrame const& frame);
+        void UpdateRfChannelResponse(dab::measurement::MeasurementFrame const& frame);
+        void UpdateRfChannelCir(dab::measurement::MeasurementFrame const& frame);
+        void RenderRfChannelCirMarker();
+        void ResetRfChannelDiagnostics();
         void UpdateRfSpectrum(dab::measurement::MeasurementFrame const& frame);
         void RenderRfSpectrum();
         void AppendRfSpectrumWaterfall();
@@ -141,6 +147,11 @@ namespace winrt::DabMeasurementWinUI::implementation
         uint64_t m_cir_frequency_hz{ 0u };
         uint32_t m_cir_bin_count{ 0u };
         float m_cir_sample_period_ns{ 0.0f };
+        std::array<float, DAB_RECEIVE_CIR_BIN_COUNT> m_rf_channel_cir_level_db{};
+        uint32_t m_rf_channel_cir_count{ 0u };
+        uint32_t m_rf_channel_cir_main_bin{ 0u };
+        float m_rf_channel_cir_sample_period_ns{ 0.0f };
+        int32_t m_rf_channel_cir_marker_delay_samples{ -1 };
         std::array<float, DAB_RECEIVE_SPECTRUM_BIN_COUNT> m_rf_spectrum_average{};
         std::array<float, DAB_RECEIVE_SPECTRUM_BIN_COUNT> m_rf_spectrum_peak{};
         uint32_t m_rf_spectrum_count{ 0u };

@@ -900,6 +900,7 @@ namespace winrt::DabMeasurementWinUI::implementation
             UpdateRfHistoryVisuals();
         }
         ResetRfSyncDiagnostics();
+        ResetRfChannelDiagnostics();
         m_active_service_id = settings.service_id;
         SetReceiverControlsEnabled(false);
         StartButton().IsEnabled(true);
@@ -2146,6 +2147,504 @@ namespace winrt::DabMeasurementWinUI::implementation
         CirPathSummaryText().Text(summary);
     }
 
+    void MainWindow::UpdateRfChannel(dab::measurement::MeasurementFrame const& frame)
+    {
+        if (frame.channel_response_count != 0u)
+        {
+            UpdateRfChannelResponse(frame);
+        }
+        if (frame.cir_bin_count != 0u && m_cir_power_history_count != 0u)
+        {
+            UpdateRfChannelCir(frame);
+        }
+    }
+
+    void MainWindow::UpdateRfChannelResponse(dab::measurement::MeasurementFrame const& frame)
+    {
+        uint32_t const response_count = (std::min)(
+            frame.channel_response_count,
+            static_cast<uint32_t>(DAB_RECEIVE_CHANNEL_RESPONSE_COUNT));
+        if (response_count == 0u)
+        {
+            return;
+        }
+
+        constexpr uint32_t display_points = 193u;
+        constexpr float plot_left = 48.0f;
+        constexpr float plot_width = 584.0f;
+        PointCollection magnitude_points;
+        PointCollection phase_points;
+        PointCollection mer_points;
+        for (uint32_t point = 0u; point < display_points; ++point)
+        {
+            uint32_t const begin = (point * response_count) / display_points;
+            uint32_t const end = (std::max)(begin + 1u,
+                ((point + 1u) * response_count) / display_points);
+            double magnitude_sum = 0.0;
+            double mer_sum = 0.0;
+            uint32_t magnitude_used = 0u;
+            uint32_t mer_used = 0u;
+            for (uint32_t carrier = begin; carrier < (std::min)(end, response_count); ++carrier)
+            {
+                if (std::isfinite(frame.channel_magnitude_db[carrier]))
+                {
+                    magnitude_sum += frame.channel_magnitude_db[carrier];
+                    ++magnitude_used;
+                }
+                if (carrier < frame.carrier_mer_count &&
+                    std::isfinite(frame.carrier_mer_db[carrier]))
+                {
+                    mer_sum += frame.carrier_mer_db[carrier];
+                    ++mer_used;
+                }
+            }
+            uint32_t const phase_index = (std::min)(
+                begin + ((std::min)(end, response_count) - begin) / 2u,
+                response_count - 1u);
+            float const magnitude = magnitude_used != 0u
+                ? static_cast<float>(magnitude_sum / static_cast<double>(magnitude_used))
+                : -20.0f;
+            float const phase = std::clamp(frame.channel_phase_deg[phase_index], -180.0f, 180.0f);
+            float const mer = mer_used != 0u
+                ? static_cast<float>(mer_sum / static_cast<double>(mer_used))
+                : 0.0f;
+            float const x = plot_left + plot_width * static_cast<float>(point) /
+                static_cast<float>(display_points - 1u);
+            float const magnitude_y = 20.0f +
+                (10.0f - std::clamp(magnitude, -20.0f, 10.0f)) / 30.0f * 99.0f;
+            float const phase_y = 148.0f +
+                (180.0f - phase) / 360.0f * 66.0f;
+            float const mer_y = 243.0f +
+                (40.0f - std::clamp(mer, 0.0f, 40.0f)) / 40.0f * 66.0f;
+            magnitude_points.Append(Point{ x, magnitude_y });
+            phase_points.Append(Point{ x, phase_y });
+            mer_points.Append(Point{ x, mer_y });
+        }
+        RfChannelMagnitudeTrace().Points(magnitude_points);
+        RfChannelPhaseTrace().Points(phase_points);
+        RfChannelMerTrace().Points(mer_points);
+
+        std::vector<float> magnitudes;
+        magnitudes.reserve(response_count);
+        uint32_t notched_carriers = 0u;
+        for (uint32_t carrier = 0u; carrier < response_count; ++carrier)
+        {
+            float const magnitude = frame.channel_magnitude_db[carrier];
+            if (!std::isfinite(magnitude))
+            {
+                continue;
+            }
+            magnitudes.push_back(std::clamp(magnitude, -60.0f, 20.0f));
+            if (magnitude < -12.0f)
+            {
+                ++notched_carriers;
+            }
+        }
+        std::sort(magnitudes.begin(), magnitudes.end());
+        float spread_db = 0.0f;
+        if (!magnitudes.empty())
+        {
+            size_t const p10_index = static_cast<size_t>(
+                0.10 * static_cast<double>(magnitudes.size() - 1u));
+            size_t const p90_index = static_cast<size_t>(
+                0.90 * static_cast<double>(magnitudes.size() - 1u));
+            spread_db = magnitudes[p90_index] - magnitudes[p10_index];
+        }
+        wchar_t const* fading = spread_db < 3.0f ? L"Flat" :
+            spread_db < 8.0f ? L"Mild" :
+            spread_db < 15.0f ? L"Moderate" : L"Severe";
+        RfChannelNotchedCarrierText().Text(to_hstring(notched_carriers));
+        RfChannelFadingText().Text(fading);
+        RfChannelFadingSpreadText().Text(
+            hstring{ L"p90\x2212p10 " } + format_float(spread_db, L" dB"));
+
+        uint32_t const mer_count = (std::min)(frame.carrier_mer_count, response_count);
+        double mer_sum = 0.0;
+        uint32_t mer_used = 0u;
+        float minimum_mer = std::numeric_limits<float>::infinity();
+        for (uint32_t carrier = 0u; carrier < mer_count; ++carrier)
+        {
+            float const mer = frame.carrier_mer_db[carrier];
+            if (!std::isfinite(mer))
+            {
+                continue;
+            }
+            mer_sum += mer;
+            minimum_mer = (std::min)(minimum_mer, mer);
+            ++mer_used;
+        }
+        RfChannelOverallMerText().Text(mer_used != 0u
+            ? format_float(static_cast<float>(mer_sum / static_cast<double>(mer_used)), L" dB")
+            : hstring{ L"\x2014 dB" });
+        RfChannelMinimumMerText().Text(mer_used != 0u
+            ? format_float(minimum_mer, L" dB")
+            : hstring{ L"\x2014 dB" });
+
+        wchar_t response_status[160]{};
+        swprintf_s(response_status,
+                   L"%u carriers \u00B7 %.0f Hz spacing \u00B7 magnitude normalized to mean carrier power \u00B7 phase wrapped \u00B1180\u00B0",
+                   response_count,
+                   static_cast<double>(frame.carrier_spacing_hz));
+        RfChannelResponseStatusText().Text(response_status);
+    }
+
+    void MainWindow::UpdateRfChannelCir(dab::measurement::MeasurementFrame const& frame)
+    {
+        uint32_t const count = (std::min)(m_cir_bin_count,
+                                          static_cast<uint32_t>(DAB_RECEIVE_CIR_BIN_COUNT));
+        if (count == 0u || m_cir_power_history_count == 0u ||
+            frame.cir_sample_period_ns <= 0.0f)
+        {
+            return;
+        }
+
+        float const divisor = static_cast<float>(m_cir_power_history_count);
+        uint32_t main_bin = 0u;
+        float main_power = 0.0f;
+        for (uint32_t bin = 0u; bin < count; ++bin)
+        {
+            float const power = m_cir_power_sum_linear[bin] / divisor;
+            if (power > main_power)
+            {
+                main_power = power;
+                main_bin = bin;
+            }
+        }
+        main_power = (std::max)(main_power, 1.0e-12f);
+        m_rf_channel_cir_count = count;
+        m_rf_channel_cir_main_bin = main_bin;
+        m_rf_channel_cir_sample_period_ns = frame.cir_sample_period_ns;
+
+        constexpr float plot_left = 52.0f;
+        constexpr float plot_top = 30.0f;
+        constexpr float plot_width = 580.0f;
+        constexpr float plot_height = 160.0f;
+        PointCollection cir_points;
+        for (uint32_t delay = 0u; delay < count; ++delay)
+        {
+            uint32_t const bin = (main_bin + delay) % count;
+            float const ratio = (m_cir_power_sum_linear[bin] / divisor) / main_power;
+            float const level = ratio > 1.0e-12f ? 10.0f * std::log10(ratio) : -120.0f;
+            m_rf_channel_cir_level_db[delay] = level;
+            float const x = count > 1u
+                ? plot_left + plot_width * static_cast<float>(delay) /
+                    static_cast<float>(count - 1u)
+                : plot_left;
+            float const y = plot_top + std::clamp(-level / 60.0f, 0.0f, 1.0f) * plot_height;
+            cir_points.Append(Point{ x, y });
+        }
+        RfChannelCirTrace().Points(cir_points);
+
+        std::vector<float> floor_samples;
+        floor_samples.reserve(count);
+        for (uint32_t delay = 7u; delay < count; ++delay)
+        {
+            floor_samples.push_back(m_rf_channel_cir_level_db[delay]);
+        }
+        float floor_db = -60.0f;
+        if (!floor_samples.empty())
+        {
+            size_t const middle = floor_samples.size() / 2u;
+            std::nth_element(floor_samples.begin(),
+                             floor_samples.begin() + middle,
+                             floor_samples.end());
+            floor_db = floor_samples[middle];
+        }
+        float const detection_threshold_db = std::clamp(floor_db + 8.0f, -35.0f, -10.0f);
+
+        struct EchoPeak
+        {
+            uint32_t delay;
+            float level_db;
+        };
+        std::vector<EchoPeak> candidates;
+        for (uint32_t delay = 6u; delay + 1u < count; ++delay)
+        {
+            float const level = m_rf_channel_cir_level_db[delay];
+            if (level >= detection_threshold_db &&
+                level >= m_rf_channel_cir_level_db[delay - 1u] &&
+                level > m_rf_channel_cir_level_db[delay + 1u])
+            {
+                candidates.push_back(EchoPeak{ delay, level });
+            }
+        }
+        std::sort(candidates.begin(), candidates.end(), [](EchoPeak const& left, EchoPeak const& right)
+        {
+            return left.level_db > right.level_db;
+        });
+        std::vector<EchoPeak> echoes;
+        for (auto const& candidate : candidates)
+        {
+            bool separated = true;
+            for (auto const& existing : echoes)
+            {
+                if (std::abs(static_cast<int32_t>(candidate.delay) -
+                             static_cast<int32_t>(existing.delay)) < 6)
+                {
+                    separated = false;
+                    break;
+                }
+            }
+            if (separated)
+            {
+                echoes.push_back(candidate);
+                if (echoes.size() == 3u)
+                {
+                    break;
+                }
+            }
+        }
+        std::sort(echoes.begin(), echoes.end(), [](EchoPeak const& left, EchoPeak const& right)
+        {
+            return left.delay < right.delay;
+        });
+
+        constexpr uint32_t mode_i_guard_samples = 504u;
+        double const sample_period_us = static_cast<double>(frame.cir_sample_period_ns) / 1000.0;
+        double const guard_us = sample_period_us * static_cast<double>(mode_i_guard_samples);
+        auto cir_markers = RfChannelCirAutoMarkerCanvas().Children();
+        cir_markers.Clear();
+        auto guard_markers = RfChannelGuardMarkerCanvas().Children();
+        guard_markers.Clear();
+        auto const echo_brush = SolidColorBrush(ColorHelper::FromArgb(255u, 84u, 226u, 255u));
+        auto const outside_brush = SolidColorBrush(ColorHelper::FromArgb(255u, 255u, 200u, 87u));
+        std::array<hstring, 3> echo_text{};
+        for (size_t index = 0u; index < echoes.size(); ++index)
+        {
+            auto const& echo = echoes[index];
+            bool const outside_guard = echo.delay >= mode_i_guard_samples;
+            auto const brush = outside_guard ? outside_brush : echo_brush;
+            double const delay_us = static_cast<double>(echo.delay) * sample_period_us;
+            double const x = plot_left + plot_width * static_cast<double>(echo.delay) /
+                static_cast<double>(count - 1u);
+            double const y = plot_top +
+                std::clamp(-static_cast<double>(echo.level_db) / 60.0, 0.0, 1.0) * plot_height;
+
+            Line marker_line;
+            marker_line.X1(x);
+            marker_line.X2(x);
+            marker_line.Y1(y + 5.0);
+            marker_line.Y2(plot_top + plot_height);
+            marker_line.Stroke(brush);
+            marker_line.StrokeThickness(1.0);
+            marker_line.Opacity(0.7);
+            cir_markers.Append(marker_line);
+            Microsoft::UI::Xaml::Shapes::Ellipse marker_dot;
+            marker_dot.Width(7.0);
+            marker_dot.Height(7.0);
+            marker_dot.Fill(brush);
+            Canvas::SetLeft(marker_dot, x - 3.5);
+            Canvas::SetTop(marker_dot, y - 3.5);
+            cir_markers.Append(marker_dot);
+            TextBlock label;
+            label.Text(hstring{ L"E" } + to_hstring(index + 1u));
+            label.FontFamily(FontFamily{ L"Consolas" });
+            label.FontSize(10.0);
+            label.Foreground(brush);
+            Canvas::SetLeft(label, std::clamp(x + 4.0, 56.0, 612.0));
+            Canvas::SetTop(label, plot_top + 3.0 + 12.0 * static_cast<double>(index));
+            cir_markers.Append(label);
+
+            double const guard_x = 50.0 + 900.0 * delay_us / (std::max)(guard_us, 1.0);
+            Line guard_line;
+            guard_line.X1(std::clamp(guard_x, 50.0, 972.0));
+            guard_line.X2(std::clamp(guard_x, 50.0, 972.0));
+            guard_line.Y1(22.0);
+            guard_line.Y2(55.0);
+            guard_line.Stroke(brush);
+            guard_line.StrokeThickness(2.0);
+            guard_markers.Append(guard_line);
+            TextBlock guard_label;
+            guard_label.Text(hstring{ L"E" } + to_hstring(index + 1u) + L" " +
+                format_float(static_cast<float>(delay_us), L" \x00B5s", 1));
+            guard_label.FontFamily(FontFamily{ L"Consolas" });
+            guard_label.FontSize(10.0);
+            guard_label.Foreground(brush);
+            Canvas::SetLeft(guard_label, std::clamp(guard_x - 22.0, 55.0, 930.0));
+            Canvas::SetTop(guard_label, 55.0 + 12.0 * static_cast<double>(index % 2u));
+            guard_markers.Append(guard_label);
+
+            wchar_t buffer[104]{};
+            swprintf_s(buffer,
+                       L"E%zu  %u samp \x00B7 %.2f \x00B5s \x00B7 %.1f dB",
+                       index + 1u,
+                       echo.delay,
+                       delay_us,
+                       static_cast<double>(echo.level_db));
+            echo_text[index] = buffer;
+        }
+        RfChannelEcho1Text().Text(echoes.empty() ? hstring{ L"None detected" } : echo_text[0u]);
+        RfChannelEcho2Text().Text(echoes.size() > 1u ? echo_text[1u] : hstring{});
+        RfChannelEcho3Text().Text(echoes.size() > 2u ? echo_text[2u] : hstring{});
+        RfChannelMainPathText().Text(L"0 samp \x00B7 0.00 \x00B5s \x00B7 0.0 dB");
+        RfChannelCirAverageText().Text(
+            to_hstring(m_cir_power_history_count) + L"/" +
+            to_hstring(cir_average_capacity) + L"-frame linear-power average");
+
+        double total_energy = 0.0;
+        double outside_energy = 0.0;
+        for (uint32_t delay = 0u; delay < count; ++delay)
+        {
+            uint32_t const bin = (main_bin + delay) % count;
+            double const power = static_cast<double>(m_cir_power_sum_linear[bin]) /
+                                 static_cast<double>(divisor);
+            total_energy += power;
+            if (delay >= mode_i_guard_samples)
+            {
+                outside_energy += power;
+            }
+        }
+        double const outside_ratio = total_energy > 0.0 ? outside_energy / total_energy : 0.0;
+        double const outside_percent = outside_ratio * 100.0;
+        double const outside_db = outside_ratio > 1.0e-12
+            ? 10.0 * std::log10(outside_ratio)
+            : -120.0;
+        RfChannelOutsideGuardText().Text(
+            format_float(static_cast<float>(outside_percent), L" %", 3));
+        RfChannelOutsideGuardDbText().Text(
+            format_float(static_cast<float>(outside_db), L" dB energy ratio", 1));
+        RfChannelGuardStatusText().Text(
+            L"Mode I guard interval: " + to_hstring(mode_i_guard_samples) + L" samples / " +
+            format_float(static_cast<float>(guard_us), L" \x00B5s", 2));
+
+        if (m_rf_channel_cir_marker_delay_samples >= static_cast<int32_t>(count))
+        {
+            m_rf_channel_cir_marker_delay_samples = -1;
+        }
+        RenderRfChannelCirMarker();
+    }
+
+    void MainWindow::RfChannelCirCanvas_PointerPressed(IInspectable const&,
+                                                        PointerRoutedEventArgs const& args)
+    {
+        if (m_rf_channel_cir_count < 2u)
+        {
+            return;
+        }
+        Point const position = args.GetCurrentPoint(RfChannelCirCanvas()).Position();
+        constexpr double plot_left = 52.0;
+        constexpr double plot_width = 580.0;
+        if (position.X < plot_left || position.X > plot_left + plot_width)
+        {
+            return;
+        }
+        uint32_t const approximate = static_cast<uint32_t>(std::llround(
+            (position.X - plot_left) / plot_width *
+            static_cast<double>(m_rf_channel_cir_count - 1u)));
+        uint32_t const begin = approximate > 10u ? approximate - 10u : 0u;
+        uint32_t const end = (std::min)(m_rf_channel_cir_count - 1u, approximate + 10u);
+        uint32_t best = approximate;
+        float best_level = -121.0f;
+        for (uint32_t delay = begin; delay <= end; ++delay)
+        {
+            bool const local_peak = delay == 0u || delay + 1u == m_rf_channel_cir_count ||
+                (m_rf_channel_cir_level_db[delay] >= m_rf_channel_cir_level_db[delay - 1u] &&
+                 m_rf_channel_cir_level_db[delay] > m_rf_channel_cir_level_db[delay + 1u]);
+            if (local_peak && m_rf_channel_cir_level_db[delay] > best_level)
+            {
+                best = delay;
+                best_level = m_rf_channel_cir_level_db[delay];
+            }
+        }
+        m_rf_channel_cir_marker_delay_samples = static_cast<int32_t>(best);
+        RenderRfChannelCirMarker();
+        args.Handled(true);
+    }
+
+    void MainWindow::RenderRfChannelCirMarker()
+    {
+        auto markers = RfChannelCirUserMarkerCanvas().Children();
+        markers.Clear();
+        if (m_rf_channel_cir_marker_delay_samples < 0 || m_rf_channel_cir_count < 2u ||
+            m_rf_channel_cir_sample_period_ns <= 0.0f)
+        {
+            RfChannelCirMarkerPanel().Visibility(Visibility::Collapsed);
+            return;
+        }
+
+        uint32_t const delay = static_cast<uint32_t>(m_rf_channel_cir_marker_delay_samples);
+        float const level_db = m_rf_channel_cir_level_db[delay];
+        double const delay_us = static_cast<double>(delay) *
+            static_cast<double>(m_rf_channel_cir_sample_period_ns) / 1000.0;
+        double const path_difference_km = delay_us * 0.299792458;
+        double const x = 52.0 + 580.0 * static_cast<double>(delay) /
+            static_cast<double>(m_rf_channel_cir_count - 1u);
+        double const y = 30.0 +
+            std::clamp(-static_cast<double>(level_db) / 60.0, 0.0, 1.0) * 160.0;
+        auto const marker_brush = SolidColorBrush(ColorHelper::FromArgb(255u, 53u, 208u, 186u));
+        Line marker_line;
+        marker_line.X1(x);
+        marker_line.X2(x);
+        marker_line.Y1(25.0);
+        marker_line.Y2(194.0);
+        marker_line.Stroke(marker_brush);
+        marker_line.StrokeThickness(1.8);
+        markers.Append(marker_line);
+        Microsoft::UI::Xaml::Shapes::Ellipse dot;
+        dot.Width(9.0);
+        dot.Height(9.0);
+        dot.Fill(marker_brush);
+        Canvas::SetLeft(dot, x - 4.5);
+        Canvas::SetTop(dot, y - 4.5);
+        markers.Append(dot);
+
+        RfChannelMarkerSamplesText().Text(to_hstring(delay) + L" samples");
+        RfChannelMarkerDelayText().Text(
+            format_float(static_cast<float>(delay_us), L" \x00B5s", 2));
+        RfChannelMarkerPowerText().Text(format_float(level_db, L" dB", 1));
+        RfChannelMarkerDistanceText().Text(
+            format_float(static_cast<float>(path_difference_km), L" km path difference", 2));
+        RfChannelCirMarkerPanel().Visibility(Visibility::Visible);
+    }
+
+    void MainWindow::ResetRfChannelDiagnostics()
+    {
+        m_cir_power_history_linear = {};
+        m_cir_power_sum_linear = {};
+        m_cir_power_history_write = 0u;
+        m_cir_power_history_count = 0u;
+        m_cir_frequency_hz = 0u;
+        m_cir_bin_count = 0u;
+        m_cir_sample_period_ns = 0.0f;
+        m_rf_channel_cir_level_db = {};
+        m_rf_channel_cir_count = 0u;
+        m_rf_channel_cir_main_bin = 0u;
+        m_rf_channel_cir_sample_period_ns = 0.0f;
+        m_rf_channel_cir_marker_delay_samples = -1;
+        PointCollection magnitude_points;
+        magnitude_points.Append(Point{ 48.0f, 53.0f });
+        magnitude_points.Append(Point{ 632.0f, 53.0f });
+        RfChannelMagnitudeTrace().Points(magnitude_points);
+        PointCollection phase_points;
+        phase_points.Append(Point{ 48.0f, 181.0f });
+        phase_points.Append(Point{ 632.0f, 181.0f });
+        RfChannelPhaseTrace().Points(phase_points);
+        PointCollection mer_points;
+        mer_points.Append(Point{ 48.0f, 309.0f });
+        mer_points.Append(Point{ 632.0f, 309.0f });
+        RfChannelMerTrace().Points(mer_points);
+        PointCollection cir_points;
+        cir_points.Append(Point{ 52.0f, 190.0f });
+        cir_points.Append(Point{ 632.0f, 190.0f });
+        RfChannelCirTrace().Points(cir_points);
+        RfChannelCirAutoMarkerCanvas().Children().Clear();
+        RfChannelCirUserMarkerCanvas().Children().Clear();
+        RfChannelGuardMarkerCanvas().Children().Clear();
+        RfChannelResponseStatusText().Text(L"Awaiting synchronized PRS channel estimate");
+        RfChannelMainPathText().Text(L"Awaiting CIR");
+        RfChannelEcho1Text().Text(L"None detected");
+        RfChannelEcho2Text().Text(L"");
+        RfChannelEcho3Text().Text(L"");
+        RfChannelOverallMerText().Text(L"\x2014 dB");
+        RfChannelMinimumMerText().Text(L"\x2014 dB");
+        RfChannelNotchedCarrierText().Text(L"0");
+        RfChannelFadingText().Text(L"Awaiting response");
+        RfChannelFadingSpreadText().Text(L"p90\x2212p10 \x2014 dB");
+        RfChannelOutsideGuardText().Text(L"\x2014 %");
+        RfChannelOutsideGuardDbText().Text(L"\x2014 dB energy ratio");
+        RfChannelCirMarkerPanel().Visibility(Visibility::Collapsed);
+    }
+
     void MainWindow::UpdateRfSpectrum(dab::measurement::MeasurementFrame const& frame)
     {
         if (m_rf_spectrum_frozen || frame.spectrum_bin_count == 0u)
@@ -2748,6 +3247,7 @@ namespace winrt::DabMeasurementWinUI::implementation
                        static_cast<double>(minimum_mer));
             CarrierMerStatusText().Text(mer_status);
         }
+        UpdateRfChannel(frame);
     }
 
     void MainWindow::AddTimelineEvent(hstring const& message)

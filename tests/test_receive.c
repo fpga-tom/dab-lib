@@ -325,7 +325,11 @@ void test_receive_measurement_builds_bounded_signal_payloads(void) {
 
     for (i = 0u; i < DAB_MODE_I_ACTIVE_CARRIERS; ++i) {
         if (i != DAB_MODE_I_ACTIVE_CARRIER_HALF) {
-            ofdm.channel_i[i] = 1.0f;
+            if (i == 1u) {
+                ofdm.channel_q[i] = -1.0f;
+            } else {
+                ofdm.channel_i[i] = 1.0f;
+            }
             physical_i[i] = (i & 1u) != 0u ? 1.0f : -1.0f;
             physical_q[i] = (i & 2u) != 0u ? 1.0f : -1.0f;
         }
@@ -361,6 +365,12 @@ void test_receive_measurement_builds_bounded_signal_payloads(void) {
     TEST_ASSERT(frame.cir_bin_count == DAB_RECEIVE_CIR_BIN_COUNT);
     TEST_ASSERT(fabsf(frame.cir_power_db[0u]) < 1.0e-4f);
     TEST_ASSERT(frame.cir_power_db[16u] < -40.0f);
+    TEST_ASSERT(frame.channel_response_count == DAB_RECEIVE_CHANNEL_RESPONSE_COUNT);
+    TEST_ASSERT(fabsf(frame.channel_magnitude_db[0u]) < 1.0e-4f);
+    TEST_ASSERT(fabsf(frame.channel_phase_deg[0u]) < 1.0e-4f);
+    TEST_ASSERT(fabsf(frame.channel_phase_deg[1u] - 90.0f) < 1.0e-4f);
+    TEST_ASSERT(fabsf(frame.channel_magnitude_db[DAB_RECEIVE_CHANNEL_RESPONSE_COUNT - 1u]) <
+                1.0e-4f);
     TEST_ASSERT(frame.carrier_mer_count == DAB_RECEIVE_CARRIER_MER_COUNT);
     TEST_ASSERT(frame.carrier_mer_db[0u] > 50.0f);
     TEST_ASSERT(frame.carrier_mer_db[DAB_RECEIVE_CARRIER_MER_COUNT - 1u] > 50.0f);

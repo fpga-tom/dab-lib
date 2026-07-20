@@ -6,7 +6,7 @@ The current proof of concept includes:
 
 - receiver controls for device, the complete 5A–13F Band III channel plan, mapped centre frequency, gain, start, record, and markers;
 - live ensemble, service, and component navigation decoded from the tuned signal's FIC;
-- live spectrum, rolling waterfall, constellation, CIR, and per-carrier MER views;
+- live spectrum, rolling waterfall, constellation, complex channel response, CIR, and per-carrier MER views;
 - a square normalized constellation plot with equal `−1.2 … +1.2` I/Q axes and explicit ideal QPSK target rings;
 - a full-tap CIR diagnostic with Hann-windowed channel estimation, an exact 8-frame linear-power average, relative-delay/level axes, adaptive floor estimation, and separated strongest/candidate-path markers;
 - an in-window maximize/restore view shared by the constellation, CIR, and carrier-MER analysis tabs (`Ctrl+M`);
@@ -34,7 +34,7 @@ config.catalog = &dab::measurement::CatalogMailbox::Callback;
 config.catalog_user = &catalog_mailbox;
 ```
 
-The scalar snapshot remains lightweight. The measurement callback exposes temporary views of 2048 FFT-shifted spectrum bins, up to 512 normalized constellation points, 512 CIR taps, and 1536 physical-carrier MER values. `MeasurementMailbox` copies the latest complete transmission-frame payload before the callback returns. The catalog callback is emitted only when the decoded FIC repository changes and is copied by `CatalogMailbox`. The UI timer therefore never touches decoder-owned memory, and the receiver thread never updates XAML controls directly.
+The scalar snapshot remains lightweight. The measurement callback exposes temporary views of 2048 FFT-shifted spectrum bins, up to 512 normalized constellation points, 512 CIR taps, 1536 channel-response magnitude/phase values, and 1536 physical-carrier MER values. `MeasurementMailbox` copies the latest complete transmission-frame payload before the callback returns. The catalog callback is emitted only when the decoded FIC repository changes and is copied by `CatalogMailbox`. The UI timer therefore never touches decoder-owned memory, and the receiver thread never updates XAML controls directly.
 
 The receiver controls currently open a real SDR device. The selected SDRplay or RTL-SDR adapter must be installed and available; explicitly selecting a real device no longer falls back silently to the synthetic adapter. On Windows, the SDRplay loader also checks the standard API installation directories.
 

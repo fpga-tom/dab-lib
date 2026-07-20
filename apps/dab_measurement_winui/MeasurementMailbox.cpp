@@ -58,6 +58,18 @@ namespace dab::measurement
                             m_latest.cir_bin_count,
                             m_latest.cir_power_db.begin());
             }
+            m_latest.channel_response_count = (std::min)(
+                source.channel_response_count,
+                static_cast<uint32_t>(DAB_RECEIVE_CHANNEL_RESPONSE_COUNT));
+            if (source.channel_magnitude_db != nullptr && source.channel_phase_deg != nullptr)
+            {
+                std::copy_n(source.channel_magnitude_db,
+                            m_latest.channel_response_count,
+                            m_latest.channel_magnitude_db.begin());
+                std::copy_n(source.channel_phase_deg,
+                            m_latest.channel_response_count,
+                            m_latest.channel_phase_deg.begin());
+            }
             m_latest.carrier_mer_count = (std::min)(
                 source.carrier_mer_count,
                 static_cast<uint32_t>(DAB_RECEIVE_CARRIER_MER_COUNT));

@@ -369,6 +369,8 @@ int dab_receive_measurement_begin(dab_receive_measurement_state_t *state,
     const uint32_t fft_count = DAB_RECEIVE_SPECTRUM_BIN_COUNT;
     const float full_scale = (float)fft_count * 32768.0f;
     const float spectrum_reference_power = full_scale * full_scale;
+    double channel_power_sum = 0.0;
+    uint32_t channel_power_count = 0u;
     float cir_peak_power = 0.0f;
     uint32_t i;
 
@@ -388,6 +390,8 @@ int dab_receive_measurement_begin(dab_receive_measurement_state_t *state,
     if (!state->collecting) {
         return 0;
     }
+    memset(state->channel_magnitude_db, 0, sizeof(state->channel_magnitude_db));
+    memset(state->channel_phase_deg, 0, sizeof(state->channel_phase_deg));
 
     for (i = 0u; i < fft_count; ++i) {
         const uint32_t source = (i + (fft_count / 2u)) % fft_count;
@@ -399,6 +403,10 @@ int dab_receive_measurement_begin(dab_receive_measurement_state_t *state,
 
     for (i = 0u; i < DAB_MODE_I_ACTIVE_CARRIERS; ++i) {
         uint32_t fft_bin;
+        uint32_t carrier;
+        float response_i;
+        float response_q;
+        float response_power;
         float window;
         const float equalizer_i = ofdm->channel_i[i];
         const float equalizer_q = ofdm->channel_q[i];
@@ -410,6 +418,15 @@ int dab_receive_measurement_begin(dab_receive_measurement_state_t *state,
         fft_bin = i < DAB_MODE_I_ACTIVE_CARRIER_HALF
             ? DAB_MODE_I_FFT_SAMPLES - DAB_MODE_I_ACTIVE_CARRIER_HALF + i
             : i - DAB_MODE_I_ACTIVE_CARRIER_HALF;
+        carrier = i < DAB_MODE_I_ACTIVE_CARRIER_HALF ? i : i - 1u;
+        response_i = equalizer_i / denominator;
+        response_q = -equalizer_q / denominator;
+        response_power = (response_i * response_i) + (response_q * response_q);
+        state->channel_magnitude_db[carrier] = response_power;
+        state->channel_phase_deg[carrier] = atan2f(response_q, response_i) *
+            (float)(180.0 / 3.14159265358979323846);
+        channel_power_sum += response_power;
+        channel_power_count++;
         /*
          * Taper the measured channel response at the active-band edges before
          * the IFFT.  A rectangular 1536-carrier mask produces a sinc-shaped
@@ -420,8 +437,19 @@ int dab_receive_measurement_begin(dab_receive_measurement_state_t *state,
         window = 0.5f - (0.5f * cosf(6.2831853071795864769f *
                                      (float)i /
                                      (float)(DAB_MODE_I_ACTIVE_CARRIERS - 1u)));
-        state->cir_i[fft_bin] = window * equalizer_i / denominator;
-        state->cir_q[fft_bin] = -window * equalizer_q / denominator;
+        state->cir_i[fft_bin] = window * response_i;
+        state->cir_q[fft_bin] = window * response_q;
+    }
+
+    {
+        const float mean_channel_power = channel_power_count != 0u
+            ? (float)(channel_power_sum / (double)channel_power_count)
+            : 0.0f;
+        for (i = 0u; i < DAB_RECEIVE_CHANNEL_RESPONSE_COUNT; ++i) {
+            state->channel_magnitude_db[i] = receive_power_db(
+                state->channel_magnitude_db[i],
+                mean_channel_power);
+        }
     }
 
     if (dab_prs_fft_execute_complex_f32(fft, state->cir_i, state->cir_q, 1) != 0) {
@@ -565,6 +593,9 @@ int dab_receive_measurement_finish(dab_receive_measurement_state_t *state,
     frame->cir_power_db = state->cir_power_db;
     frame->cir_bin_count = DAB_RECEIVE_CIR_BIN_COUNT;
     frame->cir_sample_period_ns = 1000000000.0f / (float)sample_rate_hz;
+    frame->channel_magnitude_db = state->channel_magnitude_db;
+    frame->channel_phase_deg = state->channel_phase_deg;
+    frame->channel_response_count = DAB_RECEIVE_CHANNEL_RESPONSE_COUNT;
     frame->carrier_mer_db = state->carrier_mer_db;
     frame->carrier_mer_count = DAB_RECEIVE_CARRIER_MER_COUNT;
     frame->first_carrier = -768;
