@@ -193,10 +193,29 @@ static void dab_sdrplay_stream_destroy(struct dab_sdr_stream *stream) {
     free(impl);
 }
 
+static dab_sdr_status_t dab_sdrplay_stream_diagnostics(
+    struct dab_sdr_stream *stream,
+    dab_sdr_stream_diagnostics_t *diagnostics) {
+    dab_sdrplay_stream_t *impl = (dab_sdrplay_stream_t *)stream;
+    if (impl == NULL || diagnostics == NULL) {
+        return DAB_SDR_STATUS_INVALID_ARGUMENT;
+    }
+    memset(diagnostics, 0, sizeof(*diagnostics));
+    if (impl->filled_queue_ready) {
+        dab_pc_queue_usage(&impl->filled_blocks,
+                           &diagnostics->queue_depth,
+                           &diagnostics->queue_high_watermark,
+                           &diagnostics->queue_capacity);
+    }
+    diagnostics->dropped_blocks = impl->dropped_blocks;
+    return DAB_SDR_STATUS_OK;
+}
+
 static const dab_sdr_stream_vtbl_t DAB_SDRPLAY_STREAM_VTBL = {
     dab_sdrplay_stream_start,
     dab_sdrplay_stream_stop,
     dab_sdrplay_stream_read,
+    dab_sdrplay_stream_diagnostics,
     dab_sdrplay_stream_destroy
 };
 

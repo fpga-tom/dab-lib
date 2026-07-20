@@ -22,14 +22,14 @@ namespace
     hstring format_float(float value, wchar_t const* suffix, int precision = 1)
     {
         wchar_t buffer[64]{};
-        if (precision == 3)
-        {
-            swprintf_s(buffer, L"%.3f%s", static_cast<double>(value), suffix);
-        }
-        else
-        {
-            swprintf_s(buffer, L"%.1f%s", static_cast<double>(value), suffix);
-        }
+        swprintf_s(buffer, L"%.*f%s", precision, static_cast<double>(value), suffix);
+        return hstring{ buffer };
+    }
+
+    hstring format_signed_float(float value, wchar_t const* suffix, int precision)
+    {
+        wchar_t buffer[64]{};
+        swprintf_s(buffer, L"%+.*f%s", precision, static_cast<double>(value), suffix);
         return hstring{ buffer };
     }
 
@@ -129,6 +129,29 @@ namespace
                 : width;
             float const normalized = std::clamp((value - minimum) / (maximum - minimum), 0.0f, 1.0f);
             float const y = (height - 3.0f) - normalized * (height - 6.0f);
+            points.Append(Point{ x, y });
+        }
+        return points;
+    }
+
+    template <size_t Capacity>
+    PointCollection histogram_points(uint32_t const (&values)[Capacity],
+                                     uint32_t maximum,
+                                     float width,
+                                     float height)
+    {
+        PointCollection points;
+        if (maximum == 0u || Capacity < 2u)
+        {
+            return points;
+        }
+        for (size_t bin = 0u; bin < Capacity; ++bin)
+        {
+            float const x = width * static_cast<float>(bin) /
+                            static_cast<float>(Capacity - 1u);
+            float const normalized = static_cast<float>(values[bin]) /
+                                     static_cast<float>(maximum);
+            float const y = (height - 5.0f) - normalized * (height - 10.0f);
             points.Append(Point{ x, y });
         }
         return points;
@@ -1096,6 +1119,119 @@ namespace winrt::DabMeasurementWinUI::implementation
             ? format_float(static_cast<float>(snapshot.sample_rate_hz) / 1000000.0f, L" MS/s", 3)
             : hstring{ L"— MS/s" });
 
+        bool const have_rf_input = snapshot.adc_level_valid != 0 &&
+                                   snapshot.adc_window_sample_count != 0u;
+        RfInputRmsText().Text(snapshot.adc_level_valid
+            ? format_float(snapshot.adc_level_dbfs, L" dBFS")
+            : hstring{ L"— dBFS" });
+        RfInputPeakText().Text(have_rf_input
+            ? format_float(snapshot.adc_peak_dbfs, L" dBFS")
+            : hstring{ L"— dBFS" });
+        RfInputCrestText().Text(have_rf_input
+            ? format_float(snapshot.adc_crest_factor_db, L" dB")
+            : hstring{ L"— dB" });
+        RfInputCalibratedPowerText().Text(snapshot.calibrated_power_valid != 0
+            ? format_float(snapshot.calibrated_power_dbm, L" dBm")
+            : hstring{ L"Not calibrated" });
+        if (have_rf_input)
+        {
+            wchar_t clipping_text[80]{};
+            swprintf_s(clipping_text,
+                       L"%.3f%%  ·  %u sample%s",
+                       static_cast<double>(snapshot.adc_clipping_percent),
+                       snapshot.adc_clipped_sample_count,
+                       snapshot.adc_clipped_sample_count == 1u ? L"" : L"s");
+            RfInputClippingText().Text(clipping_text);
+            RfInputWindowText().Text(to_hstring(snapshot.adc_window_sample_count) + L" samples");
+            RfClippingText().Text(hstring{ L"Clipping " } + clipping_text);
+        }
+        else
+        {
+            RfInputClippingText().Text(L"—");
+            RfInputWindowText().Text(L"— samples");
+            RfClippingText().Text(L"Awaiting ADC utilisation measurement");
+        }
+
+        RfInputIDcText().Text(have_rf_input
+            ? format_signed_float(snapshot.adc_i_dc, L" FS", 5)
+            : hstring{ L"— FS" });
+        RfInputQDcText().Text(have_rf_input
+            ? format_signed_float(snapshot.adc_q_dc, L" FS", 5)
+            : hstring{ L"— FS" });
+        bool const have_iq_quality = have_rf_input && snapshot.adc_iq_quality_valid != 0;
+        RfInputAmplitudeText().Text(have_iq_quality
+            ? format_signed_float(snapshot.adc_iq_amplitude_imbalance_db, L" dB", 2)
+            : hstring{ L"— dB" });
+        RfInputPhaseText().Text(have_iq_quality
+            ? format_signed_float(snapshot.adc_iq_phase_imbalance_deg, L"°", 2)
+            : hstring{ L"—°" });
+        RfInputCorrelationText().Text(have_iq_quality
+            ? format_signed_float(snapshot.adc_iq_correlation, L"", 4)
+            : hstring{ L"—" });
+
+        RfInputGainText().Text(snapshot.device_gain_valid != 0
+            ? format_integer(snapshot.device_gain_db, L" dB")
+            : hstring{ L"Not reported" });
+        RfInputLnaText().Text(snapshot.lna_state_valid != 0
+            ? hstring{ L"State " } + to_hstring(snapshot.lna_state)
+            : hstring{ L"Not reported" });
+        RfInputIfGainText().Text(snapshot.if_gain_reduction_valid != 0
+            ? format_integer(snapshot.if_gain_reduction_db, L" dB")
+            : hstring{ L"Not reported" });
+        RfInputAgcText().Text(snapshot.agc_enabled != 0 ? L"Enabled" : L"Disabled");
+        RfInputTemperatureText().Text(snapshot.device_temperature_valid != 0
+            ? format_float(snapshot.device_temperature_c, L" °C")
+            : hstring{ L"Not reported" });
+
+        RfInputReceivedBlocksText().Text(to_hstring(snapshot.blocks_received));
+        RfInputDroppedBlocksText().Text(to_hstring(snapshot.dropped_blocks));
+        if (snapshot.input_queue_capacity != 0u)
+        {
+            double const current_percent = 100.0 * snapshot.input_queue_depth /
+                                           snapshot.input_queue_capacity;
+            double const maximum_percent = 100.0 * snapshot.input_queue_high_watermark /
+                                           snapshot.input_queue_capacity;
+            wchar_t queue_text[64]{};
+            swprintf_s(queue_text,
+                       L"%.0f%% current  ·  %.0f%% max",
+                       current_percent,
+                       maximum_percent);
+            RfInputQueueText().Text(queue_text);
+        }
+        else
+        {
+            RfInputQueueText().Text(L"Not reported");
+        }
+        RfInputDataRateText().Text(snapshot.sample_rate_hz != 0u
+            ? format_float(static_cast<float>(snapshot.sample_rate_hz) * 4.0f / 1000000.0f,
+                           L" MB/s",
+                           2)
+            : hstring{ L"— MB/s" });
+        RfInputHardwareOverrunsText().Text(snapshot.hardware_overruns_valid != 0
+            ? to_hstring(snapshot.hardware_overruns)
+            : hstring{ L"Not reported" });
+        RfInputProcessingLateText().Text(to_hstring(snapshot.processing_late_count));
+        RfInputLatencyText().Text(snapshot.processing_latency_ns != 0u
+            ? format_float(static_cast<float>(snapshot.processing_latency_ns) / 1000000.0f,
+                           L" ms",
+                           2)
+            : hstring{ L"— ms" });
+        RfInputCallbackText().Text(snapshot.input_block_interval_ns != 0u
+            ? format_float(static_cast<float>(snapshot.input_block_interval_ns) / 1000000.0f,
+                           L" ms",
+                           2)
+            : hstring{ L"— ms" });
+        UpdateRfInputHistogram(snapshot);
+
+        if (have_rf_input && snapshot.adc_clipped_sample_count != 0u)
+        {
+            RfWarningsText().Text(L"ADC clipping detected in the latest PRS analysis window.");
+        }
+        else
+        {
+            RfWarningsText().Text(L"Input power is ADC-referenced (dBFS) until an RF calibration profile is configured.");
+        }
+
         uint64_t const timestamp_ns = snapshot.timestamp_ns != 0u
             ? snapshot.timestamp_ns
             : m_tick * 250000000ull;
@@ -1131,6 +1267,24 @@ namespace winrt::DabMeasurementWinUI::implementation
         float const missing = (std::numeric_limits<float>::quiet_NaN)();
         AppendRfHistory(snapshot.adc_level_valid ? snapshot.adc_level_dbfs : missing,
                         snapshot.cn_valid ? snapshot.cn_db : missing);
+    }
+
+    void MainWindow::UpdateRfInputHistogram(dab_receive_snapshot_t const& snapshot)
+    {
+        uint32_t maximum = 0u;
+        for (size_t bin = 0u; bin < DAB_RECEIVE_ADC_HISTOGRAM_BIN_COUNT; ++bin)
+        {
+            maximum = (std::max)(maximum, snapshot.adc_i_histogram[bin]);
+            maximum = (std::max)(maximum, snapshot.adc_q_histogram[bin]);
+        }
+        RfInputIHistogramTrace().Points(histogram_points(snapshot.adc_i_histogram,
+                                                         maximum,
+                                                         720.0f,
+                                                         220.0f));
+        RfInputQHistogramTrace().Points(histogram_points(snapshot.adc_q_histogram,
+                                                         maximum,
+                                                         720.0f,
+                                                         220.0f));
     }
 
     void MainWindow::AppendRfHistory(float power_dbfs, float cn_db)

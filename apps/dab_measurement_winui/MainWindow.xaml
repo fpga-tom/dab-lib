@@ -1104,7 +1104,227 @@
                     </ScrollViewer>
                 </TabViewItem>
                 <TabViewItem Header="RF Input" IsClosable="False">
-                    <TextBlock Text="RF input controls and calibration will be added here." HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" />
+                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  Padding="12">
+                        <StackPanel Spacing="10">
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="2*" />
+                                    <ColumnDefinition Width="3*" />
+                                </Grid.ColumnDefinitions>
+
+                                <Border Grid.Column="0" Style="{StaticResource PanelCardStyle}" Padding="16">
+                                    <Grid RowSpacing="9" ColumnSpacing="18">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.ColumnSpan="2" Margin="0,0,0,4">
+                                            <TextBlock Text="Input level" FontSize="16" FontWeight="SemiBold" />
+                                            <TextBlock Text="DC-removed complex power in the latest PRS window"
+                                                       Foreground="{StaticResource MutedTextBrush}"
+                                                       FontSize="11" />
+                                        </StackPanel>
+                                        <TextBlock Grid.Row="1" Text="RMS" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="1" Grid.Column="1" x:Name="RfInputRmsText" Text="— dBFS" FontFamily="Consolas" FontSize="15" />
+                                        <TextBlock Grid.Row="2" Text="Peak" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="2" Grid.Column="1" x:Name="RfInputPeakText" Text="— dBFS" FontFamily="Consolas" FontSize="15" />
+                                        <TextBlock Grid.Row="3" Text="Crest factor" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="3" Grid.Column="1" x:Name="RfInputCrestText" Text="— dB" FontFamily="Consolas" />
+                                        <TextBlock Grid.Row="4" Text="Calibrated power" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="4" Grid.Column="1" x:Name="RfInputCalibratedPowerText" Text="Not calibrated" Foreground="{StaticResource WarningBrush}" FontFamily="Consolas" />
+                                        <TextBlock Grid.Row="5" Text="Clipping" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="5" Grid.Column="1" x:Name="RfInputClippingText" Text="—" FontFamily="Consolas" />
+                                        <TextBlock Grid.Row="6" Text="Analysis window" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="6" Grid.Column="1" x:Name="RfInputWindowText" Text="— samples" FontFamily="Consolas" />
+                                    </Grid>
+                                </Border>
+
+                                <Border Grid.Column="1" Style="{StaticResource PanelCardStyle}" Padding="16">
+                                    <Grid RowSpacing="7">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="230" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <Grid ColumnSpacing="12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="ADC utilisation" FontSize="16" FontWeight="SemiBold" />
+                                                <TextBlock Text="Histogram of raw I/Q sample codes"
+                                                           Foreground="{StaticResource MutedTextBrush}"
+                                                           FontSize="11" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                                                <StackPanel Orientation="Horizontal" Spacing="5">
+                                                    <Rectangle Width="14" Height="3" Fill="{StaticResource SpectrumBrush}" />
+                                                    <TextBlock Text="I" FontFamily="Consolas" />
+                                                </StackPanel>
+                                                <StackPanel Orientation="Horizontal" Spacing="5">
+                                                    <Rectangle Width="14" Height="3" Fill="{StaticResource MeasurementAccentBrush}" />
+                                                    <TextBlock Text="Q" FontFamily="Consolas" />
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Grid>
+                                        <Border Grid.Row="1" BorderBrush="{StaticResource PanelStrokeBrush}" BorderThickness="1" Background="#FF07101B">
+                                            <Viewbox Stretch="Fill">
+                                                <Canvas Width="720" Height="230" Background="#FF07101B">
+                                                    <Line X1="0" Y1="55" X2="720" Y2="55" Stroke="#203D556E" />
+                                                    <Line X1="0" Y1="110" X2="720" Y2="110" Stroke="#203D556E" />
+                                                    <Line X1="0" Y1="165" X2="720" Y2="165" Stroke="#203D556E" />
+                                                    <Line X1="360" Y1="0" X2="360" Y2="220" Stroke="#303D556E" />
+                                                    <Line X1="0" Y1="220" X2="720" Y2="220" Stroke="#503D556E" />
+                                                    <Polyline x:Name="RfInputIHistogramTrace"
+                                                              Stroke="{StaticResource SpectrumBrush}"
+                                                              StrokeThickness="2"
+                                                              Points="0,220 720,220" />
+                                                    <Polyline x:Name="RfInputQHistogramTrace"
+                                                              Stroke="{StaticResource MeasurementAccentBrush}"
+                                                              StrokeThickness="2"
+                                                              Points="0,220 720,220" />
+                                                </Canvas>
+                                            </Viewbox>
+                                        </Border>
+                                        <Grid Grid.Row="2">
+                                            <TextBlock Text="−FS" Foreground="{StaticResource MutedTextBrush}" FontFamily="Consolas" />
+                                            <TextBlock Text="0" Foreground="{StaticResource MutedTextBrush}" FontFamily="Consolas" HorizontalAlignment="Center" />
+                                            <TextBlock Text="+FS" Foreground="{StaticResource MutedTextBrush}" FontFamily="Consolas" HorizontalAlignment="Right" />
+                                        </Grid>
+                                    </Grid>
+                                </Border>
+                            </Grid>
+
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0" Style="{StaticResource PanelCardStyle}" Padding="16">
+                                    <Grid RowSpacing="8" ColumnSpacing="18">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.ColumnSpan="2" Text="I/Q health" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,4" />
+                                        <TextBlock Grid.Row="1" Text="I DC" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="1" Grid.Column="1" x:Name="RfInputIDcText" Text="— FS" FontFamily="Consolas" />
+                                        <TextBlock Grid.Row="2" Text="Q DC" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="2" Grid.Column="1" x:Name="RfInputQDcText" Text="— FS" FontFamily="Consolas" />
+                                        <TextBlock Grid.Row="3" Text="Amplitude imbalance (I/Q)" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="3" Grid.Column="1" x:Name="RfInputAmplitudeText" Text="— dB" FontFamily="Consolas" />
+                                        <TextBlock Grid.Row="4" Text="Phase imbalance" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="4" Grid.Column="1" x:Name="RfInputPhaseText" Text="—°" FontFamily="Consolas" />
+                                        <TextBlock Grid.Row="5" Text="I/Q correlation" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="5" Grid.Column="1" x:Name="RfInputCorrelationText" Text="—" FontFamily="Consolas" />
+                                    </Grid>
+                                </Border>
+
+                                <Border Grid.Column="1" Style="{StaticResource PanelCardStyle}" Padding="16">
+                                    <Grid RowSpacing="8" ColumnSpacing="18">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.ColumnSpan="2" Text="Gain configuration" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,4" />
+                                        <TextBlock Grid.Row="1" Text="Gain setting" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="1" Grid.Column="1" x:Name="RfInputGainText" Text="— dB" FontFamily="Consolas" />
+                                        <TextBlock Grid.Row="2" Text="LNA state" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="2" Grid.Column="1" x:Name="RfInputLnaText" Text="Not reported" FontFamily="Consolas" />
+                                        <TextBlock Grid.Row="3" Text="IF gain reduction" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="3" Grid.Column="1" x:Name="RfInputIfGainText" Text="Not reported" FontFamily="Consolas" />
+                                        <TextBlock Grid.Row="4" Text="AGC" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="4" Grid.Column="1" x:Name="RfInputAgcText" Text="Disabled" FontFamily="Consolas" />
+                                        <TextBlock Grid.Row="5" Text="Device temperature" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="5" Grid.Column="1" x:Name="RfInputTemperatureText" Text="Not reported" FontFamily="Consolas" />
+                                    </Grid>
+                                </Border>
+                            </Grid>
+
+                            <Border Style="{StaticResource PanelCardStyle}" Padding="16">
+                                <StackPanel Spacing="11">
+                                    <StackPanel>
+                                        <TextBlock Text="SDR transport diagnostics" FontSize="16" FontWeight="SemiBold" />
+                                        <TextBlock Text="Receiver input path since the current start"
+                                                   Foreground="{StaticResource MutedTextBrush}"
+                                                   FontSize="11" />
+                                    </StackPanel>
+                                    <Grid ColumnSpacing="22" RowSpacing="10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <StackPanel Grid.Column="0">
+                                            <TextBlock Text="RECEIVED BLOCKS" Style="{StaticResource SectionTitleStyle}" />
+                                            <TextBlock x:Name="RfInputReceivedBlocksText" Text="0" FontFamily="Consolas" FontSize="17" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1">
+                                            <TextBlock Text="BUFFER DROPS" Style="{StaticResource SectionTitleStyle}" />
+                                            <TextBlock x:Name="RfInputDroppedBlocksText" Text="0" FontFamily="Consolas" FontSize="17" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2">
+                                            <TextBlock Text="INPUT QUEUE" Style="{StaticResource SectionTitleStyle}" />
+                                            <TextBlock x:Name="RfInputQueueText" Text="—" FontFamily="Consolas" FontSize="17" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="3">
+                                            <TextBlock Text="I/Q DATA RATE" Style="{StaticResource SectionTitleStyle}" />
+                                            <TextBlock x:Name="RfInputDataRateText" Text="— MB/s" FontFamily="Consolas" FontSize="17" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Row="1" Grid.Column="0">
+                                            <TextBlock Text="HARDWARE OVERRUNS" Style="{StaticResource SectionTitleStyle}" />
+                                            <TextBlock x:Name="RfInputHardwareOverrunsText" Text="Not reported" FontFamily="Consolas" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Row="1" Grid.Column="1">
+                                            <TextBlock Text="PROCESSING LATE" Style="{StaticResource SectionTitleStyle}" />
+                                            <TextBlock x:Name="RfInputProcessingLateText" Text="0" FontFamily="Consolas" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Row="1" Grid.Column="2">
+                                            <TextBlock Text="PROCESSING LATENCY" Style="{StaticResource SectionTitleStyle}" />
+                                            <TextBlock x:Name="RfInputLatencyText" Text="— ms" FontFamily="Consolas" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Row="1" Grid.Column="3">
+                                            <TextBlock Text="INPUT BLOCK INTERVAL" Style="{StaticResource SectionTitleStyle}" />
+                                            <TextBlock x:Name="RfInputCallbackText" Text="— ms" FontFamily="Consolas" />
+                                        </StackPanel>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
                 </TabViewItem>
                 <TabViewItem Header="Frequency &amp; Sync" IsClosable="False">
                     <TextBlock Text="Frequency and synchronization diagnostics will be added here." HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" />

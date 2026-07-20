@@ -50,9 +50,18 @@ typedef struct {
 } dab_sdr_block_view_t;
 
 typedef struct {
+    uint32_t queue_depth;
+    uint32_t queue_high_watermark;
+    uint32_t queue_capacity;
+    uint32_t dropped_blocks;
+} dab_sdr_stream_diagnostics_t;
+
+typedef struct {
     dab_sdr_status_t (*start)(struct dab_sdr_stream *stream);
     dab_sdr_status_t (*stop)(struct dab_sdr_stream *stream);
     dab_sdr_status_t (*read)(struct dab_sdr_stream *stream, dab_sdr_block_view_t *block);
+    dab_sdr_status_t (*diagnostics)(struct dab_sdr_stream *stream,
+                                    dab_sdr_stream_diagnostics_t *diagnostics);
     void (*destroy)(struct dab_sdr_stream *stream);
 } dab_sdr_stream_vtbl_t;
 
@@ -82,5 +91,7 @@ const dab_sdr_device_desc_t *dab_sdr_device_desc(uint32_t index);
 dab_sdr_status_t dab_sdr_device_open(const dab_sdr_open_params_t *params, dab_sdr_device_t **device);
 void dab_sdr_device_close(dab_sdr_device_t *device);
 void dab_sdr_stream_close(dab_sdr_stream_t *stream);
+dab_sdr_status_t dab_sdr_stream_get_diagnostics(dab_sdr_stream_t *stream,
+                                                 dab_sdr_stream_diagnostics_t *diagnostics);
 
 #endif

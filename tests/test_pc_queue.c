@@ -15,16 +15,26 @@ void test_pc_queue_basic(void) {
     int a = 11;
     int b = 22;
     void *item = 0;
+    uint32_t count = 0u;
+    uint32_t high_watermark = 0u;
+    uint32_t capacity = 0u;
 
     TEST_ASSERT(dab_pc_queue_init(&queue, storage, 2u) == 0);
     TEST_ASSERT(dab_pc_queue_try_push(&queue, &a) == 0);
     TEST_ASSERT(dab_pc_queue_try_push(&queue, &b) == 0);
+    dab_pc_queue_usage(&queue, &count, &high_watermark, &capacity);
+    TEST_ASSERT(count == 2u);
+    TEST_ASSERT(high_watermark == 2u);
+    TEST_ASSERT(capacity == 2u);
     TEST_ASSERT(dab_pc_queue_try_push(&queue, &a) != 0);
     TEST_ASSERT(dab_pc_queue_try_pop(&queue, &item) == 0);
     TEST_ASSERT(item == &a);
     TEST_ASSERT(dab_pc_queue_try_pop(&queue, &item) == 0);
     TEST_ASSERT(item == &b);
     TEST_ASSERT(dab_pc_queue_try_pop(&queue, &item) != 0);
+    dab_pc_queue_usage(&queue, &count, &high_watermark, &capacity);
+    TEST_ASSERT(count == 0u);
+    TEST_ASSERT(high_watermark == 2u);
     dab_pc_queue_destroy(&queue);
 }
 

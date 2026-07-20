@@ -31,6 +31,10 @@ typedef struct {
 typedef int (*dab_receive_callback_t)(const dab_receive_event_t *event, void *user);
 typedef int (*dab_receive_cancel_callback_t)(void *user);
 
+enum {
+    DAB_RECEIVE_ADC_HISTOGRAM_BIN_COUNT = 64u
+};
+
 typedef struct {
     uint64_t sequence;
     uint64_t timestamp_ns;
@@ -46,6 +50,40 @@ typedef struct {
 
     int adc_level_valid;
     float adc_level_dbfs;
+    float adc_peak_dbfs;
+    float adc_crest_factor_db;
+    uint32_t adc_window_sample_count;
+    uint32_t adc_clipped_sample_count;
+    float adc_clipping_percent;
+    float adc_i_dc;
+    float adc_q_dc;
+    int adc_iq_quality_valid;
+    float adc_iq_amplitude_imbalance_db;
+    float adc_iq_phase_imbalance_deg;
+    float adc_iq_correlation;
+    uint32_t adc_i_histogram[DAB_RECEIVE_ADC_HISTOGRAM_BIN_COUNT];
+    uint32_t adc_q_histogram[DAB_RECEIVE_ADC_HISTOGRAM_BIN_COUNT];
+    int calibrated_power_valid;
+    float calibrated_power_dbm;
+
+    int device_gain_valid;
+    int device_gain_db;
+    int lna_state_valid;
+    uint8_t lna_state;
+    int if_gain_reduction_valid;
+    int if_gain_reduction_db;
+    int agc_enabled;
+    int device_temperature_valid;
+    float device_temperature_c;
+    uint32_t input_queue_depth;
+    uint32_t input_queue_high_watermark;
+    uint32_t input_queue_capacity;
+    uint64_t input_block_interval_ns;
+    uint64_t processing_latency_ns;
+    uint32_t processing_late_count;
+    int hardware_overruns_valid;
+    uint32_t hardware_overruns;
+
     int prs_valid;
     float prs_score;
     int cn_valid;

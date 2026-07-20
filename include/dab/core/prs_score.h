@@ -31,6 +31,27 @@ typedef struct {
     uint32_t used_carriers;
 } dab_prs_snr_result_t;
 
+enum {
+    DAB_PRS_RF_INPUT_HISTOGRAM_BINS = 64u
+};
+
+typedef struct {
+    float rms_dbfs;
+    float peak_dbfs;
+    float crest_factor_db;
+    uint32_t sample_count;
+    uint32_t clipped_sample_count;
+    float clipping_percent;
+    float i_dc;
+    float q_dc;
+    int iq_quality_valid;
+    float amplitude_imbalance_db;
+    float phase_imbalance_deg;
+    float iq_correlation;
+    uint32_t i_histogram[DAB_PRS_RF_INPUT_HISTOGRAM_BINS];
+    uint32_t q_histogram[DAB_PRS_RF_INPUT_HISTOGRAM_BINS];
+} dab_prs_rf_input_metrics_t;
+
 typedef struct {
     dab_prs_score_config_t config;
 } dab_prs_score_t;
@@ -107,6 +128,10 @@ int dab_prs_estimate_rf_level_dbfs_i16(const dab_sdr_block_view_t *block,
                                        uint64_t start_sample,
                                        uint32_t count,
                                        float *level_dbfs_out);
+int dab_prs_measure_rf_input_i16(const dab_sdr_block_view_t *block,
+                                 uint64_t start_sample,
+                                 uint32_t count,
+                                 dab_prs_rf_input_metrics_t *metrics);
 int dab_prs_score_to_snr_db(float score, float *snr_db_out);
 
 #endif

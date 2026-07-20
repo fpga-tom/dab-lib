@@ -52,6 +52,7 @@ namespace winrt::DabMeasurementWinUI::implementation
         void SetReceiverControlsEnabled(bool enabled);
         void ApplySnapshot(dab_receive_snapshot_t const& snapshot);
         void ApplyRfSnapshot(dab_receive_snapshot_t const& snapshot);
+        void UpdateRfInputHistogram(dab_receive_snapshot_t const& snapshot);
         void AppendRfHistory(float power_dbfs, float cn_db);
         void UpdateRfHistoryVisuals();
         void UpdateRfContext();

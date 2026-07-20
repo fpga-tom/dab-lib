@@ -407,8 +407,18 @@ void test_prs_rf_level_dbfs_uses_complex_rms_and_removes_dc(void) {
         -15384, 500,
         1000, -15884
     };
+    const int16_t clipped_iq[] = {
+        INT16_MIN, 0,
+        INT16_MAX, 0,
+        0, INT16_MIN,
+        0, INT16_MAX
+    };
     dab_sdr_block_view_t block;
     float measured_dbfs = 0.0f;
+    dab_prs_rf_input_metrics_t metrics;
+    uint32_t histogram_total_i = 0u;
+    uint32_t histogram_total_q = 0u;
+    uint32_t bin;
 
     block.iq_interleaved = (int16_t *)iq;
     block.sample_count = 6u;
@@ -417,6 +427,32 @@ void test_prs_rf_level_dbfs_uses_complex_rms_and_removes_dc(void) {
 
     TEST_ASSERT(dab_prs_estimate_rf_level_dbfs_i16(&block, 102u, 4u, &measured_dbfs) == 0);
     TEST_ASSERT(fabsf(measured_dbfs - (-6.0205999f)) < 1.0e-4f);
+    TEST_ASSERT(dab_prs_measure_rf_input_i16(&block, 102u, 4u, &metrics) == 0);
+    TEST_ASSERT(fabsf(metrics.rms_dbfs - (-6.0205999f)) < 1.0e-4f);
+    TEST_ASSERT(fabsf(metrics.peak_dbfs - (-6.0205999f)) < 1.0e-4f);
+    TEST_ASSERT(fabsf(metrics.crest_factor_db) < 1.0e-4f);
+    TEST_ASSERT(metrics.sample_count == 4u);
+    TEST_ASSERT(metrics.clipped_sample_count == 0u);
+    TEST_ASSERT(fabsf(metrics.clipping_percent) < 1.0e-6f);
+    TEST_ASSERT(fabsf(metrics.i_dc - (1000.0f / 32768.0f)) < 1.0e-6f);
+    TEST_ASSERT(fabsf(metrics.q_dc - (500.0f / 32768.0f)) < 1.0e-6f);
+    TEST_ASSERT(metrics.iq_quality_valid == 1);
+    TEST_ASSERT(fabsf(metrics.amplitude_imbalance_db) < 1.0e-4f);
+    TEST_ASSERT(fabsf(metrics.phase_imbalance_deg) < 1.0e-4f);
+    TEST_ASSERT(fabsf(metrics.iq_correlation) < 1.0e-4f);
+    for (bin = 0u; bin < DAB_PRS_RF_INPUT_HISTOGRAM_BINS; ++bin) {
+        histogram_total_i += metrics.i_histogram[bin];
+        histogram_total_q += metrics.q_histogram[bin];
+    }
+    TEST_ASSERT(histogram_total_i == 4u);
+    TEST_ASSERT(histogram_total_q == 4u);
     TEST_ASSERT(dab_prs_estimate_rf_level_dbfs_i16(&block, 99u, 4u, &measured_dbfs) != 0);
     TEST_ASSERT(dab_prs_estimate_rf_level_dbfs_i16(&block, 104u, 4u, &measured_dbfs) != 0);
+
+    block.iq_interleaved = (int16_t *)clipped_iq;
+    block.sample_count = 4u;
+    block.sample_index = 0u;
+    TEST_ASSERT(dab_prs_measure_rf_input_i16(&block, 0u, 4u, &metrics) == 0);
+    TEST_ASSERT(metrics.clipped_sample_count == 4u);
+    TEST_ASSERT(fabsf(metrics.clipping_percent - 100.0f) < 1.0e-6f);
 }

@@ -84,3 +84,15 @@ void dab_sdr_stream_close(dab_sdr_stream_t *stream) {
         stream->vtbl->destroy(stream);
     }
 }
+
+dab_sdr_status_t dab_sdr_stream_get_diagnostics(dab_sdr_stream_t *stream,
+                                                 dab_sdr_stream_diagnostics_t *diagnostics) {
+    if (stream == NULL || stream->vtbl == NULL || diagnostics == NULL) {
+        return DAB_SDR_STATUS_INVALID_ARGUMENT;
+    }
+    memset(diagnostics, 0, sizeof(*diagnostics));
+    if (stream->vtbl->diagnostics == NULL) {
+        return DAB_SDR_STATUS_NOT_IMPLEMENTED;
+    }
+    return stream->vtbl->diagnostics(stream, diagnostics);
+}

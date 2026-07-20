@@ -20,6 +20,7 @@
 #include "dab/hal/sdr_device.h"
 #include "dab/hal/rtlsdr_device.h"
 #include "dab/hal/sdrplay_device.h"
+#include "dab/os/os_time.h"
 #if defined(DAB_RECEIVE_NO_MAIN)
 #include "dab/receive.h"
 #include "receive_audio_internal.h"
@@ -251,13 +252,19 @@ static int receive_emit_snapshot(const dab_receive_config_t *config,
                                  const dab_stream_config_t *stream_config,
                                  uint64_t blocks_received,
                                  const char *driver,
-                                 const dab_sdr_stream_t *stream,
+                                 dab_sdr_stream_t *stream,
                                  const dab_sync_t *sync,
                                  const dab_fic_state_t *fic,
                                  const dab_msc_state_t *msc,
+                                 const dab_prs_rf_input_metrics_t *rf_input,
+                                 const dab_sdrplay_config_t *sdrplay_config,
+                                 uint64_t input_block_interval_ns,
+                                 uint64_t processing_latency_ns,
+                                 uint32_t processing_late_count,
                                  int selected_sid_valid,
                                  uint32_t selected_sid) {
     dab_receive_snapshot_t snapshot;
+    dab_sdr_stream_diagnostics_t diagnostics = {0};
     dab_msc_dabplus_debug_t msc_audio = {0};
     const dab_msc_dabplus_debug_t *msc_audio_ptr = 0;
 
@@ -283,6 +290,44 @@ static int receive_emit_snapshot(const dab_receive_config_t *config,
                                fic,
                                msc,
                                msc_audio_ptr);
+    if (rf_input != 0 && rf_input->sample_count != 0u) {
+        snapshot.adc_peak_dbfs = rf_input->peak_dbfs;
+        snapshot.adc_crest_factor_db = rf_input->crest_factor_db;
+        snapshot.adc_window_sample_count = rf_input->sample_count;
+        snapshot.adc_clipped_sample_count = rf_input->clipped_sample_count;
+        snapshot.adc_clipping_percent = rf_input->clipping_percent;
+        snapshot.adc_i_dc = rf_input->i_dc;
+        snapshot.adc_q_dc = rf_input->q_dc;
+        snapshot.adc_iq_quality_valid = rf_input->iq_quality_valid;
+        snapshot.adc_iq_amplitude_imbalance_db = rf_input->amplitude_imbalance_db;
+        snapshot.adc_iq_phase_imbalance_deg = rf_input->phase_imbalance_deg;
+        snapshot.adc_iq_correlation = rf_input->iq_correlation;
+        memcpy(snapshot.adc_i_histogram,
+               rf_input->i_histogram,
+               sizeof(snapshot.adc_i_histogram));
+        memcpy(snapshot.adc_q_histogram,
+               rf_input->q_histogram,
+               sizeof(snapshot.adc_q_histogram));
+    }
+    snapshot.device_gain_valid = 1;
+    snapshot.device_gain_db = stream_config->gain_db;
+    snapshot.agc_enabled = config->agc_enabled != 0;
+    if (driver != 0 && strcmp(driver, "sdrplay") == 0 && sdrplay_config != 0) {
+        snapshot.lna_state_valid = 1;
+        snapshot.lna_state = sdrplay_config->lna_state;
+        snapshot.if_gain_reduction_valid = 1;
+        snapshot.if_gain_reduction_db = stream_config->gain_db;
+    }
+    if (dab_sdr_stream_get_diagnostics(stream, &diagnostics) ==
+        DAB_SDR_STATUS_OK) {
+        snapshot.input_queue_depth = diagnostics.queue_depth;
+        snapshot.input_queue_high_watermark = diagnostics.queue_high_watermark;
+        snapshot.input_queue_capacity = diagnostics.queue_capacity;
+        snapshot.dropped_blocks = diagnostics.dropped_blocks;
+    }
+    snapshot.input_block_interval_ns = input_block_interval_ns;
+    snapshot.processing_latency_ns = processing_latency_ns;
+    snapshot.processing_late_count = processing_late_count;
     return config->snapshot(&snapshot, config->snapshot_user);
 }
 
@@ -1065,6 +1110,13 @@ int dab_receiver_session_run(int argc, char **argv) {
     int8_t *frame_softbits = 0;
     uint64_t blocks_read = 0u;
     unsigned int dropped_blocks = 0u;
+    dab_prs_rf_input_metrics_t rf_input_metrics = {0};
+    uint64_t previous_input_block_timestamp_ns = 0u;
+    uint64_t input_block_interval_ns = 0u;
+#if defined(DAB_RECEIVE_NO_MAIN)
+    uint64_t processing_latency_ns = 0u;
+    uint32_t processing_late_count = 0u;
+#endif
     uint64_t last_predicted_fft_start = 0u;
     float ref_threshold = env_f32("DAB_SYNC_PROBE_REF_SCORE_THRESHOLD", 0.10f);
     float prs_fine_timing_limit = env_f32("DAB_SYNC_PROBE_PRS_FINE_TIMING_LIMIT", 32.0f);
@@ -1609,6 +1661,12 @@ int dab_receiver_session_run(int argc, char **argv) {
             goto cleanup;
         }
         blocks_read++;
+        if (previous_input_block_timestamp_ns != 0u &&
+            src_block.timestamp_ns >= previous_input_block_timestamp_ns) {
+            input_block_interval_ns = src_block.timestamp_ns -
+                                      previous_input_block_timestamp_ns;
+        }
+        previous_input_block_timestamp_ns = src_block.timestamp_ns;
         samples_since_audio += src_block.sample_count;
         if (ref_samples_fp != 0 &&
             append_ref_samples_file(ref_samples_fp,
@@ -1880,12 +1938,14 @@ int dab_receiver_session_run(int argc, char **argv) {
                         continue;
                     }
                     if (receiver_metrics_enabled) {
-                        if (dab_prs_estimate_rf_level_dbfs_i16(&hist_view,
-                                                              prs_fft_start_sample,
-                                                              acquire_config.fft_samples,
-                                                              &sync.state.rf_level_dbfs) == 0) {
+                        if (dab_prs_measure_rf_input_i16(&hist_view,
+                                                        prs_fft_start_sample,
+                                                        acquire_config.fft_samples,
+                                                        &rf_input_metrics) == 0) {
+                            sync.state.rf_level_dbfs = rf_input_metrics.rms_dbfs;
                             sync.state.rf_level_valid = 1;
                         } else {
+                            memset(&rf_input_metrics, 0, sizeof(rf_input_metrics));
                             sync.state.rf_level_dbfs = 0.0f;
                             sync.state.rf_level_valid = 0;
                         }
@@ -2506,6 +2566,18 @@ int dab_receiver_session_run(int argc, char **argv) {
             measurement_pending = 0u;
         }
         if (snapshot_pending != 0u) {
+            const uint64_t now_ns = dab_time_monotonic_ns();
+            const uint64_t late_threshold_ns = stream_config.sample_rate != 0u
+                ? (2000000000ull * (uint64_t)src_block.sample_count) /
+                  (uint64_t)stream_config.sample_rate
+                : 0u;
+            processing_latency_ns = src_block.timestamp_ns != 0u &&
+                                    now_ns >= src_block.timestamp_ns
+                ? now_ns - src_block.timestamp_ns
+                : 0u;
+            if (late_threshold_ns != 0u && processing_latency_ns > late_threshold_ns) {
+                processing_late_count++;
+            }
             if (receive_emit_snapshot(receive_config,
                                       &snapshot_sequence,
                                       &src_block,
@@ -2516,6 +2588,11 @@ int dab_receiver_session_run(int argc, char **argv) {
                                       &sync,
                                       &fic,
                                       &msc,
+                                      &rf_input_metrics,
+                                      &sdrplay_config,
+                                      input_block_interval_ns,
+                                      processing_latency_ns,
+                                      processing_late_count,
                                       selected_audio_sid_valid,
                                       selected_audio_sid) != 0) {
                 rc = -2;

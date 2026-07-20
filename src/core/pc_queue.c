@@ -10,6 +10,7 @@ int dab_pc_queue_init(dab_pc_queue_t *queue, void **storage, uint32_t capacity) 
     queue->head = 0u;
     queue->tail = 0u;
     queue->count = 0u;
+    queue->high_watermark = 0u;
     queue->stop = 0;
 
     if (dab_mutex_init(&queue->mutex) != 0) {
@@ -44,6 +45,9 @@ static int dab_pc_queue_push_locked(dab_pc_queue_t *queue, void *item) {
     queue->items[queue->tail] = item;
     queue->tail = (queue->tail + 1u) % queue->capacity;
     queue->count++;
+    if (queue->count > queue->high_watermark) {
+        queue->high_watermark = queue->count;
+    }
     dab_cond_signal(&queue->not_empty);
     return 0;
 }
@@ -114,5 +118,25 @@ void dab_pc_queue_stop(dab_pc_queue_t *queue) {
     queue->stop = 1;
     dab_cond_broadcast(&queue->not_empty);
     dab_cond_broadcast(&queue->not_full);
+    dab_mutex_unlock(&queue->mutex);
+}
+
+void dab_pc_queue_usage(dab_pc_queue_t *queue,
+                        uint32_t *count,
+                        uint32_t *high_watermark,
+                        uint32_t *capacity) {
+    if (queue == 0) {
+        return;
+    }
+    dab_mutex_lock(&queue->mutex);
+    if (count != 0) {
+        *count = queue->count;
+    }
+    if (high_watermark != 0) {
+        *high_watermark = queue->high_watermark;
+    }
+    if (capacity != 0) {
+        *capacity = queue->capacity;
+    }
     dab_mutex_unlock(&queue->mutex);
 }
