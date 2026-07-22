@@ -33,6 +33,24 @@ namespace dab::measurement
         uint32_t negative_carrier_count{ 0 };
         float carrier_spacing_hz{ 0.0f };
         std::array<float, DAB_RECEIVE_CARRIER_MER_COUNT> carrier_mer_db{};
+        uint32_t null_scope_sample_count{ 0 };
+        int32_t null_scope_start_offset_samples{ 0 };
+        uint32_t null_scope_start_index{ 0 };
+        uint32_t null_scope_end_index{ 0 };
+        uint32_t null_scope_duration_samples{ 0 };
+        float null_scope_sample_period_ns{ 0.0f };
+        float null_scope_threshold_dbfs{ 0.0f };
+        float null_scope_depth_db{ 0.0f };
+        float null_scope_confidence{ 0.0f };
+        float null_scope_energy_dbfs{ 0.0f };
+        std::array<int16_t, 2u * DAB_RECEIVE_NULL_SCOPE_SAMPLE_CAPACITY>
+            null_scope_iq_interleaved{};
+        std::array<float, DAB_RECEIVE_NULL_SCOPE_SAMPLE_CAPACITY> null_scope_power_dbfs{};
+        uint32_t null_scope_frame_bin_count{ 0 };
+        float null_scope_frame_bin_samples{ 0.0f };
+        uint32_t null_scope_frame_sample_count{ 0 };
+        std::array<float, DAB_RECEIVE_NULL_SCOPE_FRAME_BIN_COUNT>
+            null_scope_frame_power_dbfs{};
     };
 
     class MeasurementMailbox

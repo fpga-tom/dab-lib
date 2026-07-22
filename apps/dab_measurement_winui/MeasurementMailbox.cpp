@@ -82,6 +82,39 @@ namespace dab::measurement
                             m_latest.carrier_mer_count,
                             m_latest.carrier_mer_db.begin());
             }
+            m_latest.null_scope_sample_count = (std::min)(
+                source.null_scope_sample_count,
+                static_cast<uint32_t>(DAB_RECEIVE_NULL_SCOPE_SAMPLE_CAPACITY));
+            m_latest.null_scope_start_offset_samples = source.null_scope_start_offset_samples;
+            m_latest.null_scope_start_index = source.null_scope_start_index;
+            m_latest.null_scope_end_index = source.null_scope_end_index;
+            m_latest.null_scope_duration_samples = source.null_scope_duration_samples;
+            m_latest.null_scope_sample_period_ns = source.null_scope_sample_period_ns;
+            m_latest.null_scope_threshold_dbfs = source.null_scope_threshold_dbfs;
+            m_latest.null_scope_depth_db = source.null_scope_depth_db;
+            m_latest.null_scope_confidence = source.null_scope_confidence;
+            m_latest.null_scope_energy_dbfs = source.null_scope_energy_dbfs;
+            if (source.null_scope_iq_interleaved != nullptr &&
+                source.null_scope_power_dbfs != nullptr)
+            {
+                std::copy_n(source.null_scope_iq_interleaved,
+                            2u * m_latest.null_scope_sample_count,
+                            m_latest.null_scope_iq_interleaved.begin());
+                std::copy_n(source.null_scope_power_dbfs,
+                            m_latest.null_scope_sample_count,
+                            m_latest.null_scope_power_dbfs.begin());
+            }
+            m_latest.null_scope_frame_bin_count = (std::min)(
+                source.null_scope_frame_bin_count,
+                static_cast<uint32_t>(DAB_RECEIVE_NULL_SCOPE_FRAME_BIN_COUNT));
+            m_latest.null_scope_frame_bin_samples = source.null_scope_frame_bin_samples;
+            m_latest.null_scope_frame_sample_count = source.null_scope_frame_sample_count;
+            if (source.null_scope_frame_power_dbfs != nullptr)
+            {
+                std::copy_n(source.null_scope_frame_power_dbfs,
+                            m_latest.null_scope_frame_bin_count,
+                            m_latest.null_scope_frame_power_dbfs.begin());
+            }
             ++m_version;
             m_valid = true;
         }

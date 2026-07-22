@@ -362,6 +362,182 @@ static float receive_power_db(float power, float reference_power) {
     return 10.0f * log10f(ratio);
 }
 
+static int receive_iq_mean_power(const dab_sdr_block_view_t *samples,
+                                 uint64_t start_sample,
+                                 uint32_t count,
+                                 double *power_out) {
+    uint64_t offset;
+    double power = 0.0;
+    uint32_t index;
+
+    if (samples == 0 || samples->iq_interleaved == 0 || power_out == 0 || count == 0u ||
+        start_sample < samples->sample_index) {
+        return -1;
+    }
+    offset = start_sample - samples->sample_index;
+    if (offset > samples->sample_count || count > samples->sample_count - offset) {
+        return -1;
+    }
+    for (index = 0u; index < count; ++index) {
+        const double i = samples->iq_interleaved[2u * (offset + index)];
+        const double q = samples->iq_interleaved[(2u * (offset + index)) + 1u];
+        power += (i * i) + (q * q);
+    }
+    *power_out = power / (double)count;
+    return 0;
+}
+
+static float receive_iq_power_dbfs(double power) {
+    const double reference = 32768.0 * 32768.0;
+    return power > reference * 1.0e-12
+        ? (float)(10.0 * log10(power / reference))
+        : -120.0f;
+}
+
+int dab_receive_measurement_capture_null(dab_receive_measurement_state_t *state,
+                                         const dab_sdr_block_view_t *samples,
+                                         uint64_t prs_fft_start_sample,
+                                         uint32_t sample_rate_hz,
+                                         uint32_t null_samples,
+                                         uint32_t guard_samples,
+                                         uint32_t frame_samples) {
+    const uint32_t focus_pre_samples = 6144u;
+    const uint32_t edge_search_samples = 512u;
+    const uint32_t edge_window_samples = 32u;
+    const uint32_t level_window_samples = 512u;
+    uint64_t expected_end;
+    uint64_t expected_start;
+    uint64_t focus_start;
+    uint64_t focus_end;
+    uint64_t detected_start;
+    uint64_t detected_end;
+    double before_power;
+    double after_power;
+    double signal_power;
+    double null_power;
+    double threshold_power;
+    uint32_t index;
+
+    if (state == 0 || !state->collecting || samples == 0 || samples->iq_interleaved == 0 ||
+        sample_rate_hz == 0u || null_samples < 256u || guard_samples == 0u ||
+        prs_fft_start_sample < (uint64_t)guard_samples + null_samples) {
+        return -1;
+    }
+
+    expected_end = prs_fft_start_sample - guard_samples;
+    expected_start = expected_end - null_samples;
+    if (expected_start < focus_pre_samples) {
+        return -1;
+    }
+    focus_start = expected_start - focus_pre_samples;
+    focus_end = focus_start + DAB_RECEIVE_NULL_SCOPE_SAMPLE_CAPACITY;
+    if (focus_end < focus_start || focus_start < samples->sample_index ||
+        focus_end > samples->sample_index + samples->sample_count) {
+        return -1;
+    }
+
+    state->null_scope_sample_count = DAB_RECEIVE_NULL_SCOPE_SAMPLE_CAPACITY;
+    state->null_scope_sample_period_ns = 1000000000.0f / (float)sample_rate_hz;
+    for (index = 0u; index < DAB_RECEIVE_NULL_SCOPE_SAMPLE_CAPACITY; ++index) {
+        const uint64_t source = focus_start - samples->sample_index + index;
+        const int16_t i = samples->iq_interleaved[2u * source];
+        const int16_t q = samples->iq_interleaved[(2u * source) + 1u];
+        const double power = ((double)i * i) + ((double)q * q);
+        state->null_scope_iq_interleaved[2u * index] = i;
+        state->null_scope_iq_interleaved[(2u * index) + 1u] = q;
+        state->null_scope_power_dbfs[index] = receive_iq_power_dbfs(power);
+    }
+
+    if (receive_iq_mean_power(samples,
+                              expected_start - level_window_samples,
+                              level_window_samples,
+                              &before_power) != 0 ||
+        receive_iq_mean_power(samples,
+                              expected_end + 64u,
+                              level_window_samples,
+                              &after_power) != 0 ||
+        receive_iq_mean_power(samples,
+                              expected_start + 128u,
+                              null_samples - 256u,
+                              &null_power) != 0) {
+        state->null_scope_sample_count = 0u;
+        return -1;
+    }
+    signal_power = before_power > after_power ? before_power : after_power;
+    if (signal_power <= 0.0 || null_power <= 0.0) {
+        state->null_scope_sample_count = 0u;
+        return -1;
+    }
+    threshold_power = sqrt(signal_power * null_power);
+    detected_start = expected_start;
+    detected_end = expected_end;
+    for (index = 0u; index <= 2u * edge_search_samples; ++index) {
+        const uint64_t probe = expected_start - edge_search_samples + index;
+        double window_power;
+        if (receive_iq_mean_power(samples, probe, edge_window_samples, &window_power) == 0 &&
+            window_power <= threshold_power) {
+            detected_start = probe;
+            break;
+        }
+    }
+    for (index = 0u; index <= 2u * edge_search_samples; ++index) {
+        const uint64_t probe = expected_end - edge_search_samples + index;
+        double window_power;
+        if (receive_iq_mean_power(samples, probe, edge_window_samples, &window_power) == 0 &&
+            window_power >= threshold_power) {
+            detected_end = probe;
+            break;
+        }
+    }
+    if (detected_end <= detected_start) {
+        detected_start = expected_start;
+        detected_end = expected_end;
+    }
+
+    state->null_scope_start_offset_samples = (int32_t)((int64_t)focus_start -
+                                                        (int64_t)detected_start);
+    state->null_scope_start_index = (uint32_t)(detected_start - focus_start);
+    state->null_scope_end_index = (uint32_t)(detected_end - focus_start);
+    state->null_scope_duration_samples = (uint32_t)(detected_end - detected_start);
+    state->null_scope_threshold_dbfs = receive_iq_power_dbfs(threshold_power);
+    state->null_scope_depth_db = (float)(10.0 * log10(signal_power / null_power));
+    state->null_scope_confidence = (float)(1.0 - (null_power / signal_power));
+    if (state->null_scope_confidence < 0.0f) {
+        state->null_scope_confidence = 0.0f;
+    } else if (state->null_scope_confidence > 1.0f) {
+        state->null_scope_confidence = 1.0f;
+    }
+    state->null_scope_energy_dbfs = receive_iq_power_dbfs(null_power);
+
+    state->null_scope_frame_bin_count = 0u;
+    state->null_scope_frame_sample_count = 0u;
+    if (frame_samples != 0u &&
+        expected_start >= samples->sample_index &&
+        expected_start + frame_samples <= samples->sample_index + samples->sample_count) {
+        for (index = 0u; index < DAB_RECEIVE_NULL_SCOPE_FRAME_BIN_COUNT; ++index) {
+            const uint32_t begin = (uint32_t)(((uint64_t)index * frame_samples) /
+                                              DAB_RECEIVE_NULL_SCOPE_FRAME_BIN_COUNT);
+            const uint32_t end = (uint32_t)(((uint64_t)(index + 1u) * frame_samples) /
+                                            DAB_RECEIVE_NULL_SCOPE_FRAME_BIN_COUNT);
+            double bin_power;
+            if (receive_iq_mean_power(samples,
+                                      expected_start + begin,
+                                      end > begin ? end - begin : 1u,
+                                      &bin_power) != 0) {
+                break;
+            }
+            state->null_scope_frame_power_dbfs[index] = receive_iq_power_dbfs(bin_power);
+        }
+        if (index == DAB_RECEIVE_NULL_SCOPE_FRAME_BIN_COUNT) {
+            state->null_scope_frame_bin_count = DAB_RECEIVE_NULL_SCOPE_FRAME_BIN_COUNT;
+            state->null_scope_frame_sample_count = frame_samples;
+            state->null_scope_frame_bin_samples = (float)frame_samples /
+                                                  DAB_RECEIVE_NULL_SCOPE_FRAME_BIN_COUNT;
+        }
+    }
+    return 0;
+}
+
 int dab_receive_measurement_begin(dab_receive_measurement_state_t *state,
                                   uint32_t decimation,
                                   const dab_prs_fft_t *fft,
@@ -392,6 +568,9 @@ int dab_receive_measurement_begin(dab_receive_measurement_state_t *state,
     if (!state->collecting) {
         return 0;
     }
+    state->null_scope_sample_count = 0u;
+    state->null_scope_frame_bin_count = 0u;
+    state->null_scope_frame_sample_count = 0u;
     memset(state->channel_magnitude_db, 0, sizeof(state->channel_magnitude_db));
     memset(state->channel_phase_deg, 0, sizeof(state->channel_phase_deg));
 
@@ -604,6 +783,22 @@ int dab_receive_measurement_finish(dab_receive_measurement_state_t *state,
     frame->negative_carrier_count = 768u;
     frame->carrier_spacing_hz = (float)sample_rate_hz /
                                 (float)DAB_RECEIVE_SPECTRUM_BIN_COUNT;
+    frame->null_scope_iq_interleaved = state->null_scope_iq_interleaved;
+    frame->null_scope_power_dbfs = state->null_scope_power_dbfs;
+    frame->null_scope_sample_count = state->null_scope_sample_count;
+    frame->null_scope_start_offset_samples = state->null_scope_start_offset_samples;
+    frame->null_scope_start_index = state->null_scope_start_index;
+    frame->null_scope_end_index = state->null_scope_end_index;
+    frame->null_scope_duration_samples = state->null_scope_duration_samples;
+    frame->null_scope_sample_period_ns = state->null_scope_sample_period_ns;
+    frame->null_scope_threshold_dbfs = state->null_scope_threshold_dbfs;
+    frame->null_scope_depth_db = state->null_scope_depth_db;
+    frame->null_scope_confidence = state->null_scope_confidence;
+    frame->null_scope_energy_dbfs = state->null_scope_energy_dbfs;
+    frame->null_scope_frame_power_dbfs = state->null_scope_frame_power_dbfs;
+    frame->null_scope_frame_bin_count = state->null_scope_frame_bin_count;
+    frame->null_scope_frame_bin_samples = state->null_scope_frame_bin_samples;
+    frame->null_scope_frame_sample_count = state->null_scope_frame_sample_count;
     state->collecting = 0;
     return 0;
 }

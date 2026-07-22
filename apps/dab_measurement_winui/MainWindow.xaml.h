@@ -42,6 +42,16 @@ namespace winrt::DabMeasurementWinUI::implementation
         void RfSpectrumTuneToCursor_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void RfSpectrumResetView_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void RfChannelCirCanvas_PointerPressed(IInspectable const&, Microsoft::UI::Xaml::Input::PointerRoutedEventArgs const&);
+        void RfNullScope_Loaded(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void RfNullControls_SelectionChanged(IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
+        void RfNullNumber_ValueChanged(IInspectable const&, Microsoft::UI::Xaml::Controls::NumberBoxValueChangedEventArgs const&);
+        void RfNullRun_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void RfNullSingle_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void RfNullFreeze_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void RfNullPersistence_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void RfNullCursors_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void RfNullScopeCanvas_PointerPressed(IInspectable const&, Microsoft::UI::Xaml::Input::PointerRoutedEventArgs const&);
+        winrt::fire_and_forget RfNullCaptureIq_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void RfHistory_Loaded(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void RfHistoryPeriod_SelectionChanged(IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
         void RfHistoryControls_Changed(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -115,6 +125,11 @@ namespace winrt::DabMeasurementWinUI::implementation
         double RfSpectrumFrequencyFromX(double x) const noexcept;
         double RfSpectrumXFromFrequency(double frequency_hz) const noexcept;
         float RfSpectrumPowerAtFrequency(double frequency_hz) const noexcept;
+        void UpdateRfNullScope(dab::measurement::MeasurementFrame const& frame);
+        void RenderRfNullScope();
+        void UpdateRfNullScopeReadouts();
+        void ResetRfNullScope();
+        float RfNullPowerAtTime(double time_ms, bool average) const noexcept;
         void AddTimelineEvent(winrt::hstring const& message);
 
         Microsoft::UI::Xaml::DispatcherTimer m_timer;
@@ -239,6 +254,48 @@ namespace winrt::DabMeasurementWinUI::implementation
         bool m_rf_spectrum_frozen{ false };
         bool m_rf_spectrum_pointer_pressed{ false };
         bool m_rf_spectrum_pointer_moved{ false };
+        static constexpr size_t rf_null_history_capacity = 32u;
+        std::array<std::array<float, DAB_RECEIVE_NULL_SCOPE_SAMPLE_CAPACITY>,
+                   rf_null_history_capacity> m_rf_null_focus_history{};
+        std::array<std::array<float, DAB_RECEIVE_NULL_SCOPE_FRAME_BIN_COUNT>,
+                   rf_null_history_capacity> m_rf_null_frame_history{};
+        std::array<int32_t, rf_null_history_capacity> m_rf_null_timing_history{};
+        std::array<uint64_t, rf_null_history_capacity> m_rf_null_frame_start_history{};
+        std::array<int16_t, 2u * DAB_RECEIVE_NULL_SCOPE_SAMPLE_CAPACITY>
+            m_rf_null_latest_iq{};
+        size_t m_rf_null_history_write{ 0u };
+        size_t m_rf_null_history_count{ 0u };
+        uint32_t m_rf_null_focus_count{ 0u };
+        uint32_t m_rf_null_frame_bin_count{ 0u };
+        uint32_t m_rf_null_frame_sample_count{ 0u };
+        uint32_t m_rf_null_duration_samples{ 0u };
+        uint32_t m_rf_null_start_index{ 0u };
+        uint32_t m_rf_null_end_index{ 0u };
+        int32_t m_rf_null_start_offset_samples{ 0 };
+        float m_rf_null_sample_period_ns{ 0.0f };
+        float m_rf_null_frame_bin_samples{ 0.0f };
+        float m_rf_null_threshold_dbfs{ -40.0f };
+        float m_rf_null_depth_db{ 0.0f };
+        float m_rf_null_confidence{ 0.0f };
+        float m_rf_null_energy_dbfs{ -120.0f };
+        uint64_t m_rf_null_sequence{ 0u };
+        uint64_t m_rf_null_frequency_hz{ 0u };
+        uint32_t m_rf_null_sample_rate_hz{ 0u };
+        uint64_t m_rf_null_last_accept_timestamp_ns{ 0u };
+        double m_rf_null_time_div_us{ 500.0 };
+        double m_rf_null_vertical_db_div{ 10.0 };
+        double m_rf_null_trigger_position_percent{ 20.0 };
+        double m_rf_null_holdoff_ms{ 90.0 };
+        std::array<double, 2> m_rf_null_cursor_ms{ 0.0, 1.296875 };
+        uint32_t m_rf_null_average_factor{ 16u };
+        uint32_t m_rf_null_active_cursor{ 0u };
+        bool m_rf_null_controls_ready{ false };
+        bool m_rf_null_frozen{ false };
+        bool m_rf_null_single_armed{ false };
+        bool m_rf_null_persistence_enabled{ true };
+        bool m_rf_null_cursors_enabled{ true };
+        bool m_rf_null_filtered_source{ true };
+        bool m_rf_null_locked{ false };
     };
 }
 

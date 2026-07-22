@@ -146,7 +146,9 @@ enum {
     DAB_RECEIVE_CONSTELLATION_POINT_CAPACITY = 512u,
     DAB_RECEIVE_CIR_BIN_COUNT = 512u,
     DAB_RECEIVE_CHANNEL_RESPONSE_COUNT = 1536u,
-    DAB_RECEIVE_CARRIER_MER_COUNT = 1536u
+    DAB_RECEIVE_CARRIER_MER_COUNT = 1536u,
+    DAB_RECEIVE_NULL_SCOPE_SAMPLE_CAPACITY = 32768u,
+    DAB_RECEIVE_NULL_SCOPE_FRAME_BIN_COUNT = 2048u
 };
 
 /*
@@ -164,6 +166,10 @@ enum {
  * degrees. Entries use the same physical-carrier mapping as carrier MER.
  * Carrier MER entries 0..767 map to carriers -768..-1 and entries 768..1535
  * map to carriers +1..+768.
+ * Null-scope power is calculated directly from receiver IQ as
+ * 10*log10((I^2+Q^2)/32768^2).  The focused IQ/power arrays retain one entry
+ * per input sample around the aligned Mode-I null.  The frame array contains
+ * mean linear power reduced to fixed bins across the complete 96 ms frame.
  */
 typedef struct {
     uint64_t sequence;
@@ -194,6 +200,24 @@ typedef struct {
     int32_t first_carrier;
     uint32_t negative_carrier_count;
     float carrier_spacing_hz;
+
+    const int16_t *null_scope_iq_interleaved;
+    const float *null_scope_power_dbfs;
+    uint32_t null_scope_sample_count;
+    int32_t null_scope_start_offset_samples;
+    uint32_t null_scope_start_index;
+    uint32_t null_scope_end_index;
+    uint32_t null_scope_duration_samples;
+    float null_scope_sample_period_ns;
+    float null_scope_threshold_dbfs;
+    float null_scope_depth_db;
+    float null_scope_confidence;
+    float null_scope_energy_dbfs;
+
+    const float *null_scope_frame_power_dbfs;
+    uint32_t null_scope_frame_bin_count;
+    float null_scope_frame_bin_samples;
+    uint32_t null_scope_frame_sample_count;
 } dab_receive_measurement_frame_t;
 
 typedef int (*dab_receive_measurement_callback_t)(

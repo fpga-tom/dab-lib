@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "MainWindow.xaml.h"
 
+#include <cstring>
 #include <limits>
 
 #if __has_include("MainWindow.g.cpp")
@@ -390,6 +391,10 @@ namespace winrt::DabMeasurementWinUI::implementation
         {
             RfOverviewContent().Width((std::max)(480.0, workspace_width - 36.0));
         }
+        if (RfNullScopeContent())
+        {
+            RfNullScopeContent().Width((std::max)(480.0, workspace_width - 36.0));
+        }
     }
 
     void MainWindow::RfWorkspace_SizeChanged(IInspectable const&, SizeChangedEventArgs const& args)
@@ -397,6 +402,10 @@ namespace winrt::DabMeasurementWinUI::implementation
         if (RfOverviewContent() && args.NewSize().Width > 48.0f)
         {
             RfOverviewContent().Width(static_cast<double>(args.NewSize().Width) - 36.0);
+        }
+        if (RfNullScopeContent() && args.NewSize().Width > 48.0f)
+        {
+            RfNullScopeContent().Width(static_cast<double>(args.NewSize().Width) - 36.0);
         }
     }
 
@@ -813,6 +822,252 @@ namespace winrt::DabMeasurementWinUI::implementation
         }
     }
 
+    void MainWindow::RfNullScope_Loaded(IInspectable const&, RoutedEventArgs const&)
+    {
+        m_rf_null_controls_ready = true;
+        RenderRfNullScope();
+        UpdateRfNullScopeReadouts();
+    }
+
+    void MainWindow::RfNullControls_SelectionChanged(IInspectable const&,
+                                                      SelectionChangedEventArgs const&)
+    {
+        if (!m_rf_null_controls_ready)
+        {
+            return;
+        }
+        auto read_tag = [](ComboBox const& box, double fallback)
+        {
+            auto const item = box.SelectedItem().try_as<ComboBoxItem>();
+            if (!item || !item.Tag())
+            {
+                return fallback;
+            }
+            std::wstring const text{ unbox_value<hstring>(item.Tag()).c_str() };
+            wchar_t* end = nullptr;
+            double const value = std::wcstod(text.c_str(), &end);
+            return end != text.c_str() && std::isfinite(value) ? value : fallback;
+        };
+        m_rf_null_time_div_us = read_tag(RfNullTimebaseComboBox(), 500.0);
+        m_rf_null_vertical_db_div = read_tag(RfNullVerticalComboBox(), 10.0);
+        m_rf_null_average_factor = static_cast<uint32_t>(std::clamp(
+            read_tag(RfNullAverageComboBox(), 16.0),
+            1.0,
+            32.0));
+        m_rf_null_filtered_source = RfNullSourceComboBox().SelectedIndex() == 0;
+        RenderRfNullScope();
+        UpdateRfNullScopeReadouts();
+    }
+
+    void MainWindow::RfNullNumber_ValueChanged(IInspectable const&,
+                                                NumberBoxValueChangedEventArgs const&)
+    {
+        if (!m_rf_null_controls_ready)
+        {
+            return;
+        }
+        double position = RfNullPositionNumberBox().Value();
+        double holdoff = RfNullHoldoffNumberBox().Value();
+        m_rf_null_trigger_position_percent = std::isfinite(position)
+            ? std::clamp(position, 0.0, 80.0)
+            : 20.0;
+        m_rf_null_holdoff_ms = std::isfinite(holdoff)
+            ? std::clamp(holdoff, 0.0, 1000.0)
+            : 90.0;
+        RenderRfNullScope();
+        UpdateRfNullScopeReadouts();
+    }
+
+    void MainWindow::RfNullRun_Click(IInspectable const&, RoutedEventArgs const&)
+    {
+        m_rf_null_frozen = false;
+        m_rf_null_single_armed = false;
+        RfNullFreezeButton().IsChecked(false);
+        RfNullControlStatusText().Text(L"Live acquisition");
+        RfNullLiveText().Text(L"LIVE");
+    }
+
+    void MainWindow::RfNullSingle_Click(IInspectable const&, RoutedEventArgs const&)
+    {
+        m_rf_null_single_armed = true;
+        m_rf_null_frozen = false;
+        RfNullFreezeButton().IsChecked(false);
+        RfNullControlStatusText().Text(L"Single capture armed");
+        RfNullLiveText().Text(L"ARMED");
+    }
+
+    void MainWindow::RfNullFreeze_Click(IInspectable const&, RoutedEventArgs const&)
+    {
+        auto const checked = RfNullFreezeButton().IsChecked();
+        m_rf_null_frozen = checked && checked.Value();
+        m_rf_null_single_armed = false;
+        RfNullControlStatusText().Text(m_rf_null_frozen ? L"Display frozen" : L"Live acquisition");
+        RfNullLiveText().Text(m_rf_null_frozen ? L"FROZEN" : L"LIVE");
+    }
+
+    void MainWindow::RfNullPersistence_Click(IInspectable const&, RoutedEventArgs const&)
+    {
+        auto const checked = RfNullPersistenceButton().IsChecked();
+        m_rf_null_persistence_enabled = checked && checked.Value();
+        RenderRfNullScope();
+    }
+
+    void MainWindow::RfNullCursors_Click(IInspectable const&, RoutedEventArgs const&)
+    {
+        auto const checked = RfNullCursorsButton().IsChecked();
+        m_rf_null_cursors_enabled = checked && checked.Value();
+        RenderRfNullScope();
+        UpdateRfNullScopeReadouts();
+    }
+
+    void MainWindow::RfNullScopeCanvas_PointerPressed(IInspectable const&,
+                                                       PointerRoutedEventArgs const& args)
+    {
+        if (!m_rf_null_cursors_enabled || m_rf_null_focus_count == 0u)
+        {
+            return;
+        }
+        Point const position = args.GetCurrentPoint(RfNullScopeCanvas()).Position();
+        constexpr double plot_left = 65.0;
+        constexpr double plot_width = 905.0;
+        if (position.X < plot_left || position.X > plot_left + plot_width)
+        {
+            return;
+        }
+        double span_ms;
+        double start_ms;
+        if (m_rf_null_time_div_us == 0.0)
+        {
+            span_ms = m_rf_null_sample_rate_hz != 0u
+                ? 1000.0 * static_cast<double>(m_rf_null_frame_sample_count) /
+                    static_cast<double>(m_rf_null_sample_rate_hz)
+                : 96.0;
+            start_ms = 0.0;
+        }
+        else
+        {
+            span_ms = 7.0 * m_rf_null_time_div_us / 1000.0;
+            start_ms = m_rf_null_time_div_us >= 10000.0
+                ? 0.0
+                : -span_ms * m_rf_null_trigger_position_percent / 100.0;
+        }
+        m_rf_null_cursor_ms[m_rf_null_active_cursor] = start_ms +
+            span_ms * (position.X - plot_left) / plot_width;
+        m_rf_null_active_cursor = (m_rf_null_active_cursor + 1u) % 2u;
+        RenderRfNullScope();
+        UpdateRfNullScopeReadouts();
+        args.Handled(true);
+    }
+
+    winrt::fire_and_forget MainWindow::RfNullCaptureIq_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        auto lifetime = get_strong();
+        if (m_rf_null_focus_count == 0u)
+        {
+            RfNullCaptureStatusText().Text(L"No triggered IQ capture available");
+            co_return;
+        }
+        try
+        {
+            struct CaptureHeader
+            {
+                char magic[8];
+                uint32_t version;
+                uint32_t sample_rate_hz;
+                uint64_t center_frequency_hz;
+                uint64_t frame_sequence;
+                int32_t start_offset_samples;
+                uint32_t sample_count;
+            };
+            CaptureHeader header{
+                { 'D', 'A', 'B', 'N', 'I', 'Q', '1', '\0' },
+                1u,
+                m_rf_null_sample_rate_hz,
+                m_rf_null_frequency_hz,
+                m_rf_null_sequence,
+                m_rf_null_start_offset_samples,
+                m_rf_null_focus_count
+            };
+            size_t const iq_bytes = 2u * static_cast<size_t>(m_rf_null_focus_count) *
+                                    sizeof(m_rf_null_latest_iq[0]);
+            std::vector<uint8_t> bytes(sizeof(header) + iq_bytes);
+            std::memcpy(bytes.data(), &header, sizeof(header));
+            std::memcpy(bytes.data() + sizeof(header), m_rf_null_latest_iq.data(), iq_bytes);
+
+            SYSTEMTIME now{};
+            GetLocalTime(&now);
+            wchar_t filename[96]{};
+            swprintf_s(filename,
+                       L"DAB_NullScope_%04u%02u%02u_%02u%02u%02u_%03u.ci16",
+                       now.wYear,
+                       now.wMonth,
+                       now.wDay,
+                       now.wHour,
+                       now.wMinute,
+                       now.wSecond,
+                       now.wMilliseconds);
+
+            wchar_t local_app_data[MAX_PATH]{};
+            DWORD const local_length = GetEnvironmentVariableW(
+                L"LOCALAPPDATA",
+                local_app_data,
+                static_cast<DWORD>(std::size(local_app_data)));
+            if (local_length == 0u || local_length >= std::size(local_app_data))
+            {
+                throw_hresult(HRESULT_FROM_WIN32(GetLastError()));
+            }
+            std::wstring root{ local_app_data };
+            root += L"\\DabMeasurementWinUI";
+            if (!CreateDirectoryW(root.c_str(), nullptr) &&
+                GetLastError() != ERROR_ALREADY_EXISTS)
+            {
+                throw_hresult(HRESULT_FROM_WIN32(GetLastError()));
+            }
+            std::wstring capture_folder = root + L"\\Captures";
+            if (!CreateDirectoryW(capture_folder.c_str(), nullptr) &&
+                GetLastError() != ERROR_ALREADY_EXISTS)
+            {
+                throw_hresult(HRESULT_FROM_WIN32(GetLastError()));
+            }
+            std::wstring const path = capture_folder + L"\\" + filename;
+            HANDLE file = CreateFileW(path.c_str(),
+                                      GENERIC_WRITE,
+                                      FILE_SHARE_READ,
+                                      nullptr,
+                                      CREATE_NEW,
+                                      FILE_ATTRIBUTE_NORMAL,
+                                      nullptr);
+            if (file == INVALID_HANDLE_VALUE)
+            {
+                throw_hresult(HRESULT_FROM_WIN32(GetLastError()));
+            }
+            DWORD written = 0u;
+            BOOL const write_ok = WriteFile(file,
+                                            bytes.data(),
+                                            static_cast<DWORD>(bytes.size()),
+                                            &written,
+                                            nullptr);
+            DWORD const write_error = write_ok && written == bytes.size()
+                ? ERROR_SUCCESS
+                : (write_ok ? ERROR_WRITE_FAULT : GetLastError());
+            CloseHandle(file);
+            if (write_error != ERROR_SUCCESS)
+            {
+                throw_hresult(HRESULT_FROM_WIN32(write_error));
+            }
+            RfNullCaptureStatusText().Text(L"Saved " + hstring{ filename });
+            AddTimelineEvent(L"Triggered null IQ capture saved to " + hstring{ path });
+        }
+        catch (hresult_error const& error)
+        {
+            RfNullCaptureStatusText().Text(L"IQ capture failed");
+            AddTimelineEvent(L"Null IQ capture failed: " + error.message());
+        }
+        co_return;
+    }
+
     void MainWindow::AudioButton_Click(IInspectable const&, RoutedEventArgs const&)
     {
         AddTimelineEvent(L"Audio playback is enabled and follows the selected DAB+ service");
@@ -980,6 +1235,7 @@ namespace winrt::DabMeasurementWinUI::implementation
         }
         ResetRfSyncDiagnostics();
         ResetRfChannelDiagnostics();
+        ResetRfNullScope();
         m_active_service_id = settings.service_id;
         SetReceiverControlsEnabled(false);
         StartButton().IsEnabled(true);
@@ -1080,6 +1336,10 @@ namespace winrt::DabMeasurementWinUI::implementation
         {
         case ReceiverState::starting:
             m_metrics_stale = false;
+            if (m_rf_null_controls_ready)
+            {
+                RfNullLiveText().Text(L"STARTING");
+            }
             RfLiveBadgeText().Text(L"STARTING");
             SetReceiverControlsEnabled(false);
             StartButton().IsEnabled(true);
@@ -1101,6 +1361,11 @@ namespace winrt::DabMeasurementWinUI::implementation
             break;
         case ReceiverState::recovering:
             m_metrics_stale = true;
+            if (m_rf_null_controls_ready)
+            {
+                RfNullLiveText().Text(L"STALE");
+                RfNullControlStatusText().Text(L"Receiver recovering; last trace is stale");
+            }
             RfLiveBadgeText().Text(L"STALE - RECOVERING");
             RfStatusValueText().Text(L"STALE");
             RfStatusDetailText().Text(status_text(status.message));
@@ -1122,6 +1387,10 @@ namespace winrt::DabMeasurementWinUI::implementation
                 box_value(hstring{ L"WarningBrush" })).as<Brush>());
             break;
         case ReceiverState::stopping:
+            if (m_rf_null_controls_ready)
+            {
+                RfNullLiveText().Text(L"STOPPING");
+            }
             RfLiveBadgeText().Text(L"STOPPING");
             SetReceiverControlsEnabled(false);
             StartButton().IsEnabled(false);
@@ -1132,6 +1401,11 @@ namespace winrt::DabMeasurementWinUI::implementation
             break;
         case ReceiverState::stopped:
             m_metrics_stale = false;
+            if (m_rf_null_controls_ready)
+            {
+                RfNullLiveText().Text(L"IDLE");
+                RfNullControlStatusText().Text(L"Receiver stopped; last trace retained");
+            }
             m_active_service_id = 0u;
             RfLiveBadgeText().Text(L"IDLE");
             RfStatusValueText().Text(L"IDLE");
@@ -1151,6 +1425,11 @@ namespace winrt::DabMeasurementWinUI::implementation
             break;
         case ReceiverState::failed:
             m_metrics_stale = false;
+            if (m_rf_null_controls_ready)
+            {
+                RfNullLiveText().Text(L"ERROR");
+                RfNullControlStatusText().Text(L"Receiver error; last trace retained");
+            }
             m_active_service_id = 0u;
             RfLiveBadgeText().Text(L"ERROR");
             RfStatusValueText().Text(L"ERROR");
@@ -1297,6 +1576,15 @@ namespace winrt::DabMeasurementWinUI::implementation
     void MainWindow::ApplyRfSnapshot(dab_receive_snapshot_t const& snapshot)
     {
         UpdateRfContext();
+        m_rf_null_locked = snapshot.locked != 0;
+        if (m_rf_null_controls_ready)
+        {
+            RfNullLockText().Text(m_rf_null_locked ? L"LOCKED" : L"ACQUIRING");
+            RfNullLockIndicator().Fill(Application::Current().Resources().Lookup(
+                box_value(hstring{ m_rf_null_locked
+                    ? L"MeasurementAccentBrush"
+                    : L"WarningBrush" })).as<Brush>());
+        }
         RfLiveBadgeText().Text(L"● LIVE");
         StatusCalibrationText().Text(L"Uncalibrated");
 
@@ -3945,6 +4233,519 @@ namespace winrt::DabMeasurementWinUI::implementation
         }
     }
 
+    float MainWindow::RfNullPowerAtTime(double time_ms, bool average) const noexcept
+    {
+        if (m_rf_null_history_count == 0u || m_rf_null_sample_rate_hz == 0u)
+        {
+            return -120.0f;
+        }
+        bool const use_frame = m_rf_null_time_div_us == 0.0 ||
+                               m_rf_null_time_div_us >= 10000.0;
+        size_t const frames = average
+            ? (std::min)(m_rf_null_history_count,
+                         static_cast<size_t>(m_rf_null_average_factor))
+            : 1u;
+        double power_sum = 0.0;
+        size_t used = 0u;
+        for (size_t age = 0u; age < frames; ++age)
+        {
+            size_t const history_index =
+                (m_rf_null_history_write + rf_null_history_capacity - 1u - age) %
+                rf_null_history_capacity;
+            float level = -120.0f;
+            bool valid = false;
+            if (use_frame && m_rf_null_frame_bin_count != 0u &&
+                m_rf_null_frame_bin_samples > 0.0f && time_ms >= 0.0)
+            {
+                double const sample = time_ms * static_cast<double>(m_rf_null_sample_rate_hz) /
+                                      1000.0;
+                double const bin = sample / static_cast<double>(m_rf_null_frame_bin_samples);
+                if (bin >= 0.0 && bin <= static_cast<double>(m_rf_null_frame_bin_count - 1u))
+                {
+                    uint32_t const lower = static_cast<uint32_t>(std::floor(bin));
+                    uint32_t const upper = (std::min)(lower + 1u, m_rf_null_frame_bin_count - 1u);
+                    float const blend = static_cast<float>(bin - static_cast<double>(lower));
+                    level = m_rf_null_frame_history[history_index][lower] +
+                        blend * (m_rf_null_frame_history[history_index][upper] -
+                                 m_rf_null_frame_history[history_index][lower]);
+                    valid = true;
+                }
+            }
+            else if (!use_frame && m_rf_null_focus_count != 0u &&
+                     m_rf_null_sample_period_ns > 0.0f)
+            {
+                double const sample = time_ms * 1000000.0 /
+                                      static_cast<double>(m_rf_null_sample_period_ns) -
+                                      static_cast<double>(m_rf_null_start_offset_samples);
+                if (sample >= 0.0 && sample <= static_cast<double>(m_rf_null_focus_count - 1u))
+                {
+                    uint32_t const center = static_cast<uint32_t>(std::llround(sample));
+                    uint32_t const radius = m_rf_null_filtered_source ? 3u : 0u;
+                    uint32_t const begin = center > radius ? center - radius : 0u;
+                    uint32_t const end = (std::min)(m_rf_null_focus_count - 1u, center + radius);
+                    double local_power = 0.0;
+                    for (uint32_t point = begin; point <= end; ++point)
+                    {
+                        local_power += std::pow(10.0,
+                            static_cast<double>(m_rf_null_focus_history[history_index][point]) / 10.0);
+                    }
+                    local_power /= static_cast<double>(end - begin + 1u);
+                    level = local_power > 1.0e-12
+                        ? static_cast<float>(10.0 * std::log10(local_power))
+                        : -120.0f;
+                    valid = true;
+                }
+            }
+            if (valid)
+            {
+                power_sum += std::pow(10.0, static_cast<double>(level) / 10.0);
+                ++used;
+            }
+        }
+        return used != 0u && power_sum > 1.0e-12
+            ? static_cast<float>(10.0 * std::log10(power_sum / static_cast<double>(used)))
+            : -120.0f;
+    }
+
+    void MainWindow::UpdateRfNullScope(dab::measurement::MeasurementFrame const& frame)
+    {
+        if (!m_rf_null_controls_ready || frame.null_scope_sample_count == 0u ||
+            frame.null_scope_sample_period_ns <= 0.0f)
+        {
+            return;
+        }
+        if (m_rf_null_frozen && !m_rf_null_single_armed)
+        {
+            return;
+        }
+        uint64_t const holdoff_ns = static_cast<uint64_t>(m_rf_null_holdoff_ms * 1000000.0);
+        if (m_rf_null_last_accept_timestamp_ns != 0u &&
+            frame.timestamp_ns > m_rf_null_last_accept_timestamp_ns &&
+            frame.timestamp_ns - m_rf_null_last_accept_timestamp_ns < holdoff_ns)
+        {
+            return;
+        }
+
+        size_t const slot = m_rf_null_history_write;
+        uint32_t const focus_count = (std::min)(
+            frame.null_scope_sample_count,
+            static_cast<uint32_t>(DAB_RECEIVE_NULL_SCOPE_SAMPLE_CAPACITY));
+        uint32_t const frame_count = (std::min)(
+            frame.null_scope_frame_bin_count,
+            static_cast<uint32_t>(DAB_RECEIVE_NULL_SCOPE_FRAME_BIN_COUNT));
+        std::copy_n(frame.null_scope_power_dbfs.begin(),
+                    focus_count,
+                    m_rf_null_focus_history[slot].begin());
+        if (frame_count != 0u)
+        {
+            std::copy_n(frame.null_scope_frame_power_dbfs.begin(),
+                        frame_count,
+                        m_rf_null_frame_history[slot].begin());
+        }
+        std::copy_n(frame.null_scope_iq_interleaved.begin(),
+                    2u * focus_count,
+                    m_rf_null_latest_iq.begin());
+        m_rf_null_timing_history[slot] = static_cast<int32_t>(frame.null_scope_start_index) - 6144;
+        m_rf_null_frame_start_history[slot] = frame.frame_start_sample;
+        m_rf_null_history_write = (slot + 1u) % rf_null_history_capacity;
+        m_rf_null_history_count = (std::min)(m_rf_null_history_count + 1u,
+                                              rf_null_history_capacity);
+
+        m_rf_null_focus_count = focus_count;
+        m_rf_null_frame_bin_count = frame_count;
+        m_rf_null_frame_sample_count = frame.null_scope_frame_sample_count;
+        m_rf_null_duration_samples = frame.null_scope_duration_samples;
+        m_rf_null_start_index = frame.null_scope_start_index;
+        m_rf_null_end_index = frame.null_scope_end_index;
+        m_rf_null_start_offset_samples = frame.null_scope_start_offset_samples;
+        m_rf_null_sample_period_ns = frame.null_scope_sample_period_ns;
+        m_rf_null_frame_bin_samples = frame.null_scope_frame_bin_samples;
+        m_rf_null_threshold_dbfs = frame.null_scope_threshold_dbfs;
+        m_rf_null_depth_db = frame.null_scope_depth_db;
+        m_rf_null_confidence = frame.null_scope_confidence;
+        m_rf_null_energy_dbfs = frame.null_scope_energy_dbfs;
+        m_rf_null_sequence = frame.sequence;
+        m_rf_null_frequency_hz = frame.frequency_hz;
+        m_rf_null_sample_rate_hz = frame.sample_rate_hz;
+        m_rf_null_last_accept_timestamp_ns = frame.timestamp_ns;
+        m_rf_null_locked = true;
+
+        if (m_rf_null_history_count == 1u)
+        {
+            m_rf_null_cursor_ms[0] = 0.0;
+            m_rf_null_cursor_ms[1] = static_cast<double>(m_rf_null_duration_samples) *
+                static_cast<double>(m_rf_null_sample_period_ns) / 1000000.0;
+        }
+        if (m_rf_null_single_armed)
+        {
+            m_rf_null_single_armed = false;
+            m_rf_null_frozen = true;
+            RfNullFreezeButton().IsChecked(true);
+            RfNullControlStatusText().Text(L"Single capture complete");
+            RfNullLiveText().Text(L"FROZEN");
+        }
+        else
+        {
+            RfNullControlStatusText().Text(L"Live acquisition");
+            RfNullLiveText().Text(L"LIVE");
+        }
+        RenderRfNullScope();
+        UpdateRfNullScopeReadouts();
+    }
+
+    void MainWindow::RenderRfNullScope()
+    {
+        if (!m_rf_null_controls_ready || m_rf_null_history_count == 0u)
+        {
+            return;
+        }
+        constexpr double plot_left = 65.0;
+        constexpr double plot_width = 905.0;
+        constexpr double plot_top = 25.0;
+        constexpr double plot_height = 310.0;
+        double span_ms;
+        double start_ms;
+        if (m_rf_null_time_div_us == 0.0)
+        {
+            span_ms = m_rf_null_sample_rate_hz != 0u
+                ? 1000.0 * static_cast<double>(m_rf_null_frame_sample_count) /
+                    static_cast<double>(m_rf_null_sample_rate_hz)
+                : 96.0;
+            start_ms = 0.0;
+        }
+        else
+        {
+            span_ms = 7.0 * m_rf_null_time_div_us / 1000.0;
+            start_ms = m_rf_null_time_div_us >= 10000.0
+                ? 0.0
+                : -span_ms * m_rf_null_trigger_position_percent / 100.0;
+        }
+        span_ms = (std::max)(span_ms, 0.001);
+        double const end_ms = start_ms + span_ms;
+        double const lower_dbfs = -5.0 * m_rf_null_vertical_db_div;
+        auto level_y = [&](float level)
+        {
+            return plot_top + std::clamp(
+                -static_cast<double>(level) / (std::max)(-lower_dbfs, 1.0) * plot_height,
+                0.0,
+                plot_height);
+        };
+        auto time_x = [&](double time_ms)
+        {
+            return plot_left + (time_ms - start_ms) / span_ms * plot_width;
+        };
+
+        size_t const average_frames = (std::min)(
+            m_rf_null_history_count,
+            static_cast<size_t>(m_rf_null_average_factor));
+        auto one_frame_level = [&](size_t history_index, double time_ms)
+        {
+            bool const use_frame = m_rf_null_time_div_us == 0.0 ||
+                                   m_rf_null_time_div_us >= 10000.0;
+            if (use_frame)
+            {
+                if (m_rf_null_frame_bin_count == 0u || m_rf_null_frame_bin_samples <= 0.0f ||
+                    time_ms < 0.0)
+                {
+                    return -120.0f;
+                }
+                double const source_sample = time_ms * m_rf_null_sample_rate_hz / 1000.0;
+                double const source_bin = source_sample / m_rf_null_frame_bin_samples;
+                if (source_bin < 0.0 || source_bin > m_rf_null_frame_bin_count - 1u)
+                {
+                    return -120.0f;
+                }
+                uint32_t const center = static_cast<uint32_t>(std::llround(source_bin));
+                uint32_t const radius = m_rf_null_filtered_source ? 1u : 0u;
+                uint32_t const begin = center > radius ? center - radius : 0u;
+                uint32_t const last = (std::min)(m_rf_null_frame_bin_count - 1u, center + radius);
+                double power = 0.0;
+                for (uint32_t bin = begin; bin <= last; ++bin)
+                {
+                    power += std::pow(10.0,
+                        static_cast<double>(m_rf_null_frame_history[history_index][bin]) / 10.0);
+                }
+                return power > 1.0e-12
+                    ? static_cast<float>(10.0 * std::log10(power / (last - begin + 1u)))
+                    : -120.0f;
+            }
+            if (m_rf_null_focus_count == 0u || m_rf_null_sample_period_ns <= 0.0f)
+            {
+                return -120.0f;
+            }
+            double const source_sample = time_ms * 1000000.0 / m_rf_null_sample_period_ns -
+                                         m_rf_null_start_offset_samples;
+            if (source_sample < 0.0 || source_sample > m_rf_null_focus_count - 1u)
+            {
+                return -120.0f;
+            }
+            uint32_t const center = static_cast<uint32_t>(std::llround(source_sample));
+            uint32_t const radius = m_rf_null_filtered_source ? 3u : 0u;
+            uint32_t const begin = center > radius ? center - radius : 0u;
+            uint32_t const last = (std::min)(m_rf_null_focus_count - 1u, center + radius);
+            double power = 0.0;
+            for (uint32_t sample = begin; sample <= last; ++sample)
+            {
+                power += std::pow(10.0,
+                    static_cast<double>(m_rf_null_focus_history[history_index][sample]) / 10.0);
+            }
+            return power > 1.0e-12
+                ? static_cast<float>(10.0 * std::log10(power / (last - begin + 1u)))
+                : -120.0f;
+        };
+
+        PointCollection live_points;
+        PointCollection average_points;
+        PointCollection minimum_points;
+        PointCollection maximum_points;
+        PointCollection persistence_live;
+        PointCollection persistence_average;
+        PointCollection persistence_minimum;
+        PointCollection persistence_maximum;
+        constexpr uint32_t display_points = 501u;
+        size_t const latest = (m_rf_null_history_write + rf_null_history_capacity - 1u) %
+                              rf_null_history_capacity;
+        for (uint32_t point = 0u; point < display_points; ++point)
+        {
+            double const fraction = static_cast<double>(point) /
+                                    static_cast<double>(display_points - 1u);
+            double const time_ms = start_ms + fraction * span_ms;
+            float const live = one_frame_level(latest, time_ms);
+            double average_power = 0.0;
+            float minimum = 120.0f;
+            float maximum = -120.0f;
+            for (size_t age = 0u; age < average_frames; ++age)
+            {
+                size_t const history_index =
+                    (m_rf_null_history_write + rf_null_history_capacity - 1u - age) %
+                    rf_null_history_capacity;
+                float const level = one_frame_level(history_index, time_ms);
+                average_power += std::pow(10.0, static_cast<double>(level) / 10.0);
+                minimum = (std::min)(minimum, level);
+                maximum = (std::max)(maximum, level);
+            }
+            float const average = average_power > 1.0e-12
+                ? static_cast<float>(10.0 * std::log10(average_power /
+                                                       static_cast<double>(average_frames)))
+                : -120.0f;
+            float const x = static_cast<float>(plot_left + fraction * plot_width);
+            live_points.Append(Point{ x, static_cast<float>(level_y(live)) });
+            average_points.Append(Point{ x, static_cast<float>(level_y(average)) });
+            minimum_points.Append(Point{ x, static_cast<float>(level_y(minimum)) });
+            maximum_points.Append(Point{ x, static_cast<float>(level_y(maximum)) });
+            float const persistence_x = 1000.0f * static_cast<float>(fraction);
+            auto persistence_y = [&](float level)
+            {
+                return static_cast<float>(std::clamp(
+                    -static_cast<double>(level) / (std::max)(-lower_dbfs, 1.0) * 100.0,
+                    0.0,
+                    100.0));
+            };
+            persistence_live.Append(Point{ persistence_x, persistence_y(live) });
+            persistence_average.Append(Point{ persistence_x, persistence_y(average) });
+            persistence_minimum.Append(Point{ persistence_x, persistence_y(minimum) });
+            persistence_maximum.Append(Point{ persistence_x, persistence_y(maximum) });
+        }
+        RfNullLiveTrace().Points(live_points);
+        RfNullAverageTrace().Points(average_points);
+        RfNullMinimumTrace().Points(minimum_points);
+        RfNullMaximumTrace().Points(maximum_points);
+        RfNullPersistenceNewestTrace().Points(persistence_live);
+        RfNullPersistenceAverageTrace().Points(persistence_average);
+        RfNullPersistenceMinTrace().Points(persistence_minimum);
+        RfNullPersistenceMaxTrace().Points(persistence_maximum);
+
+        Visibility const persistence = m_rf_null_persistence_enabled
+            ? Visibility::Visible
+            : Visibility::Collapsed;
+        RfNullMinimumTrace().Visibility(persistence);
+        RfNullMaximumTrace().Visibility(persistence);
+        RfNullPersistenceMinTrace().Visibility(persistence);
+        RfNullPersistenceMaxTrace().Visibility(persistence);
+        RfNullAverageTrace().Visibility(m_rf_null_average_factor > 1u
+            ? Visibility::Visible
+            : Visibility::Collapsed);
+        RfNullPersistenceAverageTrace().Visibility(m_rf_null_average_factor > 1u
+            ? Visibility::Visible
+            : Visibility::Collapsed);
+
+        double const threshold_y = level_y(m_rf_null_threshold_dbfs);
+        RfNullThresholdLine().Y1(threshold_y);
+        RfNullThresholdLine().Y2(threshold_y);
+        Canvas::SetTop(RfNullThresholdText(), std::clamp(threshold_y + 2.0, 25.0, 320.0));
+        RfNullThresholdText().Text(L"threshold " + format_float(m_rf_null_threshold_dbfs, L" dBFS", 1));
+
+        double const null_end_ms = static_cast<double>(m_rf_null_duration_samples) *
+                                   m_rf_null_sample_period_ns / 1000000.0;
+        auto place_boundary = [&](Line const& line, TextBlock const& label, double time_ms)
+        {
+            bool const visible = time_ms >= start_ms && time_ms <= end_ms;
+            line.Visibility(visible ? Visibility::Visible : Visibility::Collapsed);
+            label.Visibility(visible ? Visibility::Visible : Visibility::Collapsed);
+            if (visible)
+            {
+                double const x = time_x(time_ms);
+                line.X1(x);
+                line.X2(x);
+                Canvas::SetLeft(label, std::clamp(x - 42.0, plot_left, plot_left + plot_width - 90.0));
+            }
+        };
+        place_boundary(RfNullStartLine(), RfNullStartText(), 0.0);
+        place_boundary(RfNullEndLine(), RfNullEndText(), null_end_ms);
+
+        std::array<Line, 2> const cursors{ RfNullCursor1Line(), RfNullCursor2Line() };
+        for (uint32_t cursor = 0u; cursor < 2u; ++cursor)
+        {
+            bool const visible = m_rf_null_cursors_enabled &&
+                m_rf_null_cursor_ms[cursor] >= start_ms && m_rf_null_cursor_ms[cursor] <= end_ms;
+            cursors[cursor].Visibility(visible ? Visibility::Visible : Visibility::Collapsed);
+            if (visible)
+            {
+                double const x = time_x(m_rf_null_cursor_ms[cursor]);
+                cursors[cursor].X1(x);
+                cursors[cursor].X2(x);
+            }
+        }
+    }
+
+    void MainWindow::UpdateRfNullScopeReadouts()
+    {
+        if (!m_rf_null_controls_ready)
+        {
+            return;
+        }
+        double span_ms;
+        double start_ms;
+        if (m_rf_null_time_div_us == 0.0)
+        {
+            span_ms = m_rf_null_sample_rate_hz != 0u
+                ? 1000.0 * m_rf_null_frame_sample_count / m_rf_null_sample_rate_hz
+                : 96.0;
+            start_ms = 0.0;
+        }
+        else
+        {
+            span_ms = 7.0 * m_rf_null_time_div_us / 1000.0;
+            start_ms = m_rf_null_time_div_us >= 10000.0
+                ? 0.0
+                : -span_ms * m_rf_null_trigger_position_percent / 100.0;
+        }
+        double const end_ms = start_ms + span_ms;
+        wchar_t view[80]{};
+        swprintf_s(view, L"%+.3f ms ... %+.3f ms", start_ms, end_ms);
+        RfNullViewText().Text(view);
+        RfNullAxisLeftText().Text(format_signed_float(static_cast<float>(start_ms), L" ms", 3));
+        RfNullAxisRightText().Text(format_signed_float(static_cast<float>(end_ms), L" ms", 3));
+        std::array<TextBlock, 6> const y_labels{
+            RfNullY0Text(), RfNullY1Text(), RfNullY2Text(),
+            RfNullY3Text(), RfNullY4Text(), RfNullY5Text()
+        };
+        for (uint32_t division = 0u; division < y_labels.size(); ++division)
+        {
+            wchar_t level[32]{};
+            swprintf_s(level,
+                       division == 0u ? L"0 dBFS" : L"%.0f",
+                       -static_cast<double>(division) * m_rf_null_vertical_db_div);
+            y_labels[division].Text(level);
+        }
+        if (m_rf_null_history_count == 0u)
+        {
+            return;
+        }
+
+        hstring channel{ L"custom" };
+        if (auto const selected = ChannelComboBox().SelectedItem().try_as<ComboBoxItem>())
+        {
+            channel = unbox_value<hstring>(selected.Content());
+        }
+        wchar_t context[160]{};
+        swprintf_s(context,
+                   L"Channel %s \x00B7 %.6f MHz \x00B7 %.3f MS/s \x00B7 Frame #%llu",
+                   channel.c_str(),
+                   static_cast<double>(m_rf_null_frequency_hz) / 1000000.0,
+                   static_cast<double>(m_rf_null_sample_rate_hz) / 1000000.0,
+                   static_cast<unsigned long long>(m_rf_null_sequence));
+        RfNullContextText().Text(context);
+        RfNullDurationSamplesText().Text(to_hstring(m_rf_null_duration_samples) + L" samples");
+        RfNullDurationTimeText().Text(format_float(
+            static_cast<float>(m_rf_null_duration_samples) * m_rf_null_sample_period_ns / 1000000.0f,
+            L" ms",
+            3));
+        RfNullDepthText().Text(format_float(m_rf_null_depth_db, L" dB", 1));
+        RfNullConfidenceText().Text(format_float(m_rf_null_confidence * 100.0f, L" %", 1));
+
+        float const frame_period_ms = m_rf_null_frame_sample_count != 0u &&
+                                      m_rf_null_sample_rate_hz != 0u
+            ? 1000.0f * static_cast<float>(m_rf_null_frame_sample_count) /
+                static_cast<float>(m_rf_null_sample_rate_hz)
+            : 0.0f;
+        RfNullFramePeriodText().Text(frame_period_ms > 0.0f
+            ? format_float(frame_period_ms, L" ms", 3)
+            : hstring{ L"Collecting..." });
+
+        double mean = 0.0;
+        for (size_t age = 0u; age < m_rf_null_history_count; ++age)
+        {
+            size_t const index = (m_rf_null_history_write + rf_null_history_capacity - 1u - age) %
+                                 rf_null_history_capacity;
+            mean += m_rf_null_timing_history[index];
+        }
+        mean /= static_cast<double>(m_rf_null_history_count);
+        double variance = 0.0;
+        for (size_t age = 0u; age < m_rf_null_history_count; ++age)
+        {
+            size_t const index = (m_rf_null_history_write + rf_null_history_capacity - 1u - age) %
+                                 rf_null_history_capacity;
+            double const error = m_rf_null_timing_history[index] - mean;
+            variance += error * error;
+        }
+        double const jitter = m_rf_null_history_count > 1u
+            ? std::sqrt(variance / static_cast<double>(m_rf_null_history_count - 1u))
+            : 0.0;
+        RfNullJitterText().Text(L"\x00B1" + format_float(static_cast<float>(jitter), L" samples", 1));
+        RfNullTiiStatusText().Text(m_rf_null_confidence > 0.5f
+            ? L"Energy observed; ID not decoded"
+            : L"No reliable null energy estimate");
+        RfNullTiiLevelText().Text(format_float(m_rf_null_energy_dbfs, L" dBFS", 1));
+        RfNullPersistenceStatusText().Text(
+            to_hstring(m_rf_null_history_count) + L"/32 frames \x00B7 linear-power average \x00B7 min/max envelope");
+
+        float const m1_power = RfNullPowerAtTime(m_rf_null_cursor_ms[0], false);
+        float const m2_power = RfNullPowerAtTime(m_rf_null_cursor_ms[1], false);
+        wchar_t cursors[220]{};
+        swprintf_s(cursors,
+                   L"M1: %.3f ms / %.1f dBFS    M2: %.3f ms / %.1f dBFS    \x0394t: %.3f ms",
+                   m_rf_null_cursor_ms[0],
+                   static_cast<double>(m1_power),
+                   m_rf_null_cursor_ms[1],
+                   static_cast<double>(m2_power),
+                   m_rf_null_cursor_ms[1] - m_rf_null_cursor_ms[0]);
+        RfNullCursorReadoutText().Text(cursors);
+    }
+
+    void MainWindow::ResetRfNullScope()
+    {
+        m_rf_null_history_write = 0u;
+        m_rf_null_history_count = 0u;
+        m_rf_null_focus_count = 0u;
+        m_rf_null_frame_bin_count = 0u;
+        m_rf_null_frame_sample_count = 0u;
+        m_rf_null_duration_samples = 0u;
+        m_rf_null_sequence = 0u;
+        m_rf_null_last_accept_timestamp_ns = 0u;
+        m_rf_null_locked = false;
+        m_rf_null_frozen = false;
+        m_rf_null_single_armed = false;
+        if (m_rf_null_controls_ready)
+        {
+            RfNullControlStatusText().Text(L"Awaiting frame trigger");
+            RfNullPersistenceStatusText().Text(L"Awaiting frames");
+            RfNullLiveText().Text(L"WAITING");
+            RfNullCaptureStatusText().Text(L"");
+            RfNullFreezeButton().IsChecked(false);
+        }
+    }
+
     void MainWindow::UpdatePlots(dab::measurement::MeasurementFrame const& frame)
     {
         if (m_metrics_stale)
@@ -3954,6 +4755,11 @@ namespace winrt::DabMeasurementWinUI::implementation
         DataModeText().Text(L"HIGH-RATE MEASUREMENTS");
         DataSeamText().Text(L"measurement " + to_hstring(frame.sequence));
         SampleCounterText().Text(L"measurement " + to_hstring(frame.sequence));
+
+        if (frame.null_scope_sample_count != 0u)
+        {
+            UpdateRfNullScope(frame);
+        }
 
         if (frame.spectrum_bin_count != 0u)
         {

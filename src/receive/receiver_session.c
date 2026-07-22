@@ -2218,13 +2218,22 @@ int dab_receiver_session_run(int argc, char **argv) {
                                                       &ofdm_result);
 #if defined(DAB_RECEIVE_NO_MAIN)
                         if (measurement_state != 0) {
-                            (void)dab_receive_measurement_begin(
+                            if (dab_receive_measurement_begin(
                                 measurement_state,
                                 receive_config->measurement_decimation,
                                 &fft,
                                 fft_i,
                                 fft_q,
-                                &ofdm);
+                                &ofdm) == 0 && measurement_state->collecting) {
+                                (void)dab_receive_measurement_capture_null(
+                                    measurement_state,
+                                    &hist_view,
+                                    prs_fft_start_sample,
+                                    stream_config.sample_rate,
+                                    acquire_config.null_samples,
+                                    acquire_config.guard_samples,
+                                    sync.config.expected_frame_samples);
+                            }
                         }
 #endif
                         (void)dab_ofdm_extract_active_carriers_mode_i(fft_i,

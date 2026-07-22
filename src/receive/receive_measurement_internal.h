@@ -22,6 +22,22 @@ typedef struct {
     float carrier_mer_db[DAB_RECEIVE_CARRIER_MER_COUNT];
     float cir_i[DAB_RECEIVE_SPECTRUM_BIN_COUNT];
     float cir_q[DAB_RECEIVE_SPECTRUM_BIN_COUNT];
+    int16_t null_scope_iq_interleaved[2u * DAB_RECEIVE_NULL_SCOPE_SAMPLE_CAPACITY];
+    float null_scope_power_dbfs[DAB_RECEIVE_NULL_SCOPE_SAMPLE_CAPACITY];
+    uint32_t null_scope_sample_count;
+    int32_t null_scope_start_offset_samples;
+    uint32_t null_scope_start_index;
+    uint32_t null_scope_end_index;
+    uint32_t null_scope_duration_samples;
+    float null_scope_sample_period_ns;
+    float null_scope_threshold_dbfs;
+    float null_scope_depth_db;
+    float null_scope_confidence;
+    float null_scope_energy_dbfs;
+    float null_scope_frame_power_dbfs[DAB_RECEIVE_NULL_SCOPE_FRAME_BIN_COUNT];
+    uint32_t null_scope_frame_bin_count;
+    float null_scope_frame_bin_samples;
+    uint32_t null_scope_frame_sample_count;
 } dab_receive_measurement_state_t;
 
 void dab_receive_measurement_reset(dab_receive_measurement_state_t *state);
@@ -31,6 +47,13 @@ int dab_receive_measurement_begin(dab_receive_measurement_state_t *state,
                                   const float *fft_i,
                                   const float *fft_q,
                                   const dab_ofdm_t *ofdm);
+int dab_receive_measurement_capture_null(dab_receive_measurement_state_t *state,
+                                         const dab_sdr_block_view_t *samples,
+                                         uint64_t prs_fft_start_sample,
+                                         uint32_t sample_rate_hz,
+                                         uint32_t null_samples,
+                                         uint32_t guard_samples,
+                                         uint32_t frame_samples);
 void dab_receive_measurement_add_symbol(dab_receive_measurement_state_t *state,
                                         const float *physical_i,
                                         const float *physical_q,

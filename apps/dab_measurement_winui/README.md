@@ -14,6 +14,7 @@ The current proof of concept includes:
 - a dedicated RF Measurements workspace with toolbar, navigation, View-menu, and live-summary entry points;
 - an RF Overview page with live ADC-referenced power, C/N, carrier MER, CFO, synchronization stability, overruns, receiver configuration, process CPU usage, and rolling 60-second traces;
 - an RF Spectrum page driven by the native 2048-bin/1 kHz receiver FFT, with display averaging, peak hold, reference and scale controls, waterfall, dual/delta markers, cursor readout, wheel zoom, drag pan, double-click reset, freeze, tune-at-cursor, and PNG capture to the Pictures library;
+- a Null Scope page driven by real receiver IQ, with a sample-resolution power envelope around the Mode-I null, a decimated full 96 ms frame view, frame-synchronous run/single/freeze controls, selectable timebase and vertical scale, 32-capture linear-power persistence, detected-edge cursors, depth/confidence/jitter summaries, and triggered `.ci16` IQ capture under `%LOCALAPPDATA%\\DabMeasurementWinUI\\Captures`;
 - an RF History & Alarms page with one-hour bounded timestamped history, selectable power/MER/CFO/clipping traces, display pause, annotations, event markers, CSV export, and a configurable duration-plus-hysteresis alarm evaluator;
 - event/annotation timeline and receiver status bar;
 - a thread-safe latest-snapshot mailbox compatible with `dab_receive_config_t.snapshot`;
@@ -35,7 +36,7 @@ config.catalog = &dab::measurement::CatalogMailbox::Callback;
 config.catalog_user = &catalog_mailbox;
 ```
 
-The scalar snapshot remains lightweight. The measurement callback exposes temporary views of 2048 FFT-shifted spectrum bins, up to 512 normalized constellation points, 512 CIR taps, 1536 channel-response magnitude/phase values, and 1536 physical-carrier MER values. `MeasurementMailbox` copies the latest complete transmission-frame payload before the callback returns. The catalog callback is emitted only when the decoded FIC repository changes and is copied by `CatalogMailbox`. The UI timer therefore never touches decoder-owned memory, and the receiver thread never updates XAML controls directly.
+The scalar snapshot remains lightweight. The measurement callback exposes temporary views of 2048 FFT-shifted spectrum bins, up to 512 normalized constellation points, 512 CIR taps, 1536 channel-response magnitude/phase values, 1536 physical-carrier MER values, a 32768-sample triggered null IQ/power window, and a 2048-bin full-frame power envelope. `MeasurementMailbox` copies the latest complete transmission-frame payload before the callback returns. The catalog callback is emitted only when the decoded FIC repository changes and is copied by `CatalogMailbox`. The UI timer therefore never touches decoder-owned memory, and the receiver thread never updates XAML controls directly.
 
 The receiver controls currently open a real SDR device. The selected SDRplay or RTL-SDR adapter must be installed and available; explicitly selecting a real device no longer falls back silently to the synthetic adapter. On Windows, the SDRplay loader also checks the standard API installation directories.
 

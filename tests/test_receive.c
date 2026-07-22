@@ -316,10 +316,16 @@ void test_receive_measurement_builds_bounded_signal_payloads(void) {
     float *physical_q = (float *)calloc(DAB_MODE_I_ACTIVE_CARRIERS, sizeof(*physical_q));
     float *points_i = (float *)calloc(DAB_MODE_I_DATA_CARRIERS, sizeof(*points_i));
     float *points_q = (float *)calloc(DAB_MODE_I_DATA_CARRIERS, sizeof(*points_q));
+    const uint32_t scope_source_count = 220000u;
+    const uint64_t scope_source_start = 1000000u;
+    const uint64_t scope_null_start = scope_source_start + 10000u;
+    const uint64_t scope_prs_fft_start = scope_null_start + 2656u + 504u;
+    int16_t *scope_iq = (int16_t *)calloc(2u * scope_source_count, sizeof(*scope_iq));
+    dab_sdr_block_view_t scope_samples;
     uint32_t i;
 
     TEST_ASSERT(state != 0 && fft_i != 0 && fft_q != 0 && physical_i != 0 &&
-                physical_q != 0 && points_i != 0 && points_q != 0);
+                physical_q != 0 && points_i != 0 && points_q != 0 && scope_iq != 0);
     dab_prs_fft_default_config(&fft_config);
     TEST_ASSERT(dab_prs_fft_init(&fft, &fft_config) == 0);
     dab_ofdm_default_config(&ofdm_config);
@@ -342,8 +348,27 @@ void test_receive_measurement_builds_bounded_signal_payloads(void) {
     }
     fft_i[100u] = 1000000.0f;
 
+    for (i = 0u; i < scope_source_count; ++i) {
+        const uint64_t absolute = scope_source_start + i;
+        scope_iq[2u * i] = absolute >= scope_null_start &&
+                           absolute < scope_null_start + 2656u
+            ? 1000
+            : 10000;
+    }
+    scope_samples.iq_interleaved = scope_iq;
+    scope_samples.sample_count = scope_source_count;
+    scope_samples.sample_index = scope_source_start;
+    scope_samples.timestamp_ns = 0u;
+
     dab_receive_measurement_reset(state);
     TEST_ASSERT(dab_receive_measurement_begin(state, 1u, &fft, fft_i, fft_q, &ofdm) == 0);
+    TEST_ASSERT(dab_receive_measurement_capture_null(state,
+                                                     &scope_samples,
+                                                     scope_prs_fft_start,
+                                                     2048000u,
+                                                     2656u,
+                                                     504u,
+                                                     196608u) == 0);
     dab_receive_measurement_add_symbol(state,
                                        physical_i,
                                        physical_q,
@@ -378,7 +403,18 @@ void test_receive_measurement_builds_bounded_signal_payloads(void) {
     TEST_ASSERT(frame.carrier_mer_db[DAB_RECEIVE_CARRIER_MER_COUNT - 1u] > 50.0f);
     TEST_ASSERT(frame.first_carrier == -768);
     TEST_ASSERT(frame.negative_carrier_count == 768u);
+    TEST_ASSERT(frame.null_scope_sample_count == DAB_RECEIVE_NULL_SCOPE_SAMPLE_CAPACITY);
+    TEST_ASSERT(frame.null_scope_iq_interleaved != 0);
+    TEST_ASSERT(frame.null_scope_power_dbfs != 0);
+    TEST_ASSERT(frame.null_scope_start_index > 6000u && frame.null_scope_start_index < 6200u);
+    TEST_ASSERT(frame.null_scope_duration_samples > 2580u &&
+                frame.null_scope_duration_samples < 2700u);
+    TEST_ASSERT(frame.null_scope_depth_db > 19.0f && frame.null_scope_depth_db < 21.0f);
+    TEST_ASSERT(frame.null_scope_confidence > 0.98f);
+    TEST_ASSERT(frame.null_scope_frame_bin_count == DAB_RECEIVE_NULL_SCOPE_FRAME_BIN_COUNT);
+    TEST_ASSERT(frame.null_scope_frame_sample_count == 196608u);
 
+    free(scope_iq);
     free(points_q);
     free(points_i);
     free(physical_q);
