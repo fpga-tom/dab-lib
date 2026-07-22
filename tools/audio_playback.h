@@ -15,9 +15,7 @@
 #if defined(DAB_HAVE_FAAD2)
 #include <neaacdec.h>
 #endif
-#include "dab/os/os_cond.h"
 #include "dab/os/os_mutex.h"
-#include "dab/os/os_thread.h"
 #include <portaudio.h>
 
 #ifdef __cplusplus
@@ -55,11 +53,7 @@ typedef struct {
     size_t ring_write;
     size_t ring_count;
     dab_mutex_t ring_mutex;
-    dab_cond_t ring_cond;
-    dab_thread_t thread;
     uint8_t ring_ready;
-    uint8_t thread_running;
-    uint8_t thread_stop;
     uint8_t prebuffer_done;
     uint64_t last_generation;
     uint32_t missing_superframe_reports;
@@ -84,6 +78,7 @@ void dab_audio_playback_set_spectrum_callback(dab_audio_playback_spectrum_callba
                                               void *user);
 void dab_audio_playback_set_equalizer_gains(const float *gains_db, uint32_t count);
 void dab_audio_playback_close(dab_audio_playback_t *audio);
+int dab_audio_playback_output_active(dab_audio_playback_t *audio);
 int dab_audio_playback_set_format(dab_audio_playback_t *audio,
                                   uint32_t service_id,
                                   uint32_t sample_rate,

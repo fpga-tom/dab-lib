@@ -2,9 +2,11 @@
 #include "ReceiverWorker.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <limits>
+#include <optional>
 #include <utility>
 
 namespace dab::measurement
@@ -34,6 +36,7 @@ namespace dab::measurement
         {
             m_thread.join();
         }
+        StopAudioWorker();
 
         m_cancel_requested.store(false, std::memory_order_release);
         ResetPlaybackState();
@@ -47,6 +50,11 @@ namespace dab::measurement
         m_last_session_snapshot = {};
         m_last_session_measurement_sequence = 0u;
         m_last_session_snapshot_valid = false;
+        if (!StartAudioWorker())
+        {
+            PublishStatus(ReceiverState::failed, "Could not create audio worker thread", true, -1);
+            return false;
+        }
         PublishStatus(ReceiverState::starting, "Opening receiver...");
         try
         {
@@ -54,6 +62,7 @@ namespace dab::measurement
         }
         catch (...)
         {
+            StopAudioWorker();
             PublishStatus(ReceiverState::failed, "Could not create receiver worker thread", true, -1);
             return false;
         }
@@ -78,6 +87,7 @@ namespace dab::measurement
         if (m_thread.joinable() && !IsActive())
         {
             m_thread.join();
+            StopAudioWorker();
         }
     }
 
@@ -89,6 +99,7 @@ namespace dab::measurement
         {
             m_thread.join();
         }
+        StopAudioWorker();
     }
 
     ReceiverState ReceiverWorker::State() const noexcept
@@ -256,20 +267,7 @@ namespace dab::measurement
                     std::memcpy(m_audio_format_asc.data(), event.asc, asc_length);
                 }
                 m_audio_format_asc_length = event.asc_length;
-
-                if (dab_audio_playback_set_format(&m_audio_playback,
-                                                  event.service_id,
-                                                  event.sample_rate,
-                                                  event.channels,
-                                                  event.asc,
-                                                  event.asc_length) != 0)
-                {
-                    m_audio_playback_failed = true;
-                    PublishStatus(ReceiverState::running,
-                                  "DAB+ audio decoded, but playback could not be opened",
-                                  true);
-                    return 0;
-                }
+                EnqueueAudioFormat(event);
 
                 char message[96]{};
                 std::snprintf(message,
@@ -281,22 +279,9 @@ namespace dab::measurement
                 PublishStatus(ReceiverState::running, message);
             }
             else if (event.type == DAB_RECEIVE_EVENT_AUDIO_AU &&
-                     m_audio_format_status_valid &&
-                     !m_audio_playback_failed)
+                     m_audio_format_status_valid)
             {
-                int const playback_result = dab_audio_playback_consume_au(
-                    &m_audio_playback,
-                    event.audio_data,
-                    event.audio_length,
-                    event.generation);
-                if (playback_result < 0)
-                {
-                    dab_audio_playback_close(&m_audio_playback);
-                    m_audio_playback_failed = true;
-                    PublishStatus(ReceiverState::running,
-                                  "DAB+ audio playback stopped after an output error",
-                                  true);
-                }
+                EnqueueAudioAccessUnit(event);
             }
         }
         catch (...)
@@ -333,7 +318,7 @@ namespace dab::measurement
         for (;;)
         {
             int const result = dab_receive_service(&config, &ReceiverWorker::EventCallback, this);
-            dab_audio_playback_close(&m_audio_playback);
+            EnqueueAudioReset();
             ResetPlaybackState();
 
             if (m_cancel_requested.load(std::memory_order_acquire))
@@ -373,6 +358,11 @@ namespace dab::measurement
                     std::this_thread::sleep_for(std::chrono::milliseconds(slice_ms));
                     waited_ms += slice_ms;
                 }
+                if (m_cancel_requested.load(std::memory_order_acquire))
+                {
+                    PublishStatus(ReceiverState::stopped, "Receiver stopped");
+                    return;
+                }
                 continue;
             }
 
@@ -392,7 +382,259 @@ namespace dab::measurement
         m_audio_format_channels = 0u;
         m_audio_format_asc.fill(0u);
         m_audio_format_asc_length = 0u;
-        m_audio_playback_failed = false;
+    }
+
+    bool ReceiverWorker::StartAudioWorker()
+    {
+        {
+            std::scoped_lock lock{ m_audio_queue_mutex };
+            m_audio_stop_requested = false;
+            m_audio_commands.clear();
+        }
+        try
+        {
+            m_audio_thread = std::thread{ &ReceiverWorker::AudioThreadMain, this };
+        }
+        catch (...)
+        {
+            return false;
+        }
+        return true;
+    }
+
+    void ReceiverWorker::StopAudioWorker() noexcept
+    {
+        {
+            std::scoped_lock lock{ m_audio_queue_mutex };
+            m_audio_stop_requested = true;
+            m_audio_commands.clear();
+        }
+        m_audio_queue_cv.notify_all();
+        if (m_audio_thread.joinable())
+        {
+            m_audio_thread.join();
+        }
+    }
+
+    void ReceiverWorker::EnqueueAudioFormat(dab_receive_event_t const& event)
+    {
+        AudioCommand command;
+        command.kind = AudioCommandKind::format;
+        command.service_id = event.service_id;
+        command.frequency_hz = event.frequency_hz;
+        command.sample_rate = event.sample_rate;
+        command.channels = event.channels;
+        command.asc_length = (std::min)(
+            event.asc_length,
+            static_cast<uint32_t>(command.asc.size()));
+        if (event.asc != nullptr && command.asc_length != 0u)
+        {
+            std::copy_n(event.asc, command.asc_length, command.asc.begin());
+        }
+
+        {
+            std::scoped_lock lock{ m_audio_queue_mutex };
+            if (m_audio_stop_requested)
+            {
+                return;
+            }
+            m_audio_commands.clear();
+            m_audio_commands.push_back(std::move(command));
+        }
+        m_audio_queue_cv.notify_one();
+    }
+
+    void ReceiverWorker::EnqueueAudioAccessUnit(dab_receive_event_t const& event)
+    {
+        constexpr size_t audio_queue_capacity = 256u;
+        AudioCommand command;
+        if (event.audio_data == nullptr || event.audio_length == 0u)
+        {
+            return;
+        }
+        command.kind = AudioCommandKind::access_unit;
+        command.generation = event.generation;
+        command.data.assign(event.audio_data, event.audio_data + event.audio_length);
+
+        {
+            std::scoped_lock lock{ m_audio_queue_mutex };
+            if (m_audio_stop_requested)
+            {
+                return;
+            }
+            while (m_audio_commands.size() >= audio_queue_capacity)
+            {
+                auto const oldest_audio = std::find_if(
+                    m_audio_commands.begin(),
+                    m_audio_commands.end(),
+                    [](AudioCommand const& queued)
+                    {
+                        return queued.kind == AudioCommandKind::access_unit;
+                    });
+                if (oldest_audio == m_audio_commands.end())
+                {
+                    return;
+                }
+                m_audio_commands.erase(oldest_audio);
+            }
+            m_audio_commands.push_back(std::move(command));
+        }
+        m_audio_queue_cv.notify_one();
+    }
+
+    void ReceiverWorker::EnqueueAudioReset() noexcept
+    {
+        try
+        {
+            AudioCommand command;
+            command.kind = AudioCommandKind::reset;
+            {
+                std::scoped_lock lock{ m_audio_queue_mutex };
+                if (m_audio_stop_requested)
+                {
+                    return;
+                }
+                m_audio_commands.clear();
+                m_audio_commands.push_back(std::move(command));
+            }
+            m_audio_queue_cv.notify_one();
+        }
+        catch (...)
+        {
+        }
+    }
+
+    void ReceiverWorker::AudioThreadMain() noexcept
+    {
+        using clock = std::chrono::steady_clock;
+        std::optional<AudioCommand> active_format;
+        bool decoder_configured = false;
+        bool recovering = false;
+        uint32_t retry_attempt = 0u;
+        auto retry_at = clock::time_point{};
+
+        auto schedule_retry = [&](char const* reason)
+        {
+            dab_audio_playback_close(&m_audio_playback);
+            decoder_configured = false;
+            recovering = true;
+            ++retry_attempt;
+            uint32_t const shift = (std::min)(retry_attempt - 1u, 3u);
+            uint32_t const retry_ms = (std::min)(250u << shift, 2000u);
+            retry_at = clock::now() + std::chrono::milliseconds(retry_ms);
+            char message[160]{};
+            std::snprintf(message,
+                          sizeof(message),
+                          "%s; retrying audio independently in %u ms",
+                          reason,
+                          retry_ms);
+            PublishStatus(State(), message);
+        };
+
+        try
+        {
+            for (;;)
+            {
+                std::optional<AudioCommand> command;
+                {
+                    std::unique_lock lock{ m_audio_queue_mutex };
+                    m_audio_queue_cv.wait_for(
+                        lock,
+                        std::chrono::milliseconds(100),
+                        [&]
+                        {
+                            return m_audio_stop_requested || !m_audio_commands.empty();
+                        });
+                    if (m_audio_stop_requested)
+                    {
+                        break;
+                    }
+                    if (!m_audio_commands.empty())
+                    {
+                        command = std::move(m_audio_commands.front());
+                        m_audio_commands.pop_front();
+                    }
+                }
+
+                if (command && command->kind == AudioCommandKind::reset)
+                {
+                    dab_audio_playback_close(&m_audio_playback);
+                    active_format.reset();
+                    decoder_configured = false;
+                    recovering = false;
+                    retry_attempt = 0u;
+                    retry_at = clock::time_point{};
+                    continue;
+                }
+                if (command && command->kind == AudioCommandKind::format)
+                {
+                    dab_audio_playback_close(&m_audio_playback);
+                    active_format = std::move(*command);
+                    decoder_configured = false;
+                    recovering = false;
+                    retry_attempt = 0u;
+                    retry_at = clock::time_point{};
+                    continue;
+                }
+                if (command && command->kind == AudioCommandKind::access_unit && active_format)
+                {
+                    auto const now = clock::now();
+                    if (!decoder_configured && now >= retry_at)
+                    {
+                        int const configure_result = dab_audio_playback_set_format(
+                            &m_audio_playback,
+                            active_format->service_id,
+                            active_format->sample_rate,
+                            active_format->channels,
+                            active_format->asc.data(),
+                            active_format->asc_length);
+                        if (configure_result != 0)
+                        {
+                            schedule_retry("Audio decoder or output setup failed");
+                            continue;
+                        }
+                        decoder_configured = true;
+                    }
+                    if (!decoder_configured)
+                    {
+                        continue;
+                    }
+
+                    int const playback_result = dab_audio_playback_consume_au(
+                        &m_audio_playback,
+                        command->data.data(),
+                        static_cast<uint32_t>(command->data.size()),
+                        command->generation);
+                    if (playback_result < 0)
+                    {
+                        schedule_retry("Audio decoding or output failed");
+                        continue;
+                    }
+                    if (playback_result == 0 &&
+                        dab_audio_playback_output_active(&m_audio_playback) > 0 &&
+                        recovering)
+                    {
+                        recovering = false;
+                        retry_attempt = 0u;
+                        PublishStatus(State(), "Audio output recovered without restarting the receiver");
+                    }
+                }
+
+                if (decoder_configured && m_audio_playback.stream != nullptr)
+                {
+                    int const active = dab_audio_playback_output_active(&m_audio_playback);
+                    if (active <= 0)
+                    {
+                        schedule_retry("Audio output device stopped");
+                    }
+                }
+            }
+        }
+        catch (...)
+        {
+            PublishStatus(State(), "Audio worker stopped after an internal error", true);
+        }
+        dab_audio_playback_close(&m_audio_playback);
     }
 
     void ReceiverWorker::AccumulateRecoveredSession() noexcept

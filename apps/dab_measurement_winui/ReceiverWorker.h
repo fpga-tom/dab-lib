@@ -7,10 +7,13 @@
 
 #include <array>
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace dab::measurement
 {
@@ -70,6 +73,26 @@ namespace dab::measurement
                            uint64_t& version) const;
 
     private:
+        enum class AudioCommandKind
+        {
+            format,
+            access_unit,
+            reset,
+        };
+
+        struct AudioCommand
+        {
+            AudioCommandKind kind{ AudioCommandKind::reset };
+            uint32_t service_id{ 0u };
+            uint64_t frequency_hz{ 0u };
+            uint32_t sample_rate{ 0u };
+            uint32_t channels{ 0u };
+            std::array<uint8_t, 8> asc{};
+            uint32_t asc_length{ 0u };
+            std::vector<uint8_t> data;
+            uint64_t generation{ 0u };
+        };
+
         static int CancelCallback(void* user) noexcept;
         static int EventCallback(dab_receive_event_t const* event, void* user) noexcept;
         static int SnapshotCallback(dab_receive_snapshot_t const* snapshot, void* user) noexcept;
@@ -78,6 +101,12 @@ namespace dab::measurement
         int OnEvent(dab_receive_event_t const& event) noexcept;
         void Run(ReceiverSettings settings) noexcept;
         void ResetPlaybackState() noexcept;
+        bool StartAudioWorker();
+        void StopAudioWorker() noexcept;
+        void AudioThreadMain() noexcept;
+        void EnqueueAudioFormat(dab_receive_event_t const& event);
+        void EnqueueAudioAccessUnit(dab_receive_event_t const& event);
+        void EnqueueAudioReset() noexcept;
         void AccumulateRecoveredSession() noexcept;
         void PublishStatus(ReceiverState state,
                            std::string message,
@@ -102,7 +131,11 @@ namespace dab::measurement
         std::array<uint8_t, 8> m_audio_format_asc{};
         uint32_t m_audio_format_asc_length{ 0u };
         dab_audio_playback_t m_audio_playback{};
-        bool m_audio_playback_failed{ false };
+        std::thread m_audio_thread;
+        std::mutex m_audio_queue_mutex;
+        std::condition_variable m_audio_queue_cv;
+        std::deque<AudioCommand> m_audio_commands;
+        bool m_audio_stop_requested{ false };
         uint32_t m_recovery_attempt_count{ 0u };
         uint64_t m_snapshot_sequence_offset{ 0u };
         uint64_t m_measurement_sequence_offset{ 0u };
