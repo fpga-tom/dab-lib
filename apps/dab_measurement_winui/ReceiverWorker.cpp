@@ -1,8 +1,10 @@
 #include "pch.h"
 #include "ReceiverWorker.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <utility>
 
 namespace dab::measurement
@@ -34,14 +36,17 @@ namespace dab::measurement
         }
 
         m_cancel_requested.store(false, std::memory_order_release);
-        m_audio_format_status_valid = false;
-        m_audio_format_service_id = 0u;
-        m_audio_format_frequency_hz = 0u;
-        m_audio_format_sample_rate = 0u;
-        m_audio_format_channels = 0u;
-        m_audio_format_asc.fill(0u);
-        m_audio_format_asc_length = 0u;
-        m_audio_playback_failed = false;
+        ResetPlaybackState();
+        m_recovery_attempt_count = 0u;
+        m_snapshot_sequence_offset = 0u;
+        m_measurement_sequence_offset = 0u;
+        m_blocks_received_offset = 0u;
+        m_dropped_blocks_offset = 0u;
+        m_processing_late_offset = 0u;
+        m_hardware_overruns_offset = 0u;
+        m_last_session_snapshot = {};
+        m_last_session_measurement_sequence = 0u;
+        m_last_session_snapshot_valid = false;
         PublishStatus(ReceiverState::starting, "Opening receiver...");
         try
         {
@@ -59,7 +64,9 @@ namespace dab::measurement
     {
         m_cancel_requested.store(true, std::memory_order_release);
         ReceiverState const state = State();
-        if (state == ReceiverState::starting || state == ReceiverState::running)
+        if (state == ReceiverState::starting ||
+            state == ReceiverState::running ||
+            state == ReceiverState::recovering)
         {
             PublishStatus(ReceiverState::stopping, "Stopping receiver...");
         }
@@ -94,6 +101,7 @@ namespace dab::measurement
         ReceiverState const state = State();
         return state == ReceiverState::starting ||
                state == ReceiverState::running ||
+               state == ReceiverState::recovering ||
                state == ReceiverState::stopping;
     }
 
@@ -130,6 +138,56 @@ namespace dab::measurement
         return static_cast<ReceiverWorker*>(user)->OnEvent(*event);
     }
 
+    int ReceiverWorker::SnapshotCallback(dab_receive_snapshot_t const* snapshot,
+                                         void* user) noexcept
+    {
+        if (snapshot == nullptr || user == nullptr)
+        {
+            return -1;
+        }
+
+        auto* worker = static_cast<ReceiverWorker*>(user);
+        dab_receive_snapshot_t adjusted = *snapshot;
+        auto const saturate_u32 = [](uint64_t value) noexcept
+        {
+            return static_cast<uint32_t>((std::min)(
+                value,
+                static_cast<uint64_t>((std::numeric_limits<uint32_t>::max)())));
+        };
+
+        worker->m_last_session_snapshot = *snapshot;
+        worker->m_last_session_snapshot_valid = true;
+        adjusted.sequence += worker->m_snapshot_sequence_offset;
+        adjusted.blocks_received += worker->m_blocks_received_offset;
+        adjusted.dropped_blocks = saturate_u32(
+            worker->m_dropped_blocks_offset + snapshot->dropped_blocks);
+        adjusted.processing_late_count = saturate_u32(
+            worker->m_processing_late_offset + snapshot->processing_late_count);
+        if (snapshot->hardware_overruns_valid != 0)
+        {
+            adjusted.hardware_overruns = saturate_u32(
+                worker->m_hardware_overruns_offset + snapshot->hardware_overruns);
+        }
+        worker->m_mailbox.Publish(adjusted);
+        return 0;
+    }
+
+    int ReceiverWorker::MeasurementCallback(dab_receive_measurement_frame_t const* frame,
+                                            void* user) noexcept
+    {
+        if (frame == nullptr || user == nullptr)
+        {
+            return -1;
+        }
+
+        auto* worker = static_cast<ReceiverWorker*>(user);
+        dab_receive_measurement_frame_t adjusted = *frame;
+        worker->m_last_session_measurement_sequence = frame->sequence;
+        adjusted.sequence += worker->m_measurement_sequence_offset;
+        worker->m_measurement_mailbox.Publish(adjusted);
+        return 0;
+    }
+
     int ReceiverWorker::OnEvent(dab_receive_event_t const& event) noexcept
     {
         try
@@ -137,6 +195,18 @@ namespace dab::measurement
             if (event.type == DAB_RECEIVE_EVENT_ERROR)
             {
                 PublishStatus(State(), event.message != nullptr ? event.message : "Receiver error", true);
+            }
+            else if (event.type == DAB_RECEIVE_EVENT_STREAM_STALLED ||
+                     event.type == DAB_RECEIVE_EVENT_DECODER_STALLED)
+            {
+                PublishStatus(ReceiverState::recovering,
+                              event.message != nullptr
+                                  ? event.message
+                                  : "Receiver progress stalled; measurements are stale",
+                              false,
+                              event.type == DAB_RECEIVE_EVENT_DECODER_STALLED
+                                  ? DAB_RECEIVE_RESULT_DECODER_STALLED
+                                  : DAB_RECEIVE_RESULT_STREAM_STALLED);
             }
             else if (event.type == DAB_RECEIVE_EVENT_STATUS)
             {
@@ -146,6 +216,13 @@ namespace dab::measurement
                     (message.starts_with("Warming up") || message.starts_with("Receiver started")))
                 {
                     state = ReceiverState::running;
+                }
+                else if (state == ReceiverState::recovering &&
+                         message.starts_with("Receiver started"))
+                {
+                    state = ReceiverState::running;
+                    m_recovery_attempt_count = 0u;
+                    message = "SDR stream recovered; " + message;
                 }
                 PublishStatus(state, std::move(message));
             }
@@ -243,30 +320,98 @@ namespace dab::measurement
         config.use_real_device = settings.use_real_device ? 1 : 0;
         config.cancel = &ReceiverWorker::CancelCallback;
         config.cancel_user = this;
-        config.snapshot = &SnapshotMailbox::Callback;
-        config.snapshot_user = &m_mailbox;
-        config.measurement = &MeasurementMailbox::Callback;
-        config.measurement_user = &m_measurement_mailbox;
+        config.snapshot = &ReceiverWorker::SnapshotCallback;
+        config.snapshot_user = this;
+        config.measurement = &ReceiverWorker::MeasurementCallback;
+        config.measurement_user = this;
         config.measurement_decimation = settings.measurement_decimation;
+        config.stream_watchdog_timeout_ms = settings.stream_watchdog_timeout_ms;
+        config.decoder_watchdog_timeout_ms = settings.decoder_watchdog_timeout_ms;
         config.catalog = &CatalogMailbox::Callback;
         config.catalog_user = &m_catalog_mailbox;
 
-        int const result = dab_receive_service(&config, &ReceiverWorker::EventCallback, this);
-        dab_audio_playback_close(&m_audio_playback);
-        if (m_cancel_requested.load(std::memory_order_acquire))
+        for (;;)
         {
-            PublishStatus(ReceiverState::stopped, "Receiver stopped");
-        }
-        else if (result == 0)
-        {
-            PublishStatus(ReceiverState::stopped, "Receiver completed");
-        }
-        else
-        {
+            int const result = dab_receive_service(&config, &ReceiverWorker::EventCallback, this);
+            dab_audio_playback_close(&m_audio_playback);
+            ResetPlaybackState();
+
+            if (m_cancel_requested.load(std::memory_order_acquire))
+            {
+                PublishStatus(ReceiverState::stopped, "Receiver stopped");
+                return;
+            }
+            if (result == 0)
+            {
+                PublishStatus(ReceiverState::stopped, "Receiver completed");
+                return;
+            }
+            if (result == DAB_RECEIVE_RESULT_STREAM_STALLED ||
+                result == DAB_RECEIVE_RESULT_DECODER_STALLED ||
+                State() == ReceiverState::recovering)
+            {
+                AccumulateRecoveredSession();
+                ++m_recovery_attempt_count;
+                uint32_t const shift = (std::min)(m_recovery_attempt_count - 1u, 3u);
+                uint32_t const backoff_ms = (std::min)(250u << shift, 2000u);
+                char message[144]{};
+                std::snprintf(message,
+                              sizeof(message),
+                              "Measurements stale; restarting SDR stream (attempt %u in %u ms)",
+                              m_recovery_attempt_count,
+                              backoff_ms);
+                PublishStatus(ReceiverState::recovering,
+                              message,
+                              false,
+                              DAB_RECEIVE_RESULT_STREAM_STALLED);
+
+                uint32_t waited_ms = 0u;
+                while (waited_ms < backoff_ms &&
+                       !m_cancel_requested.load(std::memory_order_acquire))
+                {
+                    uint32_t const slice_ms = (std::min)(50u, backoff_ms - waited_ms);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(slice_ms));
+                    waited_ms += slice_ms;
+                }
+                continue;
+            }
+
             char message[96]{};
             std::snprintf(message, sizeof(message), "Receiver stopped with error code %d", result);
             PublishStatus(ReceiverState::failed, message, true, result);
+            return;
         }
+    }
+
+    void ReceiverWorker::ResetPlaybackState() noexcept
+    {
+        m_audio_format_status_valid = false;
+        m_audio_format_service_id = 0u;
+        m_audio_format_frequency_hz = 0u;
+        m_audio_format_sample_rate = 0u;
+        m_audio_format_channels = 0u;
+        m_audio_format_asc.fill(0u);
+        m_audio_format_asc_length = 0u;
+        m_audio_playback_failed = false;
+    }
+
+    void ReceiverWorker::AccumulateRecoveredSession() noexcept
+    {
+        if (m_last_session_snapshot_valid)
+        {
+            m_snapshot_sequence_offset += m_last_session_snapshot.sequence;
+            m_blocks_received_offset += m_last_session_snapshot.blocks_received;
+            m_dropped_blocks_offset += m_last_session_snapshot.dropped_blocks;
+            m_processing_late_offset += m_last_session_snapshot.processing_late_count;
+            if (m_last_session_snapshot.hardware_overruns_valid != 0)
+            {
+                m_hardware_overruns_offset += m_last_session_snapshot.hardware_overruns;
+            }
+        }
+        m_measurement_sequence_offset += m_last_session_measurement_sequence;
+        m_last_session_snapshot = {};
+        m_last_session_measurement_sequence = 0u;
+        m_last_session_snapshot_valid = false;
     }
 
     void ReceiverWorker::PublishStatus(ReceiverState state,

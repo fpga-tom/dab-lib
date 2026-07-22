@@ -133,6 +133,7 @@ namespace winrt::DabMeasurementWinUI::implementation
         uint64_t m_catalog_mailbox_version{ 0 };
         uint64_t m_receiver_status_version{ 0 };
         uint64_t m_tick{ 0 };
+        bool m_metrics_stale{ false };
         uint32_t m_selected_service_id{ 0u };
         uint32_t m_active_service_id{ 0u };
         std::optional<dab::measurement::ReceiverSettings> m_pending_receiver_restart;

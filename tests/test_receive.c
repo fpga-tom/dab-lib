@@ -28,6 +28,8 @@ void test_receive_default_config_uses_rtlsdr_playback_defaults(void) {
     TEST_ASSERT(config.measurement == 0);
     TEST_ASSERT(config.measurement_user == 0);
     TEST_ASSERT(config.measurement_decimation == 1u);
+    TEST_ASSERT(config.stream_watchdog_timeout_ms == 1500u);
+    TEST_ASSERT(config.decoder_watchdog_timeout_ms == 1500u);
     TEST_ASSERT(config.catalog == 0);
     TEST_ASSERT(config.catalog_user == 0);
 }

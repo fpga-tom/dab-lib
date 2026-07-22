@@ -15,7 +15,8 @@ typedef enum {
     DAB_SDR_STATUS_UNSUPPORTED = -3,
     DAB_SDR_STATUS_NOT_FOUND = -4,
     DAB_SDR_STATUS_NOT_IMPLEMENTED = -5,
-    DAB_SDR_STATUS_BUSY = -6
+    DAB_SDR_STATUS_BUSY = -6,
+    DAB_SDR_STATUS_TIMEOUT = -7
 } dab_sdr_status_t;
 
 typedef enum {
@@ -60,6 +61,9 @@ typedef struct {
     dab_sdr_status_t (*start)(struct dab_sdr_stream *stream);
     dab_sdr_status_t (*stop)(struct dab_sdr_stream *stream);
     dab_sdr_status_t (*read)(struct dab_sdr_stream *stream, dab_sdr_block_view_t *block);
+    dab_sdr_status_t (*read_timeout)(struct dab_sdr_stream *stream,
+                                     dab_sdr_block_view_t *block,
+                                     uint32_t timeout_ms);
     dab_sdr_status_t (*diagnostics)(struct dab_sdr_stream *stream,
                                     dab_sdr_stream_diagnostics_t *diagnostics);
     void (*destroy)(struct dab_sdr_stream *stream);
@@ -91,6 +95,9 @@ const dab_sdr_device_desc_t *dab_sdr_device_desc(uint32_t index);
 dab_sdr_status_t dab_sdr_device_open(const dab_sdr_open_params_t *params, dab_sdr_device_t **device);
 void dab_sdr_device_close(dab_sdr_device_t *device);
 void dab_sdr_stream_close(dab_sdr_stream_t *stream);
+dab_sdr_status_t dab_sdr_stream_read_timeout(dab_sdr_stream_t *stream,
+                                              dab_sdr_block_view_t *block,
+                                              uint32_t timeout_ms);
 dab_sdr_status_t dab_sdr_stream_get_diagnostics(dab_sdr_stream_t *stream,
                                                  dab_sdr_stream_diagnostics_t *diagnostics);
 

@@ -3,6 +3,7 @@
 
 void test_pc_queue_basic(void);
 void test_pc_queue_stop_wakes_waiter(void);
+void test_pc_queue_timed_pop_reports_timeout_and_reads_available_item(void);
 void test_block_pool_acquire_release(void);
 void test_block_storage_is_compact_and_aligned(void);
 void test_sample_history_wraps_with_contiguous_view(void);
@@ -94,6 +95,7 @@ void test_tframe_push_symbol_partitions_fic_and_msc_and_wraps_frame(void);
 int main(void) {
     test_pc_queue_basic();
     test_pc_queue_stop_wakes_waiter();
+    test_pc_queue_timed_pop_reports_timeout_and_reads_available_item();
     test_block_pool_acquire_release();
     test_block_storage_is_compact_and_aligned();
     test_sample_history_wraps_with_contiguous_view();

@@ -869,7 +869,7 @@ namespace winrt::DabMeasurementWinUI::implementation
     {
         m_timer.Stop();
         m_pending_receiver_restart.reset();
-        m_receiver.RequestStop();
+        m_receiver.StopAndJoin();
     }
 
     void MainWindow::OnTimerTick(IInspectable const&, IInspectable const&)
@@ -1079,13 +1079,17 @@ namespace winrt::DabMeasurementWinUI::implementation
         switch (status.state)
         {
         case ReceiverState::starting:
+            m_metrics_stale = false;
             RfLiveBadgeText().Text(L"STARTING");
             SetReceiverControlsEnabled(false);
             StartButton().IsEnabled(true);
             StartButtonLabel().Text(L"Stop");
             StatusSyncText().Text(L"opening");
+            StatusSyncIndicator().Fill(Application::Current().Resources().Lookup(
+                box_value(hstring{ L"WarningBrush" })).as<Brush>());
             break;
         case ReceiverState::running:
+            m_metrics_stale = false;
             RfLiveBadgeText().Text(L"● LIVE");
             SetReceiverControlsEnabled(false);
             StartButton().IsEnabled(true);
@@ -1095,14 +1099,39 @@ namespace winrt::DabMeasurementWinUI::implementation
                 StatusSyncText().Text(L"acquiring");
             }
             break;
+        case ReceiverState::recovering:
+            m_metrics_stale = true;
+            RfLiveBadgeText().Text(L"STALE - RECOVERING");
+            RfStatusValueText().Text(L"STALE");
+            RfStatusDetailText().Text(status_text(status.message));
+            RfSyncStateText().Text(L"RECOVERING");
+            RfSyncTrackingText().Text(L"Automatic receiver recovery");
+            RfSyncStateIndicator().Fill(Application::Current().Resources().Lookup(
+                box_value(hstring{ L"WarningBrush" })).as<Brush>());
+            RfLockIndicator().Fill(Application::Current().Resources().Lookup(
+                box_value(hstring{ L"WarningBrush" })).as<Brush>());
+            RfWarningsText().Text(
+                L"Displayed RF values are stale. Receiver progress stopped; automatic recovery is active.");
+            m_rf_was_locked = false;
+            m_rf_lock_started_ns = 0u;
+            SetReceiverControlsEnabled(false);
+            StartButton().IsEnabled(true);
+            StartButtonLabel().Text(L"Stop");
+            StatusSyncText().Text(L"recovering");
+            StatusSyncIndicator().Fill(Application::Current().Resources().Lookup(
+                box_value(hstring{ L"WarningBrush" })).as<Brush>());
+            break;
         case ReceiverState::stopping:
             RfLiveBadgeText().Text(L"STOPPING");
             SetReceiverControlsEnabled(false);
             StartButton().IsEnabled(false);
             StartButtonLabel().Text(L"Stopping...");
             StatusSyncText().Text(L"stopping");
+            StatusSyncIndicator().Fill(Application::Current().Resources().Lookup(
+                box_value(hstring{ L"MutedTextBrush" })).as<Brush>());
             break;
         case ReceiverState::stopped:
+            m_metrics_stale = false;
             m_active_service_id = 0u;
             RfLiveBadgeText().Text(L"IDLE");
             RfStatusValueText().Text(L"IDLE");
@@ -1117,8 +1146,11 @@ namespace winrt::DabMeasurementWinUI::implementation
             StartButton().IsEnabled(true);
             StartButtonLabel().Text(L"Start");
             StatusSyncText().Text(L"idle");
+            StatusSyncIndicator().Fill(Application::Current().Resources().Lookup(
+                box_value(hstring{ L"MutedTextBrush" })).as<Brush>());
             break;
         case ReceiverState::failed:
+            m_metrics_stale = false;
             m_active_service_id = 0u;
             RfLiveBadgeText().Text(L"ERROR");
             RfStatusValueText().Text(L"ERROR");
@@ -1131,10 +1163,16 @@ namespace winrt::DabMeasurementWinUI::implementation
             StartButton().IsEnabled(true);
             StartButtonLabel().Text(L"Start");
             StatusSyncText().Text(L"error");
+            StatusSyncIndicator().Fill(Application::Current().Resources().Lookup(
+                box_value(hstring{ L"WarningBrush" })).as<Brush>());
             break;
         }
 
-        if (status.is_error)
+        if (status.state == ReceiverState::recovering)
+        {
+            DataModeText().Text(L"STALE METRICS");
+        }
+        else if (status.is_error)
         {
             DataModeText().Text(L"RECEIVER ERROR");
         }
@@ -2451,9 +2489,17 @@ namespace winrt::DabMeasurementWinUI::implementation
 
     void MainWindow::ApplySnapshot(dab_receive_snapshot_t const& snapshot)
     {
+        if (m_metrics_stale)
+        {
+            return;
+        }
         DataModeText().Text(L"LIVE METRICS");
         DataSeamText().Text(L"snapshot " + to_hstring(snapshot.sequence));
         StatusSyncText().Text(snapshot.locked != 0 ? L"synchronized" : L"acquiring");
+        StatusSyncIndicator().Fill(Application::Current().Resources().Lookup(
+            box_value(hstring{ snapshot.locked != 0
+                ? L"MeasurementAccentBrush"
+                : L"WarningBrush" })).as<Brush>());
         SampleRateText().Text(snapshot.sample_rate_hz != 0u
             ? format_float(static_cast<float>(snapshot.sample_rate_hz) / 1000000.0f, L" MS/s", 3)
             : hstring{ L"— MS/s" });
@@ -3901,6 +3947,10 @@ namespace winrt::DabMeasurementWinUI::implementation
 
     void MainWindow::UpdatePlots(dab::measurement::MeasurementFrame const& frame)
     {
+        if (m_metrics_stale)
+        {
+            return;
+        }
         DataModeText().Text(L"HIGH-RATE MEASUREMENTS");
         DataSeamText().Text(L"measurement " + to_hstring(frame.sequence));
         SampleCounterText().Text(L"measurement " + to_hstring(frame.sequence));

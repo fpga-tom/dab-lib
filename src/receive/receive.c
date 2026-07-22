@@ -20,6 +20,8 @@ void dab_receive_default_config(dab_receive_config_t *config) {
     config->android_usb_fd = -1;
     config->use_real_device = 1;
     config->measurement_decimation = 1u;
+    config->stream_watchdog_timeout_ms = 1500u;
+    config->decoder_watchdog_timeout_ms = 1500u;
 }
 
 int dab_receive_audio_format_update(dab_receive_audio_format_state_t *state,

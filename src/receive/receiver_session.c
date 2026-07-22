@@ -1084,9 +1084,17 @@ int dab_receive_service(const dab_receive_config_t *receive_config,
                         dab_receive_callback_t receive_callback,
                         void *receive_user) {
     const char *driver = receive_config != 0 ? receive_config->driver : 0;
+    const uint32_t stream_watchdog_timeout_ms = receive_config != 0
+        ? receive_config->stream_watchdog_timeout_ms
+        : 1500u;
+    const uint32_t decoder_watchdog_timeout_ms = receive_config != 0
+        ? receive_config->decoder_watchdog_timeout_ms
+        : 1500u;
 #else
 int dab_receiver_session_run(int argc, char **argv) {
     const char *driver = getenv("DAB_SDR_BACKEND");
+    const uint32_t stream_watchdog_timeout_ms =
+        env_u32("DAB_STREAM_WATCHDOG_TIMEOUT_MS", 1500u);
 #endif
     dab_sdr_open_params_t params = {"sdrplay", NULL, NULL};
     dab_sdr_device_t *device = 0;
@@ -1193,6 +1201,9 @@ int dab_receiver_session_run(int argc, char **argv) {
     uint8_t selected_sid_fallback_reported = 0u;
     uint8_t lock_reported = 0u;
     uint8_t snapshot_pending = 0u;
+    uint64_t decoder_watchdog_samples = 0u;
+    uint64_t samples_since_decoder_progress = 0u;
+    uint8_t decoder_progress_seen = 0u;
     receive_sync_diagnostics_t sync_diagnostics = {0};
     dab_receive_measurement_state_t *measurement_state = 0;
     uint64_t measurement_sequence = 0u;
@@ -1280,6 +1291,8 @@ int dab_receiver_session_run(int argc, char **argv) {
     rtlsdr_config.android_usb_fd = receive_config->android_usb_fd;
     selected_audio_sid = receive_config->service_id;
     selected_audio_sid_valid = (uint8_t)(receive_config->service_id != 0u);
+    decoder_watchdog_samples =
+        ((uint64_t)stream_config.sample_rate * decoder_watchdog_timeout_ms + 999u) / 1000u;
     freq_set = 1u;
 #else
     {
@@ -1562,7 +1575,20 @@ int dab_receiver_session_run(int argc, char **argv) {
                 rc = -2;
                 goto cleanup;
             }
-            if (stream->vtbl->read(stream, &src_block) != DAB_SDR_STATUS_OK) {
+            dab_sdr_status_t const read_status = dab_sdr_stream_read_timeout(
+                stream,
+                &src_block,
+                stream_watchdog_timeout_ms);
+            if (read_status == DAB_SDR_STATUS_TIMEOUT) {
+                fprintf(stderr, "SDR input stalled during warmup\n");
+                (void)receive_emit_status(receive_callback,
+                                          receive_user,
+                                          DAB_RECEIVE_EVENT_STREAM_STALLED,
+                                          "SDR input stalled during receiver warmup");
+                rc = DAB_RECEIVE_RESULT_STREAM_STALLED;
+                goto cleanup;
+            }
+            if (read_status != DAB_SDR_STATUS_OK) {
                 fprintf(stderr, "warmup read failed\n");
                 (void)receive_emit_status(receive_callback,
                                           receive_user,
@@ -1684,9 +1710,34 @@ int dab_receiver_session_run(int argc, char **argv) {
             prev_locked = (uint8_t)(sync.state.locked != 0);
         }
 
-        if (stream->vtbl->read(stream, &src_block) != DAB_SDR_STATUS_OK) {
-            fprintf(stderr, "read failed at block %llu\n", (unsigned long long)blocks_read);
-            goto cleanup;
+        {
+            dab_sdr_status_t const read_status = dab_sdr_stream_read_timeout(
+                stream,
+                &src_block,
+                stream_watchdog_timeout_ms);
+            if (read_status == DAB_SDR_STATUS_TIMEOUT) {
+                fprintf(stderr,
+                        "SDR input stalled at block %llu\n",
+                        (unsigned long long)blocks_read);
+#if defined(DAB_RECEIVE_NO_MAIN)
+                (void)receive_emit_status(receive_callback,
+                                          receive_user,
+                                          DAB_RECEIVE_EVENT_STREAM_STALLED,
+                                          "SDR input stalled; measurements are stale");
+                rc = DAB_RECEIVE_RESULT_STREAM_STALLED;
+#endif
+                goto cleanup;
+            }
+            if (read_status != DAB_SDR_STATUS_OK) {
+                fprintf(stderr, "read failed at block %llu\n", (unsigned long long)blocks_read);
+#if defined(DAB_RECEIVE_NO_MAIN)
+                (void)receive_emit_status(receive_callback,
+                                          receive_user,
+                                          DAB_RECEIVE_EVENT_ERROR,
+                                          "SDR input read failed");
+#endif
+                goto cleanup;
+            }
         }
         blocks_read++;
         if (previous_input_block_timestamp_ns != 0u &&
@@ -1705,6 +1756,30 @@ int dab_receiver_session_run(int argc, char **argv) {
             goto cleanup;
         }
         history_append(&history, &src_block);
+
+#if defined(DAB_RECEIVE_NO_MAIN)
+        if (decoder_progress_seen != 0u) {
+            if (UINT64_MAX - samples_since_decoder_progress < src_block.sample_count) {
+                samples_since_decoder_progress = UINT64_MAX;
+            } else {
+                samples_since_decoder_progress += src_block.sample_count;
+            }
+            if (decoder_watchdog_samples != 0u &&
+                sync.state.locked != 0 &&
+                samples_since_decoder_progress >= decoder_watchdog_samples) {
+                fprintf(stderr,
+                        "DAB decoder stalled while IQ input remained active at block %llu\n",
+                        (unsigned long long)blocks_read);
+                (void)receive_emit_status(
+                    receive_callback,
+                    receive_user,
+                    DAB_RECEIVE_EVENT_DECODER_STALLED,
+                    "DAB decoding stalled while IQ input remains active; measurements are stale");
+                rc = DAB_RECEIVE_RESULT_DECODER_STALLED;
+                goto cleanup;
+            }
+        }
+#endif
 
         if (dab_null_detect_process_i16(&detector, &src_block, &event) < 0) {
             fprintf(stderr, "null detector failed at block %llu\n", (unsigned long long)blocks_read);
@@ -2108,6 +2183,10 @@ int dab_receiver_session_run(int argc, char **argv) {
                     publish_playback_status(&sync);
 #if defined(DAB_RECEIVE_NO_MAIN)
                     snapshot_pending = 1u;
+                    if (sync.state.locked != 0) {
+                        decoder_progress_seen = 1u;
+                        samples_since_decoder_progress = 0u;
+                    }
 #endif
 
                     {

@@ -11,8 +11,16 @@ typedef enum {
     DAB_RECEIVE_EVENT_STATUS = 1,
     DAB_RECEIVE_EVENT_AUDIO_FORMAT = 2,
     DAB_RECEIVE_EVENT_AUDIO_AU = 3,
-    DAB_RECEIVE_EVENT_ERROR = 4
+    DAB_RECEIVE_EVENT_ERROR = 4,
+    DAB_RECEIVE_EVENT_STREAM_STALLED = 5,
+    DAB_RECEIVE_EVENT_DECODER_STALLED = 6
 } dab_receive_event_type_t;
+
+enum {
+    DAB_RECEIVE_RESULT_CANCELLED = -2,
+    DAB_RECEIVE_RESULT_STREAM_STALLED = -3,
+    DAB_RECEIVE_RESULT_DECODER_STALLED = -4
+};
 
 typedef struct {
     dab_receive_event_type_t type;
@@ -279,6 +287,10 @@ typedef struct {
     dab_receive_measurement_callback_t measurement;
     void *measurement_user;
     uint32_t measurement_decimation;
+    /* Zero disables the SDR input watchdog. */
+    uint32_t stream_watchdog_timeout_ms;
+    /* Zero disables the locked DAB decoder-progress watchdog. */
+    uint32_t decoder_watchdog_timeout_ms;
     dab_receive_catalog_callback_t catalog;
     void *catalog_user;
 } dab_receive_config_t;

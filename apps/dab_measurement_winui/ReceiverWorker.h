@@ -19,6 +19,7 @@ namespace dab::measurement
         stopped,
         starting,
         running,
+        recovering,
         stopping,
         failed,
     };
@@ -34,6 +35,8 @@ namespace dab::measurement
         bool bias_tee_enabled{ false };
         bool use_real_device{ true };
         uint32_t measurement_decimation{ 1 };
+        uint32_t stream_watchdog_timeout_ms{ 1500 };
+        uint32_t decoder_watchdog_timeout_ms{ 1500 };
     };
 
     struct ReceiverStatus
@@ -69,9 +72,13 @@ namespace dab::measurement
     private:
         static int CancelCallback(void* user) noexcept;
         static int EventCallback(dab_receive_event_t const* event, void* user) noexcept;
+        static int SnapshotCallback(dab_receive_snapshot_t const* snapshot, void* user) noexcept;
+        static int MeasurementCallback(dab_receive_measurement_frame_t const* frame, void* user) noexcept;
 
         int OnEvent(dab_receive_event_t const& event) noexcept;
         void Run(ReceiverSettings settings) noexcept;
+        void ResetPlaybackState() noexcept;
+        void AccumulateRecoveredSession() noexcept;
         void PublishStatus(ReceiverState state,
                            std::string message,
                            bool is_error = false,
@@ -96,5 +103,15 @@ namespace dab::measurement
         uint32_t m_audio_format_asc_length{ 0u };
         dab_audio_playback_t m_audio_playback{};
         bool m_audio_playback_failed{ false };
+        uint32_t m_recovery_attempt_count{ 0u };
+        uint64_t m_snapshot_sequence_offset{ 0u };
+        uint64_t m_measurement_sequence_offset{ 0u };
+        uint64_t m_blocks_received_offset{ 0u };
+        uint64_t m_dropped_blocks_offset{ 0u };
+        uint64_t m_processing_late_offset{ 0u };
+        uint64_t m_hardware_overruns_offset{ 0u };
+        dab_receive_snapshot_t m_last_session_snapshot{};
+        uint64_t m_last_session_measurement_sequence{ 0u };
+        bool m_last_session_snapshot_valid{ false };
     };
 }

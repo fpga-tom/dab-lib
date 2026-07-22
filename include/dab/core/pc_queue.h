@@ -19,10 +19,17 @@ typedef struct {
     dab_cond_t not_full;
 } dab_pc_queue_t;
 
+enum {
+    DAB_PC_QUEUE_OK = 0,
+    DAB_PC_QUEUE_ERROR = -1,
+    DAB_PC_QUEUE_TIMEOUT = 1
+};
+
 int dab_pc_queue_init(dab_pc_queue_t *queue, void **storage, uint32_t capacity);
 void dab_pc_queue_destroy(dab_pc_queue_t *queue);
 int dab_pc_queue_push(dab_pc_queue_t *queue, void *item);
 int dab_pc_queue_pop(dab_pc_queue_t *queue, void **item);
+int dab_pc_queue_pop_timeout(dab_pc_queue_t *queue, void **item, uint32_t timeout_ms);
 int dab_pc_queue_try_push(dab_pc_queue_t *queue, void *item);
 int dab_pc_queue_try_pop(dab_pc_queue_t *queue, void **item);
 void dab_pc_queue_stop(dab_pc_queue_t *queue);

@@ -2021,7 +2021,7 @@
                 <TextBlock x:Name="StatusDeviceText" Text="SDRplay RSP1A" VerticalAlignment="Center" />
                 <TextBlock Grid.Column="1" x:Name="StatusChannelText" Text="10C" VerticalAlignment="Center" Foreground="{StaticResource SpectrumBrush}" />
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                    <Ellipse Width="7" Height="7" Fill="{StaticResource MeasurementAccentBrush}" />
+                    <Ellipse x:Name="StatusSyncIndicator" Width="7" Height="7" Fill="{StaticResource MutedTextBrush}" />
                     <TextBlock x:Name="StatusSyncText" Text="idle" />
                 </StackPanel>
                 <TextBlock Grid.Column="3" x:Name="StatusRecordText" Text="not recording" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" />

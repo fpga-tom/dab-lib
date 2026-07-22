@@ -149,9 +149,12 @@ static dab_sdr_status_t dab_rtlsdr_stream_stop(struct dab_sdr_stream *stream) {
     return status;
 }
 
-static dab_sdr_status_t dab_rtlsdr_stream_read(struct dab_sdr_stream *stream, dab_sdr_block_view_t *block) {
+static dab_sdr_status_t dab_rtlsdr_stream_read_internal(struct dab_sdr_stream *stream,
+                                                        dab_sdr_block_view_t *block,
+                                                        uint32_t timeout_ms) {
     dab_rtlsdr_stream_t *impl = (dab_rtlsdr_stream_t *)stream;
     dab_iq_block_t *next_block = 0;
+    int queue_result;
 
     if (impl == 0 || block == 0) {
         return DAB_SDR_STATUS_INVALID_ARGUMENT;
@@ -163,7 +166,15 @@ static dab_sdr_status_t dab_rtlsdr_stream_read(struct dab_sdr_stream *stream, da
         (void)dab_iq_block_release(&impl->pool, impl->current_block);
         impl->current_block = 0;
     }
-    if (dab_pc_queue_pop(&impl->filled_blocks, (void **)&next_block) != 0) {
+    queue_result = timeout_ms == 0u
+        ? dab_pc_queue_pop(&impl->filled_blocks, (void **)&next_block)
+        : dab_pc_queue_pop_timeout(&impl->filled_blocks,
+                                   (void **)&next_block,
+                                   timeout_ms);
+    if (queue_result == DAB_PC_QUEUE_TIMEOUT) {
+        return DAB_SDR_STATUS_TIMEOUT;
+    }
+    if (queue_result != DAB_PC_QUEUE_OK) {
         return DAB_SDR_STATUS_ERROR;
     }
 
@@ -209,10 +220,22 @@ static dab_sdr_status_t dab_rtlsdr_stream_diagnostics(
     return DAB_SDR_STATUS_OK;
 }
 
+static dab_sdr_status_t dab_rtlsdr_stream_read(struct dab_sdr_stream *stream,
+                                                dab_sdr_block_view_t *block) {
+    return dab_rtlsdr_stream_read_internal(stream, block, 0u);
+}
+
+static dab_sdr_status_t dab_rtlsdr_stream_read_timeout(struct dab_sdr_stream *stream,
+                                                        dab_sdr_block_view_t *block,
+                                                        uint32_t timeout_ms) {
+    return dab_rtlsdr_stream_read_internal(stream, block, timeout_ms);
+}
+
 static const dab_sdr_stream_vtbl_t DAB_RTLSDR_STREAM_VTBL = {
     dab_rtlsdr_stream_start,
     dab_rtlsdr_stream_stop,
     dab_rtlsdr_stream_read,
+    dab_rtlsdr_stream_read_timeout,
     dab_rtlsdr_stream_diagnostics,
     dab_rtlsdr_stream_destroy
 };
