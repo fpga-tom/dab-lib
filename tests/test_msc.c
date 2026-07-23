@@ -325,6 +325,8 @@ void test_msc_process_frame_with_fic_populates_layout(void) {
     db.subchannels[1].protection_kind = DAB_FIC_PROTECTION_EEP;
     db.subchannels[1].protection_option = 0u;
     db.subchannels[1].protection_level = 0u;
+    db.fig0_ext0_valid = 1u;
+    db.cif_count = 100u;
 
     TEST_ASSERT(dab_msc_init(&state) == 0);
     TEST_ASSERT(dab_msc_process_frame_with_fic(&state, 777u, msc, DAB_TFRAME_MSC_SOFTBITS, &db) == 0);
@@ -604,6 +606,8 @@ void test_msc_process_frame_with_fic_tracks_decoded_component_bindings(void) {
     db.subchannels[1].protection_kind = DAB_FIC_PROTECTION_EEP;
     db.subchannels[1].protection_option = 0u;
     db.subchannels[1].protection_level = 0u;
+    db.fig0_ext0_valid = 1u;
+    db.cif_count = 100u;
 
     db.service_count = 1u;
     db.services[0].sid = 0x3456u;
@@ -625,6 +629,18 @@ void test_msc_process_frame_with_fic_tracks_decoded_component_bindings(void) {
     TEST_ASSERT(state.decoded_components[0].sid == 0x3456u);
     TEST_ASSERT(state.decoded_components[0].subchid == 1u);
     TEST_ASSERT(state.decoded_components[0].tmid == 0u);
+    TEST_ASSERT(state.runtimes[1].deinterleaver_cifs_seen ==
+                DAB_MSC_CIFS_PER_FRAME);
+    TEST_ASSERT(state.runtimes[1].decoded_cif_attempts ==
+                DAB_MSC_CIFS_PER_FRAME);
+    TEST_ASSERT(state.runtimes[1].decoded_cif_successes ==
+                DAB_MSC_CIFS_PER_FRAME);
+    TEST_ASSERT(state.runtimes[1].decoded_cif_failures == 0u);
+    TEST_ASSERT(state.runtimes[1].decoded_output_bytes ==
+                4u * (state.runtimes[1].config.framebits / 8u));
+    TEST_ASSERT(state.cif_counter_valid == 1u);
+    TEST_ASSERT(state.last_cif_count == 100u);
+    TEST_ASSERT(state.cif_discontinuity_count == 0u);
 
     for (cif_index = 0u; cif_index < DAB_MSC_CIFS_PER_FRAME; ++cif_index) {
         TEST_ASSERT(dab_msc_decode_subchannel_cif(msc,
@@ -639,6 +655,21 @@ void test_msc_process_frame_with_fic_tracks_decoded_component_bindings(void) {
                            state.decoded_subchannels[1].data[cif_index],
                            state.decoded_subchannels[1].byte_count[cif_index]) == 0);
     }
+    db.services[0].components[0].tmid = 1u;
+    db.cif_count = 104u;
+    TEST_ASSERT(dab_msc_process_frame_with_fic(&state,
+                                                124u,
+                                                msc,
+                                                DAB_TFRAME_MSC_SOFTBITS,
+                                                &db) == 0);
+    TEST_ASSERT(state.cif_discontinuity_count == 0u);
+    db.cif_count = 120u;
+    TEST_ASSERT(dab_msc_process_frame_with_fic(&state,
+                                                125u,
+                                                msc,
+                                                DAB_TFRAME_MSC_SOFTBITS,
+                                                &db) == 0);
+    TEST_ASSERT(state.cif_discontinuity_count == 1u);
     free(legacy_deinterleaver);
     dab_msc_reset(&state);
 }

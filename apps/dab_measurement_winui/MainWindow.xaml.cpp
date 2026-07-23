@@ -120,6 +120,53 @@ namespace
         }
     }
 
+    hstring msc_protection_text(dab_receive_subchannel_info_t const& subchannel)
+    {
+        wchar_t text[80]{};
+        if (subchannel.protection_kind == 0u)
+        {
+            swprintf_s(text,
+                       L"UEP table %u / index %u",
+                       subchannel.protection_table_switch,
+                       subchannel.protection_index);
+        }
+        else
+        {
+            swprintf_s(text,
+                       L"EEP %u-%s",
+                       subchannel.protection_level + 1u,
+                       subchannel.protection_option == 0u ? L"A" : L"B");
+        }
+        return hstring{ text };
+    }
+
+    hstring bytes_to_hex_lines(uint8_t const* bytes, uint32_t length)
+    {
+        if (bytes == nullptr || length == 0u)
+        {
+            return L"—";
+        }
+        std::wstring result;
+        for (uint32_t offset = 0u; offset < length; offset += 16u)
+        {
+            wchar_t address[16]{};
+            swprintf_s(address, L"%04X  ", offset);
+            result += address;
+            uint32_t const line_end = (std::min)(offset + 16u, length);
+            for (uint32_t index = offset; index < line_end; ++index)
+            {
+                wchar_t byte[4]{};
+                swprintf_s(byte, L"%02X ", bytes[index]);
+                result += byte;
+            }
+            if (line_end < length)
+            {
+                result += L"\r\n";
+            }
+        }
+        return hstring{ result };
+    }
+
     uint64_t file_time_value(FILETIME const& value)
     {
         ULARGE_INTEGER result{};
@@ -490,11 +537,13 @@ namespace winrt::DabMeasurementWinUI::implementation
         else if (metric == L"msc:ber")
         {
             DabTabView().SelectedItem(DabMscTab());
+            MscTabView().SelectedItem(MscErrorTimelineTab());
             DabMscFocusText().Text(L"Selected metric: MSC post-Viterbi BER");
         }
         else if (metric == L"msc:service")
         {
             DabTabView().SelectedItem(DabMscTab());
+            MscTabView().SelectedItem(MscSubchannelsTab());
             DabMscFocusText().Text(L"Selected metric: selected service and protection");
         }
         else
@@ -708,6 +757,167 @@ namespace winrt::DabMeasurementWinUI::implementation
         catch (hresult_error const& error)
         {
             FicFigBrowserStatusText().Text(L"Export failed · " + error.message());
+        }
+    }
+
+    void MainWindow::MscMetricCard_Click(IInspectable const& sender,
+                                          RoutedEventArgs const&)
+    {
+        auto const button = sender.try_as<Button>();
+        if (!button || !button.Tag())
+        {
+            return;
+        }
+        std::wstring_view const metric{ unbox_value<hstring>(button.Tag()) };
+        if (metric.starts_with(L"timeline:"))
+        {
+            MscTabView().SelectedItem(MscErrorTimelineTab());
+        }
+        else if (metric.starts_with(L"buffers:"))
+        {
+            MscTabView().SelectedItem(MscBuffersTab());
+        }
+        else
+        {
+            MscTabView().SelectedItem(MscRawDataTab());
+        }
+    }
+
+    void MainWindow::MscCapacitySegment_Click(IInspectable const& sender,
+                                               RoutedEventArgs const&)
+    {
+        auto const element = sender.try_as<FrameworkElement>();
+        if (element && element.Tag())
+        {
+            SelectMscSubchannel(
+                static_cast<uint8_t>(unbox_value<uint32_t>(element.Tag())));
+        }
+    }
+
+    void MainWindow::MscCapacitySegment_DoubleTapped(
+        IInspectable const& sender,
+        DoubleTappedRoutedEventArgs const& args)
+    {
+        auto const element = sender.try_as<FrameworkElement>();
+        if (!element || !element.Tag())
+        {
+            return;
+        }
+        uint8_t const subchannel_id =
+            static_cast<uint8_t>(unbox_value<uint32_t>(element.Tag()));
+        SelectMscSubchannel(subchannel_id);
+        dab_receive_component_info_t const* component = nullptr;
+        auto const* service =
+            FindMscServiceForSubchannel(subchannel_id, &component);
+        if (service != nullptr)
+        {
+            SelectAudioService(service->service_id);
+            DabTabView().SelectedItem(DabPlusTab());
+            AddTimelineEvent(
+                L"MSC capacity map selected service " +
+                fic_label_text(service->label));
+        }
+        args.Handled(true);
+    }
+
+    void MainWindow::MscSubchannelListView_ItemClick(
+        IInspectable const&,
+        ItemClickEventArgs const& args)
+    {
+        auto const row = args.ClickedItem().try_as<FrameworkElement>();
+        if (row && row.Tag())
+        {
+            SelectMscSubchannel(
+                static_cast<uint8_t>(unbox_value<uint32_t>(row.Tag())));
+        }
+    }
+
+    void MainWindow::MscCompareCapacity_Click(IInspectable const&,
+                                               RoutedEventArgs const&)
+    {
+        RenderMscCapacityMap();
+    }
+
+    winrt::fire_and_forget MainWindow::MscExportCapacity_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        auto lifetime = get_strong();
+        if (!m_have_catalog)
+        {
+            MscCapacityConfigSummaryText().Text(
+                L"Export unavailable · no multiplex database");
+            co_return;
+        }
+        try
+        {
+            std::wstring csv =
+                L"subchannel,service_id,service,start_cu,size_cu,bitrate_kbps,"
+                L"protection,allocation_valid,overlap\r\n";
+            for (uint32_t index = 0u;
+                 index < DAB_RECEIVE_CATALOG_MAX_SUBCHANNELS;
+                 ++index)
+            {
+                auto const& subchannel = m_latest_catalog.subchannels[index];
+                if (subchannel.valid == 0u)
+                {
+                    continue;
+                }
+                dab_receive_component_info_t const* component = nullptr;
+                auto const* service = FindMscServiceForSubchannel(
+                    subchannel.subchannel_id,
+                    &component);
+                hstring const label = service != nullptr
+                    ? fic_label_text(service->label)
+                    : hstring{ L"Unreferenced" };
+                wchar_t row[512]{};
+                swprintf_s(row,
+                           L"%u,0x%08X,\"%s\",%u,%u,%u,\"%s\",%s,%s\r\n",
+                           subchannel.subchannel_id,
+                           service != nullptr ? service->service_id : 0u,
+                           label.c_str(),
+                           subchannel.start_cu,
+                           subchannel.size_cu,
+                           subchannel.bitrate_kbps,
+                           msc_protection_text(subchannel).c_str(),
+                           subchannel.allocation_valid != 0u ? L"true" : L"false",
+                           subchannel.overlaps != 0u ? L"true" : L"false");
+                csv += row;
+            }
+
+            using namespace Windows::Storage;
+            SYSTEMTIME now{};
+            GetLocalTime(&now);
+            wchar_t filename[96]{};
+            swprintf_s(filename,
+                       L"DAB_MSC_Allocation_%04u%02u%02u_%02u%02u%02u.csv",
+                       now.wYear,
+                       now.wMonth,
+                       now.wDay,
+                       now.wHour,
+                       now.wMinute,
+                       now.wSecond);
+            auto const file = co_await DownloadsFolder::CreateFileAsync(
+                filename,
+                CreationCollisionOption::GenerateUniqueName);
+            co_await FileIO::WriteTextAsync(file, hstring{ csv });
+            MscCapacityConfigSummaryText().Text(
+                L"Exported allocation · " + file.Path());
+            AddTimelineEvent(L"MSC allocation exported to " + file.Path());
+        }
+        catch (hresult_error const& error)
+        {
+            MscCapacityConfigSummaryText().Text(
+                L"Allocation export failed · " + error.message());
+        }
+    }
+
+    void MainWindow::MscTimelineOverlay_Click(IInspectable const&,
+                                               RoutedEventArgs const&)
+    {
+        if (MscTimelineCanvas())
+        {
+            UpdateMscTimeline();
         }
     }
 
@@ -1629,6 +1839,7 @@ namespace winrt::DabMeasurementWinUI::implementation
             ClearCatalogView();
             ResetDabOverviewHistory();
             ResetFicMeasurementSession();
+            ResetMscMeasurementSession();
             m_fic_mailbox_history_version = m_mailbox_version;
             m_rf_history_write = 0u;
             m_rf_history_count = 0u;
@@ -2991,10 +3202,1128 @@ namespace winrt::DabMeasurementWinUI::implementation
         FicDatabaseListView().Items().Clear();
     }
 
+    dab_receive_subchannel_info_t const* MainWindow::FindMscSubchannel(
+        uint8_t subchannel_id) const noexcept
+    {
+        if (!m_have_catalog)
+        {
+            return nullptr;
+        }
+        for (auto const& subchannel : m_latest_catalog.subchannels)
+        {
+            if (subchannel.valid != 0u &&
+                subchannel.subchannel_id == subchannel_id)
+            {
+                return &subchannel;
+            }
+        }
+        return nullptr;
+    }
+
+    dab_receive_service_info_t const* MainWindow::FindMscServiceForSubchannel(
+        uint8_t subchannel_id,
+        dab_receive_component_info_t const** component) const noexcept
+    {
+        if (component != nullptr)
+        {
+            *component = nullptr;
+        }
+        if (!m_have_catalog)
+        {
+            return nullptr;
+        }
+        for (uint32_t service_index = 0u;
+             service_index < m_latest_catalog.service_count;
+             ++service_index)
+        {
+            auto const& service = m_latest_catalog.services[service_index];
+            for (uint32_t component_index = 0u;
+                 component_index < service.component_count;
+                 ++component_index)
+            {
+                auto const& candidate = service.components[component_index];
+                if (candidate.has_subchannel != 0u &&
+                    candidate.subchannel_id == subchannel_id)
+                {
+                    if (component != nullptr)
+                    {
+                        *component = &candidate;
+                    }
+                    return &service;
+                }
+            }
+        }
+        return nullptr;
+    }
+
+    void MainWindow::SelectMscSubchannel(uint8_t subchannel_id)
+    {
+        if (FindMscSubchannel(subchannel_id) == nullptr)
+        {
+            return;
+        }
+        if (m_msc_selected_subchannel != subchannel_id)
+        {
+            m_msc_selected_subchannel = subchannel_id;
+            m_msc_measured_output_valid = false;
+            m_msc_previous_output_bytes = 0u;
+            m_msc_previous_output_timestamp_ns = 0u;
+        }
+        m_msc_live_selection =
+            m_msc_have_snapshot &&
+            m_msc_latest_snapshot.msc_selected_subchannel_valid != 0 &&
+            m_msc_latest_snapshot.msc_selected_subchannel_id == subchannel_id;
+        UpdateMscSelectedDetails();
+        RenderMscCapacityMap();
+        RefreshMscSubchannelTable();
+    }
+
+    void MainWindow::UpdateMscSelectedDetails()
+    {
+        auto const* subchannel = FindMscSubchannel(m_msc_selected_subchannel);
+        if (subchannel == nullptr)
+        {
+            MscCapacitySelectedText().Text(L"No subchannel selected");
+            MscCapacityAddressText().Text(L"—");
+            MscCapacitySizeText().Text(L"—");
+            MscCapacityBitrateText().Text(L"—");
+            MscCapacityProtectionText().Text(L"—");
+            MscDetailIdText().Text(L"—");
+            MscDetailAddressText().Text(L"—");
+            MscDetailCapacityText().Text(L"—");
+            MscDetailProtectionText().Text(L"—");
+            MscDetailExpectedRateText().Text(L"—");
+            MscDetailMeasuredRateText().Text(L"—");
+            MscDetailPuncturingText().Text(L"—");
+            MscDetailDeinterleaverText().Text(L"—");
+            MscDetailViterbiText().Text(L"—");
+            MscDetailDecodedText().Text(L"—");
+            MscDetailDroppedText().Text(L"—");
+            return;
+        }
+
+        dab_receive_component_info_t const* component = nullptr;
+        auto const* service = FindMscServiceForSubchannel(
+            subchannel->subchannel_id,
+            &component);
+        hstring label = service != nullptr
+            ? fic_label_text(service->label)
+            : hstring{ L"Unreferenced allocation" };
+        if (label.empty())
+        {
+            label = L"Unnamed service";
+        }
+        MscCapacitySelectedText().Text(
+            label + L" · Subchannel " + to_hstring(subchannel->subchannel_id));
+        MscCapacityAddressText().Text(
+            to_hstring(subchannel->start_cu) + L" CU");
+        MscCapacitySizeText().Text(
+            to_hstring(subchannel->size_cu) + L" CU");
+        MscCapacityBitrateText().Text(
+            subchannel->bitrate_kbps != 0u
+                ? to_hstring(subchannel->bitrate_kbps) + L" kbit/s"
+                : hstring{ L"Unresolved" });
+        MscCapacityProtectionText().Text(msc_protection_text(*subchannel));
+
+        MscDetailIdText().Text(to_hstring(subchannel->subchannel_id));
+        MscDetailAddressText().Text(
+            to_hstring(subchannel->start_cu) + L" CU");
+        MscDetailCapacityText().Text(
+            to_hstring(subchannel->size_cu) + L" CU");
+        MscDetailProtectionText().Text(msc_protection_text(*subchannel));
+        MscDetailExpectedRateText().Text(
+            subchannel->bitrate_kbps != 0u
+                ? to_hstring(subchannel->bitrate_kbps) + L" kbit/s"
+                : hstring{ L"Unresolved" });
+
+        if (!m_msc_live_selection || !m_msc_have_snapshot)
+        {
+            MscDetailMeasuredRateText().Text(L"Not decoded");
+            MscDetailPuncturingText().Text(
+                subchannel->allocation_valid != 0u
+                    ? hstring{ L"Configuration valid; select service to decode" }
+                    : hstring{ L"Invalid allocation" });
+            MscDetailDeinterleaverText().Text(L"Not active");
+            MscDetailViterbiText().Text(L"Not measured");
+            MscDetailDecodedText().Text(L"0");
+            MscDetailDroppedText().Text(L"Not measured");
+            return;
+        }
+
+        auto const& snapshot = m_msc_latest_snapshot;
+        MscDetailMeasuredRateText().Text(m_msc_measured_output_valid
+            ? format_float(m_msc_measured_output_kbps, L" kbit/s", 3)
+            : hstring{ L"Measuring…" });
+        MscDetailPuncturingText().Text(snapshot.msc_puncturing_valid != 0u
+            ? L"Valid"
+            : L"Invalid or unresolved");
+        uint64_t const phases =
+            (std::min)(snapshot.msc_deinterleaver_cifs_seen, 16ull);
+        MscDetailDeinterleaverText().Text(
+            phases >= 16u
+                ? hstring{ L"Ready · 16/16 phases" }
+                : to_hstring(phases) + L"/16 phases");
+        MscDetailViterbiText().Text(
+            snapshot.msc_input_confidence_samples != 0u
+                ? format_float(snapshot.msc_input_confidence_percent, L"%", 1)
+                : hstring{ L"—" });
+        MscDetailDecodedText().Text(
+            to_hstring(snapshot.msc_cif_decode_successes));
+        MscDetailDroppedText().Text(
+            to_hstring(snapshot.msc_cif_decode_failures) + L" failed · " +
+            to_hstring(snapshot.msc_cif_discontinuity_count) +
+            L" counter discontinuities");
+    }
+
+    void MainWindow::RenderMscCapacityMap()
+    {
+        if (!MscCapacityCanvas())
+        {
+            return;
+        }
+        auto children = MscCapacityCanvas().Children();
+        children.Clear();
+        double const width = (std::max)(MscCapacityCanvas().ActualWidth(), 900.0);
+        constexpr double current_top = 18.0;
+        constexpr double current_height = 72.0;
+
+        Microsoft::UI::Xaml::Shapes::Rectangle unused;
+        unused.Width(width);
+        unused.Height(current_height);
+        unused.Fill(SolidColorBrush{ ColorHelper::FromArgb(
+            0xFF, 0x14, 0x20, 0x2D) });
+        unused.Stroke(SolidColorBrush{ ColorHelper::FromArgb(
+            0xFF, 0x3A, 0x4B, 0x5E) });
+        Canvas::SetTop(unused, current_top);
+        children.Append(unused);
+
+        if (!m_have_catalog)
+        {
+            MscCapacityCifText().Text(L"CIF —");
+            MscCapacityUsageText().Text(L"—");
+            MscCapacityConfigSummaryText().Text(
+                L"Awaiting FIC subchannel organisation");
+            return;
+        }
+
+        MscCapacityCifText().Text(
+            L"CIF " + to_hstring(m_latest_catalog.cif_count));
+        static std::array<Color, 8u> const colours{
+            ColorHelper::FromArgb(0xFF, 0x18, 0x8F, 0xA8),
+            ColorHelper::FromArgb(0xFF, 0x31, 0x82, 0xCE),
+            ColorHelper::FromArgb(0xFF, 0x7C, 0x5C, 0xD6),
+            ColorHelper::FromArgb(0xFF, 0x2B, 0xA8, 0x75),
+            ColorHelper::FromArgb(0xFF, 0xB7, 0x79, 0x1F),
+            ColorHelper::FromArgb(0xFF, 0xB5, 0x4A, 0x6B),
+            ColorHelper::FromArgb(0xFF, 0x52, 0x88, 0x45),
+            ColorHelper::FromArgb(0xFF, 0x4E, 0x70, 0xA9)
+        };
+
+        auto append_allocation =
+            [&](dab_receive_subchannel_info_t const& subchannel,
+                dab_receive_catalog_t const& catalog,
+                double top,
+                double height,
+                bool interactive)
+        {
+            if (subchannel.valid == 0u)
+            {
+                return;
+            }
+            double const left = width *
+                static_cast<double>((std::min)(
+                    subchannel.start_cu,
+                    static_cast<uint16_t>(DAB_RECEIVE_MSC_CAPACITY_UNITS))) /
+                static_cast<double>(DAB_RECEIVE_MSC_CAPACITY_UNITS);
+            uint32_t const bounded_end = (std::min)(
+                static_cast<uint32_t>(subchannel.start_cu) +
+                    static_cast<uint32_t>(subchannel.size_cu),
+                static_cast<uint32_t>(DAB_RECEIVE_MSC_CAPACITY_UNITS));
+            double const right = width *
+                static_cast<double>(bounded_end) /
+                static_cast<double>(DAB_RECEIVE_MSC_CAPACITY_UNITS);
+            double const segment_width = (std::max)(right - left, 3.0);
+
+            dab_receive_service_info_t const* service = nullptr;
+            dab_receive_component_info_t const* component = nullptr;
+            for (uint32_t service_index = 0u;
+                 service_index < catalog.service_count && service == nullptr;
+                 ++service_index)
+            {
+                auto const& candidate_service = catalog.services[service_index];
+                for (uint32_t component_index = 0u;
+                     component_index < candidate_service.component_count;
+                     ++component_index)
+                {
+                    auto const& candidate =
+                        candidate_service.components[component_index];
+                    if (candidate.has_subchannel != 0u &&
+                        candidate.subchannel_id == subchannel.subchannel_id)
+                    {
+                        service = &candidate_service;
+                        component = &candidate;
+                        break;
+                    }
+                }
+            }
+            hstring label = service != nullptr
+                ? fic_label_text(service->label)
+                : hstring{ L"Unreferenced" };
+            if (label.empty())
+            {
+                label = L"Unnamed service";
+            }
+
+            Button segment;
+            segment.Tag(box_value(static_cast<uint32_t>(
+                subchannel.subchannel_id)));
+            segment.Width(segment_width);
+            segment.Height(height);
+            segment.Padding(Thickness{ 5.0, 2.0, 5.0, 2.0 });
+            segment.HorizontalContentAlignment(HorizontalAlignment::Left);
+            segment.VerticalContentAlignment(VerticalAlignment::Center);
+            bool const allocation_warning =
+                subchannel.allocation_valid == 0u ||
+                subchannel.overlaps != 0u;
+            Color const fill = allocation_warning
+                ? ColorHelper::FromArgb(0xFF, 0xB4, 0x2D, 0x3B)
+                : colours[subchannel.subchannel_id % colours.size()];
+            segment.Background(SolidColorBrush{ fill });
+            segment.BorderBrush(SolidColorBrush{
+                subchannel.subchannel_id == m_msc_selected_subchannel
+                    ? ColorHelper::FromArgb(0xFF, 0xF5, 0xF7, 0xFA)
+                    : ColorHelper::FromArgb(0xFF, 0x09, 0x12, 0x1D) });
+            double const border_width =
+                subchannel.subchannel_id == m_msc_selected_subchannel
+                    ? 3.0
+                    : 1.0;
+            segment.BorderThickness(Thickness{
+                border_width, border_width, border_width, border_width });
+
+            TextBlock text;
+            text.Text(segment_width >= 95.0
+                ? label + L"\nSubch " +
+                    to_hstring(subchannel.subchannel_id)
+                : L"S" + to_hstring(subchannel.subchannel_id));
+            text.TextTrimming(TextTrimming::CharacterEllipsis);
+            text.FontSize(interactive ? 11.0 : 9.0);
+            segment.Content(text);
+
+            hstring tooltip =
+                label + L"\nSubchannel " +
+                to_hstring(subchannel.subchannel_id) +
+                L" · Address " + to_hstring(subchannel.start_cu) +
+                L" CU · Size " + to_hstring(subchannel.size_cu) +
+                L" CU\n" + to_hstring(subchannel.bitrate_kbps) +
+                L" kbit/s · " + msc_protection_text(subchannel);
+            if (allocation_warning)
+            {
+                tooltip = tooltip + L"\nWarning: invalid or overlapping allocation";
+            }
+            ToolTipService::SetToolTip(segment, box_value(tooltip));
+            if (interactive)
+            {
+                segment.Click({ this, &MainWindow::MscCapacitySegment_Click });
+                segment.DoubleTapped(
+                    { this, &MainWindow::MscCapacitySegment_DoubleTapped });
+            }
+            else
+            {
+                segment.IsHitTestVisible(false);
+                segment.Opacity(0.48);
+            }
+            Canvas::SetLeft(segment, left);
+            Canvas::SetTop(segment, top);
+            children.Append(segment);
+        };
+
+        for (auto const& subchannel : m_latest_catalog.subchannels)
+        {
+            append_allocation(
+                subchannel,
+                m_latest_catalog,
+                current_top,
+                current_height,
+                true);
+        }
+
+        auto const compare_checked = MscCompareCapacityToggle().IsChecked();
+        bool const compare =
+            compare_checked && compare_checked.Value() &&
+            m_have_previous_catalog;
+        if (compare)
+        {
+            for (auto const& subchannel : m_previous_catalog.subchannels)
+            {
+                append_allocation(
+                    subchannel,
+                    m_previous_catalog,
+                    108.0,
+                    27.0,
+                    false);
+            }
+            MscCapacityConfigSummaryText().Text(
+                L"Current allocation above · previous FIC configuration below");
+        }
+        else
+        {
+            MscCapacityConfigSummaryText().Text(
+                m_latest_catalog.database_consistent != 0u
+                    ? hstring{ L"Allocation is consistent" }
+                    : to_hstring(
+                        m_latest_catalog.overlapping_subchannel_count) +
+                        L" overlapping · " +
+                        to_hstring(m_latest_catalog.invalid_subchannel_count) +
+                        L" invalid allocation(s)");
+        }
+        MscCapacityUsageText().Text(
+            to_hstring(m_latest_catalog.allocated_capacity_units) +
+            L" CU allocated · " +
+            to_hstring(m_latest_catalog.unused_capacity_units) +
+            L" CU unused");
+    }
+
+    void MainWindow::RefreshMscSubchannelTable()
+    {
+        if (!MscSubchannelListView())
+        {
+            return;
+        }
+        auto items = MscSubchannelListView().Items();
+        items.Clear();
+        if (!m_have_catalog)
+        {
+            ListViewItem placeholder;
+            placeholder.Content(box_value(L"Awaiting FIC subchannel definitions"));
+            placeholder.IsEnabled(false);
+            items.Append(placeholder);
+            return;
+        }
+
+        for (auto const& subchannel : m_latest_catalog.subchannels)
+        {
+            if (subchannel.valid == 0u)
+            {
+                continue;
+            }
+            dab_receive_component_info_t const* component = nullptr;
+            auto const* service = FindMscServiceForSubchannel(
+                subchannel.subchannel_id,
+                &component);
+            hstring label = service != nullptr
+                ? fic_label_text(service->label)
+                : hstring{ L"Unreferenced" };
+            if (label.empty())
+            {
+                label = L"Unnamed service";
+            }
+            bool const live =
+                m_msc_live_selection &&
+                subchannel.subchannel_id == m_msc_selected_subchannel;
+            hstring status = subchannel.allocation_valid == 0u
+                ? hstring{ L"Invalid" }
+                : (subchannel.overlaps != 0u
+                    ? hstring{ L"Overlap" }
+                    : (live ? hstring{ L"Decoding" }
+                            : hstring{ L"Allocated" }));
+            hstring const ber =
+                live && m_msc_latest_snapshot.msc_ber_valid != 0
+                    ? format_scientific(m_msc_latest_snapshot.msc_ber)
+                    : hstring{ L"—" };
+            float const buffer_percent =
+                live && m_msc_latest_snapshot.msc_dabplus_columns_filled != 0u
+                    ? 100.0f *
+                        static_cast<float>(
+                            m_msc_latest_snapshot.msc_dabplus_columns_filled) /
+                        120.0f
+                    : 0.0f;
+
+            StackPanel row;
+            row.Orientation(Orientation::Horizontal);
+            row.Tag(box_value(static_cast<uint32_t>(
+                subchannel.subchannel_id)));
+            auto append = [&](hstring const& value, double width)
+            {
+                TextBlock cell;
+                cell.Text(value);
+                cell.Width(width);
+                cell.TextTrimming(TextTrimming::CharacterEllipsis);
+                cell.VerticalAlignment(VerticalAlignment::Center);
+                row.Children().Append(cell);
+            };
+            append(to_hstring(subchannel.subchannel_id), 70.0);
+            append(label, 330.0);
+            append(to_hstring(subchannel.bitrate_kbps), 95.0);
+            append(msc_protection_text(subchannel), 100.0);
+            append(ber, 120.0);
+            append(live
+                ? format_float(buffer_percent, L"%", 0)
+                : hstring{ L"—" }, 100.0);
+            append(status, 125.0);
+            items.Append(row);
+        }
+    }
+
+    void MainWindow::AppendMscHistory(dab_receive_snapshot_t const& snapshot)
+    {
+        if (!m_msc_live_selection || snapshot.timestamp_ns == 0u)
+        {
+            return;
+        }
+        if (m_msc_history_count != 0u)
+        {
+            size_t const last =
+                (m_msc_history_write + msc_history_capacity - 1u) %
+                msc_history_capacity;
+            if (m_msc_history[last].timestamp_ns == snapshot.timestamp_ns)
+            {
+                return;
+            }
+        }
+        MscHistorySample sample{};
+        sample.timestamp_ns = snapshot.timestamp_ns;
+        sample.pre_ber = snapshot.msc_ber;
+        sample.ber_valid = snapshot.msc_ber_valid != 0;
+        sample.confidence_percent = snapshot.msc_input_confidence_percent;
+        sample.confidence_valid =
+            snapshot.msc_input_confidence_samples != 0u;
+        sample.service_buffer_percent = std::clamp(
+            100.0f * static_cast<float>(
+                snapshot.msc_dabplus_columns_filled) / 120.0f,
+            0.0f,
+            100.0f);
+        sample.output_kbps = m_msc_measured_output_kbps;
+        sample.output_valid = m_msc_measured_output_valid;
+        sample.processing_latency_ms =
+            static_cast<float>(snapshot.processing_latency_ns) / 1000000.0f;
+        sample.live = true;
+        m_msc_history[m_msc_history_write] = sample;
+        m_msc_history_write =
+            (m_msc_history_write + 1u) % msc_history_capacity;
+        m_msc_history_count =
+            (std::min)(m_msc_history_count + 1u, msc_history_capacity);
+    }
+
+    void MainWindow::UpdateMscTimeline()
+    {
+        if (!MscTimelineCanvas())
+        {
+            return;
+        }
+        PointCollection ber;
+        PointCollection confidence;
+        PointCollection buffer;
+        PointCollection output;
+        PointCollection latency;
+        if (m_msc_history_count == 0u)
+        {
+            MscTimelineBerTrace().Points(ber);
+            MscTimelineConfidenceTrace().Points(confidence);
+            MscTimelineBufferTrace().Points(buffer);
+            MscTimelineOutputTrace().Points(output);
+            MscTimelineLatencyTrace().Points(latency);
+            return;
+        }
+
+        uint64_t period_seconds = 60u;
+        auto const period_item =
+            MscTimelinePeriodComboBox().SelectedItem().try_as<ComboBoxItem>();
+        if (period_item && period_item.Tag())
+        {
+            period_seconds = std::wcstoull(
+                unbox_value<hstring>(period_item.Tag()).c_str(),
+                nullptr,
+                10);
+        }
+        size_t const first_ring =
+            (m_msc_history_write + msc_history_capacity -
+             m_msc_history_count) % msc_history_capacity;
+        size_t const latest_ring =
+            (m_msc_history_write + msc_history_capacity - 1u) %
+            msc_history_capacity;
+        uint64_t const latest_ns = m_msc_history[latest_ring].timestamp_ns;
+        uint64_t const start_ns =
+            latest_ns > period_seconds * 1000000000ull
+                ? latest_ns - period_seconds * 1000000000ull
+                : 0u;
+        double const width = (std::max)(
+            MscTimelineCanvas().ActualWidth(), 900.0);
+        double const height = (std::max)(
+            MscTimelineCanvas().ActualHeight(), 245.0);
+        auto enabled = [](CheckBox const& check_box)
+        {
+            auto const value = check_box.IsChecked();
+            return value && value.Value();
+        };
+        bool const show_ber = enabled(MscTimelineBerCheckBox());
+        bool const show_confidence =
+            enabled(MscTimelineConfidenceCheckBox());
+        bool const show_buffer = enabled(MscTimelineBufferCheckBox());
+        bool const show_output = enabled(MscTimelineOutputCheckBox());
+        bool const show_latency = enabled(MscTimelineLatencyCheckBox());
+        float const expected_kbps =
+            m_msc_latest_snapshot.msc_decoder_bitrate_kbps != 0u
+                ? static_cast<float>(
+                    m_msc_latest_snapshot.msc_decoder_bitrate_kbps)
+                : 192.0f;
+
+        for (size_t offset = 0u; offset < m_msc_history_count; ++offset)
+        {
+            auto const& sample = m_msc_history[
+                (first_ring + offset) % msc_history_capacity];
+            if (sample.timestamp_ns < start_ns)
+            {
+                continue;
+            }
+            double const x = period_seconds != 0u
+                ? width * std::clamp(
+                    static_cast<double>(sample.timestamp_ns - start_ns) /
+                        static_cast<double>(
+                            period_seconds * 1000000000ull),
+                    0.0,
+                    1.0)
+                : 0.0;
+            if (show_ber && sample.ber_valid)
+            {
+                float const log_ber = std::log10(
+                    std::clamp(sample.pre_ber, 1.0e-7f, 1.0e-1f));
+                double const normalized =
+                    std::clamp(static_cast<double>(
+                        (log_ber + 7.0f) / 6.0f), 0.0, 1.0);
+                ber.Append(Point{
+                    static_cast<float>(x),
+                    static_cast<float>(height * (1.0 - normalized)) });
+            }
+            if (show_confidence && sample.confidence_valid)
+            {
+                confidence.Append(Point{
+                    static_cast<float>(x),
+                    static_cast<float>(
+                        height * (1.0 - std::clamp(
+                            sample.confidence_percent / 100.0f,
+                            0.0f,
+                            1.0f))) });
+            }
+            if (show_buffer)
+            {
+                buffer.Append(Point{
+                    static_cast<float>(x),
+                    static_cast<float>(
+                        height * (1.0 - std::clamp(
+                            sample.service_buffer_percent / 100.0f,
+                            0.0f,
+                            1.0f))) });
+            }
+            if (show_output && sample.output_valid)
+            {
+                output.Append(Point{
+                    static_cast<float>(x),
+                    static_cast<float>(
+                        height * (1.0 - std::clamp(
+                            sample.output_kbps / expected_kbps,
+                            0.0f,
+                            1.2f) / 1.2f)) });
+            }
+            if (show_latency)
+            {
+                latency.Append(Point{
+                    static_cast<float>(x),
+                    static_cast<float>(
+                        height * (1.0 - std::clamp(
+                            sample.processing_latency_ms / 20.0f,
+                            0.0f,
+                            1.0f))) });
+            }
+        }
+        MscTimelineBerTrace().Points(ber);
+        MscTimelineConfidenceTrace().Points(confidence);
+        MscTimelineBufferTrace().Points(buffer);
+        MscTimelineOutputTrace().Points(output);
+        MscTimelineLatencyTrace().Points(latency);
+    }
+
+    void MainWindow::UpdateMscAlarms(
+        dab_receive_snapshot_t const& snapshot)
+    {
+        auto alarms = MscAlarmListView().Items();
+        alarms.Clear();
+        auto append_alarm = [&](hstring const& value)
+        {
+            TextBlock item;
+            item.Text(L"⚠ " + value);
+            item.TextWrapping(TextWrapping::Wrap);
+            item.Foreground(Application::Current().Resources().Lookup(
+                box_value(hstring{ L"WarningBrush" })).as<Brush>());
+            alarms.Append(item);
+        };
+
+        bool const new_decode_failure =
+            snapshot.msc_cif_decode_failures >
+            m_msc_last_cif_failure_count;
+        bool const new_discontinuity =
+            snapshot.msc_cif_discontinuity_count >
+            m_msc_last_cif_discontinuity_count;
+        if (m_msc_live_selection &&
+            snapshot.msc_ber_valid != 0 &&
+            snapshot.msc_ber > 1.0e-3f)
+        {
+            append_alarm(
+                L"Pre-Viterbi pseudo-BER above 1 × 10⁻³");
+        }
+        if (m_msc_live_selection &&
+            snapshot.msc_input_confidence_samples != 0u &&
+            snapshot.msc_input_confidence_percent < 55.0f)
+        {
+            append_alarm(L"Viterbi input confidence below 55%");
+        }
+        if (m_msc_live_selection &&
+            snapshot.msc_frames_seen >= 16u &&
+            snapshot.msc_deinterleaver_cifs_seen < 16u)
+        {
+            append_alarm(L"Time deinterleaver is not ready");
+        }
+        if (new_decode_failure)
+        {
+            append_alarm(L"Subchannel CIF decode failure observed");
+        }
+        if (new_discontinuity)
+        {
+            append_alarm(L"FIC-signalled CIF counter discontinuity");
+        }
+        if (m_msc_live_selection &&
+            m_msc_measured_output_valid &&
+            snapshot.msc_decoder_bitrate_kbps != 0u)
+        {
+            float const expected =
+                static_cast<float>(snapshot.msc_decoder_bitrate_kbps);
+            if (std::abs(m_msc_measured_output_kbps - expected) >
+                expected * 0.02f)
+            {
+                append_alarm(L"Measured output bitrate differs by more than 2%");
+            }
+        }
+        if (snapshot.processing_late_count != 0u)
+        {
+            append_alarm(
+                to_hstring(snapshot.processing_late_count) +
+                L" receiver processing-late block(s)");
+        }
+        if (snapshot.dropped_blocks != 0u)
+        {
+            append_alarm(
+                to_hstring(snapshot.dropped_blocks) +
+                L" dropped SDR input block(s)");
+        }
+        if (m_have_catalog &&
+            m_latest_catalog.overlapping_subchannel_count != 0u)
+        {
+            append_alarm(
+                to_hstring(
+                    m_latest_catalog.overlapping_subchannel_count) +
+                L" overlapping subchannel allocation(s)");
+        }
+        if (m_have_catalog &&
+            m_latest_catalog.invalid_subchannel_count != 0u)
+        {
+            append_alarm(
+                to_hstring(m_latest_catalog.invalid_subchannel_count) +
+                L" invalid subchannel allocation(s)");
+        }
+        if (m_msc_selected_subchannel != 0xFFu &&
+            FindMscSubchannel(m_msc_selected_subchannel) == nullptr)
+        {
+            append_alarm(L"Selected service/subchannel disappeared");
+        }
+
+        if (alarms.Size() == 0u)
+        {
+            TextBlock clear;
+            clear.Text(L"No current MSC alarms");
+            clear.Foreground(Application::Current().Resources().Lookup(
+                box_value(hstring{ L"MutedTextBrush" })).as<Brush>());
+            alarms.Append(clear);
+        }
+
+        auto events = MscErrorEventList().Items();
+        auto append_event = [&](hstring const& description)
+        {
+            TextBlock event;
+            event.Text(local_clock_text() + L" · Warning · " + description);
+            event.TextWrapping(TextWrapping::Wrap);
+            events.Append(event);
+            while (events.Size() > 50u)
+            {
+                events.RemoveAt(0u);
+            }
+        };
+        if (new_decode_failure)
+        {
+            append_event(
+                L"CIF decode failures +" +
+                to_hstring(snapshot.msc_cif_decode_failures -
+                           m_msc_last_cif_failure_count));
+        }
+        if (new_discontinuity)
+        {
+            append_event(
+                L"FIC CIF counter discontinuities +" +
+                to_hstring(snapshot.msc_cif_discontinuity_count -
+                           m_msc_last_cif_discontinuity_count));
+        }
+        m_msc_last_cif_failure_count =
+            snapshot.msc_cif_decode_failures;
+        m_msc_last_cif_discontinuity_count =
+            snapshot.msc_cif_discontinuity_count;
+    }
+
+    void MainWindow::ResetMscMeasurementSession()
+    {
+        m_previous_catalog = {};
+        m_have_previous_catalog = false;
+        m_msc_selected_subchannel = 0xFFu;
+        m_msc_latest_snapshot = {};
+        m_msc_have_snapshot = false;
+        m_msc_live_selection = false;
+        m_msc_measured_output_kbps = 0.0f;
+        m_msc_measured_output_valid = false;
+        m_msc_previous_output_bytes = 0u;
+        m_msc_previous_output_timestamp_ns = 0u;
+        m_msc_max_processing_latency_ns = 0u;
+        m_msc_last_cif_failure_count = 0u;
+        m_msc_last_cif_discontinuity_count = 0u;
+        m_msc_history = {};
+        m_msc_history_write = 0u;
+        m_msc_history_count = 0u;
+        if (MscErrorEventList())
+        {
+            MscErrorEventList().Items().Clear();
+        }
+        if (MscAlarmListView())
+        {
+            MscAlarmListView().Items().Clear();
+        }
+        if (MscCapacityCanvas())
+        {
+            RenderMscCapacityMap();
+        }
+        if (MscSubchannelListView())
+        {
+            RefreshMscSubchannelTable();
+        }
+        UpdateMscTimeline();
+        UpdateMscSelectedDetails();
+    }
+
+    void MainWindow::ApplyMscSnapshot(
+        dab_receive_snapshot_t const& snapshot)
+    {
+        bool const followed_live_selection = m_msc_live_selection;
+        uint8_t const previous_subchannel = m_msc_selected_subchannel;
+        m_msc_latest_snapshot = snapshot;
+        m_msc_have_snapshot = true;
+
+        if (snapshot.msc_selected_subchannel_valid != 0 &&
+            FindMscSubchannel(snapshot.msc_selected_subchannel_id) != nullptr &&
+            (m_msc_selected_subchannel == 0xFFu ||
+             (followed_live_selection &&
+              previous_subchannel != snapshot.msc_selected_subchannel_id)))
+        {
+            m_msc_selected_subchannel =
+                snapshot.msc_selected_subchannel_id;
+            m_msc_previous_output_bytes = 0u;
+            m_msc_previous_output_timestamp_ns = 0u;
+            m_msc_measured_output_valid = false;
+        }
+        m_msc_live_selection =
+            snapshot.msc_selected_subchannel_valid != 0 &&
+            snapshot.msc_selected_subchannel_id ==
+                m_msc_selected_subchannel;
+
+        if (m_msc_live_selection)
+        {
+            if (m_msc_previous_output_timestamp_ns != 0u &&
+                snapshot.timestamp_ns >
+                    m_msc_previous_output_timestamp_ns &&
+                snapshot.msc_output_bytes >=
+                    m_msc_previous_output_bytes)
+            {
+                double const seconds =
+                    static_cast<double>(
+                        snapshot.timestamp_ns -
+                        m_msc_previous_output_timestamp_ns) /
+                    1000000000.0;
+                float const instantaneous =
+                    static_cast<float>(
+                        static_cast<double>(
+                            snapshot.msc_output_bytes -
+                            m_msc_previous_output_bytes) *
+                        8.0 / 1000.0 / seconds);
+                if (std::isfinite(instantaneous))
+                {
+                    m_msc_measured_output_kbps =
+                        m_msc_measured_output_valid
+                            ? 0.75f * m_msc_measured_output_kbps +
+                                0.25f * instantaneous
+                            : instantaneous;
+                    m_msc_measured_output_valid = true;
+                }
+            }
+            m_msc_previous_output_bytes = snapshot.msc_output_bytes;
+            m_msc_previous_output_timestamp_ns = snapshot.timestamp_ns;
+        }
+
+        m_msc_max_processing_latency_ns = (std::max)(
+            m_msc_max_processing_latency_ns,
+            snapshot.processing_latency_ns);
+
+        auto const* subchannel =
+            FindMscSubchannel(m_msc_selected_subchannel);
+        dab_receive_component_info_t const* component = nullptr;
+        auto const* service = subchannel != nullptr
+            ? FindMscServiceForSubchannel(
+                subchannel->subchannel_id,
+                &component)
+            : nullptr;
+        hstring service_label = service != nullptr
+            ? fic_label_text(service->label)
+            : hstring{ L"No service" };
+        if (service_label.empty())
+        {
+            service_label = L"Unnamed service";
+        }
+        if (subchannel != nullptr)
+        {
+            MscHeaderContextText().Text(
+                L"Service: " + service_label +
+                L" · Subchannel " +
+                to_hstring(subchannel->subchannel_id) +
+                L" · " + to_hstring(subchannel->bitrate_kbps) +
+                L" kbit/s · " + msc_protection_text(*subchannel));
+        }
+        else
+        {
+            MscHeaderContextText().Text(
+                L"Awaiting selected service and subchannel");
+        }
+
+        hstring status{ L"IDLE" };
+        hstring brush_name{ L"MutedTextBrush" };
+        if (m_msc_live_selection && snapshot.msc_synchronized != 0)
+        {
+            status = snapshot.msc_deinterleaver_cifs_seen >= 16u
+                ? hstring{ L"DECODING" }
+                : hstring{ L"FILLING" };
+            brush_name = L"MeasurementAccentBrush";
+        }
+        else if (subchannel != nullptr)
+        {
+            status = L"ALLOCATED · NOT DECODED";
+            brush_name = L"WarningBrush";
+        }
+        MscHeaderStatusText().Text(status);
+        Brush const status_brush =
+            Application::Current().Resources().Lookup(
+                box_value(brush_name)).as<Brush>();
+        MscHeaderStatusText().Foreground(status_brush);
+        MscHeaderStatusIndicator().Fill(status_brush);
+
+        bool const have_live_data =
+            m_msc_live_selection &&
+            snapshot.msc_cif_decode_attempts != 0u;
+        MscPreBerValueText().Text(
+            m_msc_live_selection && snapshot.msc_ber_valid != 0
+                ? format_scientific(snapshot.msc_ber)
+                : hstring{ L"—" });
+        MscPreBerDetailText().Text(!m_msc_live_selection
+            ? hstring{ L"Selected subchannel is not being decoded" }
+            : (snapshot.msc_ber_valid != 0
+                ? hstring{ L"Re-encoded coded-bit comparison" }
+                : hstring{ L"Awaiting compared coded bits" }));
+
+        bool const downstream_validated =
+            m_msc_live_selection &&
+            snapshot.msc_last_decode_ok != 0;
+        MscPostViterbiValueText().Text(downstream_validated
+            ? L"VALIDATED"
+            : L"UNVERIFIED");
+        MscPostViterbiDetailText().Text(downstream_validated
+            ? L"DAB+ outer checks passed for latest superframe"
+            : L"No direct residual-error detector in convolutional decoder");
+
+        MscOutputRateValueText().Text(
+            m_msc_live_selection && m_msc_measured_output_valid
+                ? format_float(m_msc_measured_output_kbps, L" kbit/s", 1)
+                : hstring{ L"—" });
+        MscOutputRateDetailText().Text(
+            subchannel != nullptr && subchannel->bitrate_kbps != 0u
+                ? L"Expected " +
+                    to_hstring(subchannel->bitrate_kbps) + L" kbit/s"
+                : hstring{ L"Expected rate unresolved" });
+
+        float const continuity =
+            have_live_data
+                ? 100.0f *
+                    static_cast<float>(
+                        static_cast<double>(
+                            snapshot.msc_cif_decode_successes) /
+                        static_cast<double>(
+                            snapshot.msc_cif_decode_attempts))
+                : 0.0f;
+        MscContinuityValueText().Text(have_live_data
+            ? format_float(continuity, L"%", 2)
+            : hstring{ L"—" });
+        MscContinuityDetailText().Text(have_live_data
+            ? (snapshot.msc_cif_decode_failures == 0u
+                ? hstring{ L"No CIF decode failures" }
+                : to_hstring(snapshot.msc_cif_decode_failures) +
+                    L" CIF decode failure(s)")
+            : hstring{ L"Awaiting decoded CIF output" });
+
+        MscViterbiQualityValueText().Text(
+            m_msc_live_selection &&
+            snapshot.msc_input_confidence_samples != 0u
+                ? format_float(
+                    snapshot.msc_input_confidence_percent,
+                    L"%",
+                    1)
+                : hstring{ L"—" });
+        MscViterbiQualityDetailText().Text(
+            snapshot.msc_input_confidence_samples != 0u
+                ? (snapshot.msc_input_confidence_percent >= 70.0f
+                    ? hstring{ L"Good softbit confidence" }
+                    : hstring{ L"Low softbit confidence" })
+                : hstring{ L"Awaiting Viterbi input softbits" });
+
+        uint64_t const deinterleaver_phases = (std::min)(
+            snapshot.msc_deinterleaver_cifs_seen,
+            16ull);
+        MscDeinterleaverValueText().Text(
+            m_msc_live_selection && deinterleaver_phases >= 16u
+                ? L"READY"
+                : (m_msc_live_selection
+                    ? hstring{ L"FILLING" }
+                    : hstring{ L"—" }));
+        MscDeinterleaverDetailText().Text(
+            m_msc_live_selection
+                ? to_hstring(deinterleaver_phases) + L"/16 phases"
+                : hstring{ L"Selected allocation is not active" });
+
+        float const service_buffer_percent = std::clamp(
+            100.0f * static_cast<float>(
+                snapshot.msc_dabplus_columns_filled) / 120.0f,
+            0.0f,
+            100.0f);
+        MscBufferValueText().Text(m_msc_live_selection
+            ? format_float(service_buffer_percent, L"%", 0)
+            : hstring{ L"—" });
+        MscBufferDetailText().Text(m_msc_live_selection
+            ? to_hstring(snapshot.msc_dabplus_columns_filled) +
+                L"/120 DAB+ superframe columns"
+            : hstring{ L"Selected allocation is not active" });
+
+        MscCifStatusValueText().Text(
+            m_msc_live_selection &&
+            snapshot.msc_latest_cif_valid_mask == 0x0Fu
+                ? L"VALID"
+                : (m_msc_live_selection
+                    ? hstring{ L"PARTIAL" }
+                    : hstring{ L"—" }));
+        MscCifStatusDetailText().Text(
+            L"FIC counter " + to_hstring(snapshot.fic_cif_count) +
+            L" · " +
+            to_hstring(snapshot.msc_cif_discontinuity_count) +
+            L" discontinuities");
+
+        uint32_t valid_cifs = 0u;
+        for (uint32_t bit = 0u; bit < 4u; ++bit)
+        {
+            valid_cifs +=
+                (snapshot.msc_latest_cif_valid_mask >> bit) & 1u;
+        }
+        MscBufferInputValueText().Text(
+            to_hstring(valid_cifs) + L"/4 latest");
+        MscBufferInputStateText().Text(m_msc_live_selection
+            ? (valid_cifs == 4u ? hstring{ L"Complete" }
+                                : hstring{ L"Partial frame" })
+            : hstring{ L"Not active" });
+        MscBufferTimeValueText().Text(format_float(
+            100.0f * static_cast<float>(deinterleaver_phases) / 16.0f,
+            L"%",
+            0));
+        MscBufferTimeStateText().Text(
+            deinterleaver_phases >= 16u ? L"Ready" : L"Filling");
+        MscBufferViterbiStateText().Text(
+            snapshot.msc_puncturing_valid != 0u
+                ? L"Synchronous · puncturing valid"
+                : L"Awaiting valid puncturing");
+        MscBufferDecodedValueText().Text(
+            to_hstring(snapshot.msc_cif_decode_successes) + L" CIFs");
+        MscBufferDecodedStateText().Text(
+            snapshot.msc_cif_decode_failures == 0u
+                ? L"No decode failures"
+                : to_hstring(snapshot.msc_cif_decode_failures) +
+                    L" failure(s)");
+        MscBufferServiceValueText().Text(
+            to_hstring(snapshot.msc_dabplus_columns_filled) + L"/120");
+        MscBufferServiceStateText().Text(
+            snapshot.msc_audio_valid != 0
+                ? L"DAB+ component active"
+                : L"No DAB+ component output");
+        MscBufferLatencyText().Text(format_float(
+            static_cast<float>(m_msc_max_processing_latency_ns) /
+                1000000.0f,
+            L" ms",
+            2));
+        MscBufferLateText().Text(
+            to_hstring(snapshot.processing_late_count));
+        MscBufferDroppedText().Text(
+            to_hstring(snapshot.dropped_blocks));
+        MscBufferCifGapText().Text(
+            to_hstring(snapshot.msc_cif_discontinuity_count) +
+            L" FIC-signalled");
+
+        if (m_msc_live_selection)
+        {
+            wchar_t mask[16]{};
+            swprintf_s(
+                mask,
+                L"0x%02X",
+                snapshot.msc_latest_cif_valid_mask);
+            MscRawSubchannelText().Text(
+                to_hstring(snapshot.msc_selected_subchannel_id));
+            MscRawValidMaskText().Text(mask);
+            MscRawCifBytesText().Text(
+                to_hstring(snapshot.msc_latest_cif_bytes[0]) + L" / " +
+                to_hstring(snapshot.msc_latest_cif_bytes[1]) + L" / " +
+                to_hstring(snapshot.msc_latest_cif_bytes[2]) + L" / " +
+                to_hstring(snapshot.msc_latest_cif_bytes[3]) + L" bytes");
+            MscRawBytesText().Text(
+                bytes_to_hex_lines(
+                    snapshot.msc_raw_data,
+                    snapshot.msc_raw_data_length));
+        }
+        else
+        {
+            MscRawSubchannelText().Text(L"Not decoded");
+            MscRawValidMaskText().Text(L"—");
+            MscRawCifBytesText().Text(L"—");
+            MscRawBytesText().Text(
+                L"Double-click this allocation in Capacity Map to select "
+                L"its service and begin decoding.");
+        }
+
+        AppendMscHistory(snapshot);
+        UpdateMscSelectedDetails();
+        RefreshMscSubchannelTable();
+        UpdateMscTimeline();
+        UpdateMscAlarms(snapshot);
+    }
+
     void MainWindow::ApplyDabSnapshot(dab_receive_snapshot_t const& snapshot)
     {
         UpdateDabContext();
         ApplyFicSnapshot(snapshot);
+        ApplyMscSnapshot(snapshot);
 
         bool const locked = snapshot.locked != 0;
         DabModeBadgeText().Text(L"● LIVE");
@@ -4797,6 +6126,11 @@ namespace winrt::DabMeasurementWinUI::implementation
             preserve_selection = true;
         }
 
+        if (m_have_catalog && catalog_changed)
+        {
+            m_previous_catalog = m_latest_catalog;
+            m_have_previous_catalog = true;
+        }
         m_latest_catalog = catalog;
         m_have_catalog = true;
         if (catalog_changed)
@@ -4910,6 +6244,37 @@ namespace winrt::DabMeasurementWinUI::implementation
         hstring const timeline_name = EnsembleNameText().Text();
         UpdateDabContext();
         UpdateFicDatabase();
+        if (FindMscSubchannel(m_msc_selected_subchannel) == nullptr)
+        {
+            if (m_msc_have_snapshot &&
+                m_msc_latest_snapshot.msc_selected_subchannel_valid != 0 &&
+                FindMscSubchannel(
+                    m_msc_latest_snapshot.msc_selected_subchannel_id) != nullptr)
+            {
+                m_msc_selected_subchannel =
+                    m_msc_latest_snapshot.msc_selected_subchannel_id;
+            }
+            else
+            {
+                for (auto const& subchannel : m_latest_catalog.subchannels)
+                {
+                    if (subchannel.valid != 0u)
+                    {
+                        m_msc_selected_subchannel =
+                            subchannel.subchannel_id;
+                        break;
+                    }
+                }
+            }
+        }
+        m_msc_live_selection =
+            m_msc_have_snapshot &&
+            m_msc_latest_snapshot.msc_selected_subchannel_valid != 0 &&
+            m_msc_latest_snapshot.msc_selected_subchannel_id ==
+                m_msc_selected_subchannel;
+        RenderMscCapacityMap();
+        RefreshMscSubchannelTable();
+        UpdateMscSelectedDetails();
         AddTimelineEvent(L"FIC catalog · " + timeline_name + L" · " +
                          to_hstring(catalog.service_count) + L" services");
     }
@@ -5021,6 +6386,10 @@ namespace winrt::DabMeasurementWinUI::implementation
     {
         m_have_catalog = false;
         m_latest_catalog = {};
+        m_have_previous_catalog = false;
+        m_previous_catalog = {};
+        m_msc_selected_subchannel = 0xFFu;
+        m_msc_live_selection = false;
         m_dab_catalog_changed_tick = m_tick;
         EnsembleNameText().Text(L"Awaiting FIC ensemble");
         EnsembleDetailText().Text(L"Decoding ensemble metadata from the signal");
@@ -5034,6 +6403,9 @@ namespace winrt::DabMeasurementWinUI::implementation
         ServicesListView().SelectedIndex(-1);
         ApplySelectedServiceComponents();
         UpdateDabContext();
+        RenderMscCapacityMap();
+        RefreshMscSubchannelTable();
+        UpdateMscSelectedDetails();
     }
 
     void MainWindow::UpdateCirPlot(dab::measurement::MeasurementFrame const& frame)

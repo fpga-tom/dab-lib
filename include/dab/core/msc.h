@@ -101,6 +101,13 @@ typedef struct {
     uint8_t last_reconfig_reason;
     uint64_t ber_error_bits;
     uint64_t ber_compared_bits;
+    uint64_t input_confidence_sum;
+    uint64_t input_confidence_samples;
+    uint64_t deinterleaver_cifs_seen;
+    uint64_t decoded_cif_attempts;
+    uint64_t decoded_cif_successes;
+    uint64_t decoded_cif_failures;
+    uint64_t decoded_output_bytes;
     dab_msc_deinterleaver_t *deinterleaver;
     dab_msc_decoder_workspace_t *workspace;
     dab_msc_dabplus_stream_runtime_t *dabplus;
@@ -267,6 +274,9 @@ typedef struct {
     uint16_t decoded_component_count;
     uint8_t service_filter_enabled;
     uint32_t service_filter_sid;
+    uint8_t cif_counter_valid;
+    uint16_t last_cif_count;
+    uint32_t cif_discontinuity_count;
 } dab_msc_state_t;
 
 int dab_msc_init(dab_msc_state_t *state);

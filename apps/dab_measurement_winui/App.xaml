@@ -18,6 +18,7 @@
             <Color x:Key="AccentColor">#FF35D0BA</Color>
             <Color x:Key="SpectrumColor">#FF54E2FF</Color>
             <Color x:Key="WarningColor">#FFFFC857</Color>
+            <Color x:Key="PlotBackgroundColor">#FF07101C</Color>
 
             <SolidColorBrush x:Key="WorkspaceBrush" Color="{StaticResource WorkspaceColor}" />
             <SolidColorBrush x:Key="PanelBrush" Color="{StaticResource PanelColor}" />
@@ -27,6 +28,7 @@
             <SolidColorBrush x:Key="MeasurementAccentBrush" Color="{StaticResource AccentColor}" />
             <SolidColorBrush x:Key="SpectrumBrush" Color="{StaticResource SpectrumColor}" />
             <SolidColorBrush x:Key="WarningBrush" Color="{StaticResource WarningColor}" />
+            <SolidColorBrush x:Key="PlotBackgroundBrush" Color="{StaticResource PlotBackgroundColor}" />
 
             <Style x:Key="PanelCardStyle" TargetType="Border">
                 <Setter Property="Background" Value="{StaticResource PanelBrush}" />
@@ -48,6 +50,17 @@
             </Style>
             <Style x:Key="RfMetricCardStyle" TargetType="Border" BasedOn="{StaticResource PanelCardStyle}">
                 <Setter Property="Padding" Value="16,12" />
+            </Style>
+            <Style x:Key="RfMetricCardButtonStyle" TargetType="Button">
+                <Setter Property="Background" Value="{StaticResource PanelRaisedBrush}" />
+                <Setter Property="BorderBrush" Value="{StaticResource PanelStrokeBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="8" />
+                <Setter Property="Padding" Value="16,12" />
+                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                <Setter Property="VerticalAlignment" Value="Stretch" />
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                <Setter Property="VerticalContentAlignment" Value="Stretch" />
             </Style>
             <Style x:Key="RfMetricLabelStyle" TargetType="TextBlock">
                 <Setter Property="FontSize" Value="11" />

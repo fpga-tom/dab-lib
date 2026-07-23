@@ -65,6 +65,14 @@ namespace dab::measurement
         m_msc_au_crc_checks_offset = 0u;
         m_msc_ber_error_bits_offset = 0u;
         m_msc_ber_compared_bits_offset = 0u;
+        m_msc_input_confidence_sum_offset = 0u;
+        m_msc_input_confidence_samples_offset = 0u;
+        m_msc_deinterleaver_cifs_offset = 0u;
+        m_msc_cif_attempts_offset = 0u;
+        m_msc_cif_successes_offset = 0u;
+        m_msc_cif_failures_offset = 0u;
+        m_msc_output_bytes_offset = 0u;
+        m_msc_cif_discontinuities_offset = 0u;
         m_last_session_snapshot = {};
         m_last_session_measurement_sequence = 0u;
         m_last_session_snapshot_valid = false;
@@ -257,6 +265,31 @@ namespace dab::measurement
                 static_cast<double>(adjusted.msc_ber_error_bits) /
                 static_cast<double>(adjusted.msc_ber_compared_bits))
             : 0.0f;
+        adjusted.msc_input_confidence_sum +=
+            worker->m_msc_input_confidence_sum_offset;
+        adjusted.msc_input_confidence_samples +=
+            worker->m_msc_input_confidence_samples_offset;
+        adjusted.msc_input_confidence_percent =
+            adjusted.msc_input_confidence_samples != 0u
+                ? static_cast<float>(
+                    100.0 *
+                    static_cast<double>(adjusted.msc_input_confidence_sum) /
+                    (127.0 *
+                     static_cast<double>(
+                         adjusted.msc_input_confidence_samples)))
+                : 0.0f;
+        adjusted.msc_deinterleaver_cifs_seen +=
+            worker->m_msc_deinterleaver_cifs_offset;
+        adjusted.msc_cif_decode_attempts +=
+            worker->m_msc_cif_attempts_offset;
+        adjusted.msc_cif_decode_successes +=
+            worker->m_msc_cif_successes_offset;
+        adjusted.msc_cif_decode_failures +=
+            worker->m_msc_cif_failures_offset;
+        adjusted.msc_output_bytes += worker->m_msc_output_bytes_offset;
+        adjusted.msc_cif_discontinuity_count = saturate_u32(
+            worker->m_msc_cif_discontinuities_offset +
+            snapshot->msc_cif_discontinuity_count);
         if (snapshot->hardware_overruns_valid != 0)
         {
             adjusted.hardware_overruns = saturate_u32(
@@ -769,6 +802,22 @@ namespace dab::measurement
             m_msc_ber_error_bits_offset += m_last_session_snapshot.msc_ber_error_bits;
             m_msc_ber_compared_bits_offset +=
                 m_last_session_snapshot.msc_ber_compared_bits;
+            m_msc_input_confidence_sum_offset +=
+                m_last_session_snapshot.msc_input_confidence_sum;
+            m_msc_input_confidence_samples_offset +=
+                m_last_session_snapshot.msc_input_confidence_samples;
+            m_msc_deinterleaver_cifs_offset +=
+                m_last_session_snapshot.msc_deinterleaver_cifs_seen;
+            m_msc_cif_attempts_offset +=
+                m_last_session_snapshot.msc_cif_decode_attempts;
+            m_msc_cif_successes_offset +=
+                m_last_session_snapshot.msc_cif_decode_successes;
+            m_msc_cif_failures_offset +=
+                m_last_session_snapshot.msc_cif_decode_failures;
+            m_msc_output_bytes_offset +=
+                m_last_session_snapshot.msc_output_bytes;
+            m_msc_cif_discontinuities_offset +=
+                m_last_session_snapshot.msc_cif_discontinuity_count;
             if (m_last_session_snapshot.hardware_overruns_valid != 0)
             {
                 m_hardware_overruns_offset += m_last_session_snapshot.hardware_overruns;

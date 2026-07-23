@@ -33,6 +33,13 @@ namespace winrt::DabMeasurementWinUI::implementation
         void FicCaptureIqOnChange_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void FicCopySelectedFig_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         winrt::fire_and_forget FicExportSelectedFig_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void MscMetricCard_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void MscCapacitySegment_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void MscCapacitySegment_DoubleTapped(IInspectable const&, Microsoft::UI::Xaml::Input::DoubleTappedRoutedEventArgs const&);
+        void MscSubchannelListView_ItemClick(IInspectable const&, Microsoft::UI::Xaml::Controls::ItemClickEventArgs const&);
+        void MscCompareCapacity_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        winrt::fire_and_forget MscExportCapacity_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void MscTimelineOverlay_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void RootLayout_SizeChanged(IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
         void RfWorkspace_SizeChanged(IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
         void CirExpandButton_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -118,6 +125,20 @@ namespace winrt::DabMeasurementWinUI::implementation
         void UpdateFicDatabase();
         void ResetFicMeasurementSession();
         void InspectFicHistoryEntry(size_t index);
+        void ApplyMscSnapshot(dab_receive_snapshot_t const& snapshot);
+        void ResetMscMeasurementSession();
+        void RenderMscCapacityMap();
+        void RefreshMscSubchannelTable();
+        void SelectMscSubchannel(uint8_t subchannel_id);
+        void UpdateMscSelectedDetails();
+        void AppendMscHistory(dab_receive_snapshot_t const& snapshot);
+        void UpdateMscTimeline();
+        void UpdateMscAlarms(dab_receive_snapshot_t const& snapshot);
+        dab_receive_subchannel_info_t const* FindMscSubchannel(
+            uint8_t subchannel_id) const noexcept;
+        dab_receive_service_info_t const* FindMscServiceForSubchannel(
+            uint8_t subchannel_id,
+            dab_receive_component_info_t const** component) const noexcept;
         void ShowWorkspace(WorkspaceKind workspace);
         void SetCirPanelMaximized(bool maximized);
         void ApplyWorkspaceWidth(double root_width);
@@ -247,6 +268,36 @@ namespace winrt::DabMeasurementWinUI::implementation
         bool m_fic_capture_in_progress{ false };
         winrt::hstring m_fic_database_last_change{ L"—" };
         winrt::hstring m_fic_database_change_summary{ L"No database received" };
+        dab_receive_catalog_t m_previous_catalog{};
+        bool m_have_previous_catalog{ false };
+        uint8_t m_msc_selected_subchannel{ 0xFFu };
+        dab_receive_snapshot_t m_msc_latest_snapshot{};
+        bool m_msc_have_snapshot{ false };
+        bool m_msc_live_selection{ false };
+        float m_msc_measured_output_kbps{ 0.0f };
+        bool m_msc_measured_output_valid{ false };
+        uint64_t m_msc_previous_output_bytes{ 0u };
+        uint64_t m_msc_previous_output_timestamp_ns{ 0u };
+        uint64_t m_msc_max_processing_latency_ns{ 0u };
+        uint64_t m_msc_last_cif_failure_count{ 0u };
+        uint32_t m_msc_last_cif_discontinuity_count{ 0u };
+        struct MscHistorySample
+        {
+            uint64_t timestamp_ns{ 0u };
+            float pre_ber{ 0.0f };
+            float confidence_percent{ 0.0f };
+            float service_buffer_percent{ 0.0f };
+            float output_kbps{ 0.0f };
+            float processing_latency_ms{ 0.0f };
+            bool ber_valid{ false };
+            bool confidence_valid{ false };
+            bool output_valid{ false };
+            bool live{ false };
+        };
+        static constexpr size_t msc_history_capacity = 2400u;
+        std::array<MscHistorySample, msc_history_capacity> m_msc_history{};
+        size_t m_msc_history_write{ 0u };
+        size_t m_msc_history_count{ 0u };
         bool m_cir_panel_maximized{ false };
         bool m_rf_was_locked{ false };
         uint64_t m_rf_lock_started_ns{ 0u };

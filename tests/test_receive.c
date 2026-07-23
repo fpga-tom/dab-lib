@@ -118,10 +118,36 @@ void test_receive_snapshot_maps_receiver_measurements_and_counters(void) {
     fic.repo.fig_stats[0].raw[2] = 0x42u;
     fic.repo.fig_stats[0].previous_raw[2] = 0x41u;
     msc.frames_seen = 20u;
+    msc.cif_discontinuity_count = 2u;
+    msc.runtimes[4].valid = 1u;
+    msc.runtimes[4].subchid = 4u;
+    msc.runtimes[4].config.valid = 1u;
+    msc.runtimes[4].config.profile = DAB_MSC_PROFILE_EEP_A;
+    msc.runtimes[4].config.protection_level = 3u;
+    msc.runtimes[4].config.segment_count = 3u;
+    msc.runtimes[4].config.bitrate_kbps = 96u;
+    msc.runtimes[4].config.size_cu = 84u;
+    msc.runtimes[4].input_confidence_sum = 12700u;
+    msc.runtimes[4].input_confidence_samples = 100u;
+    msc.runtimes[4].deinterleaver_cifs_seen = 20u;
+    msc.runtimes[4].decoded_cif_attempts = 100u;
+    msc.runtimes[4].decoded_cif_successes = 99u;
+    msc.runtimes[4].decoded_cif_failures = 1u;
+    msc.runtimes[4].decoded_output_bytes = 115200u;
+    msc.decoded_subchannels[4].valid = 1u;
+    msc.decoded_subchannels[4].subchid = 4u;
+    msc.decoded_subchannels[4].cif_valid[2] = 1u;
+    msc.decoded_subchannels[4].byte_count[2] = 3u;
+    msc.decoded_subchannels[4].data[2][0] = 0x11u;
+    msc.decoded_subchannels[4].data[2][1] = 0x22u;
+    msc.decoded_subchannels[4].data[2][2] = 0x33u;
 
     msc_audio.valid = 1u;
+    msc_audio.subchid = 4u;
     msc_audio.synchronized = 1u;
     msc_audio.superframe_valid = 1u;
+    msc_audio.cif_bytes = 288u;
+    msc_audio.columns_filled = 72u;
     msc_audio.generation = 11u;
     msc_audio.decode_attempts = 12u;
     msc_audio.decode_failures = 1u;
@@ -214,9 +240,31 @@ void test_receive_snapshot_maps_receiver_measurements_and_counters(void) {
     TEST_ASSERT(fabsf(snapshot.msc_ber - 0.00021f) < 0.0000001f);
     TEST_ASSERT(snapshot.msc_ber_error_bits == 21u);
     TEST_ASSERT(snapshot.msc_ber_compared_bits == 100000u);
+    TEST_ASSERT(snapshot.msc_selected_subchannel_valid == 1);
+    TEST_ASSERT(snapshot.msc_selected_subchannel_id == 4u);
+    TEST_ASSERT(snapshot.msc_latest_cif_valid_mask == 0x04u);
+    TEST_ASSERT(snapshot.msc_puncturing_valid == 1u);
+    TEST_ASSERT(snapshot.msc_decoder_profile == DAB_MSC_PROFILE_EEP_A);
+    TEST_ASSERT(snapshot.msc_decoder_protection_level == 3u);
+    TEST_ASSERT(snapshot.msc_decoder_segment_count == 3u);
+    TEST_ASSERT(snapshot.msc_decoder_bitrate_kbps == 96u);
+    TEST_ASSERT(snapshot.msc_decoder_size_cu == 84u);
+    TEST_ASSERT(snapshot.msc_input_confidence_percent == 100.0f);
+    TEST_ASSERT(snapshot.msc_deinterleaver_cifs_seen == 20u);
+    TEST_ASSERT(snapshot.msc_cif_decode_attempts == 100u);
+    TEST_ASSERT(snapshot.msc_cif_decode_successes == 99u);
+    TEST_ASSERT(snapshot.msc_cif_decode_failures == 1u);
+    TEST_ASSERT(snapshot.msc_output_bytes == 115200u);
+    TEST_ASSERT(snapshot.msc_cif_discontinuity_count == 2u);
+    TEST_ASSERT(snapshot.msc_latest_cif_bytes[2] == 3u);
+    TEST_ASSERT(snapshot.msc_raw_data_length == 3u);
+    TEST_ASSERT(snapshot.msc_raw_data[0] == 0x11u);
+    TEST_ASSERT(snapshot.msc_raw_data[2] == 0x33u);
     TEST_ASSERT(snapshot.msc_audio_valid == 1);
     TEST_ASSERT(snapshot.msc_synchronized == 1);
     TEST_ASSERT(snapshot.msc_superframe_valid == 1);
+    TEST_ASSERT(snapshot.msc_dabplus_cif_bytes == 288u);
+    TEST_ASSERT(snapshot.msc_dabplus_columns_filled == 72u);
     TEST_ASSERT(snapshot.msc_superframe_generation == 11u);
     TEST_ASSERT(snapshot.msc_decode_attempts == 12u);
     TEST_ASSERT(snapshot.msc_decode_failures == 1u);
@@ -350,6 +398,16 @@ void test_receive_catalog_copies_fic_ensemble_services_and_components(void) {
     TEST_ASSERT(catalog.service_count == 2u);
     TEST_ASSERT(catalog.service_component_count == 2u);
     TEST_ASSERT(catalog.subchannel_count == 1u);
+    TEST_ASSERT(catalog.allocated_capacity_units == 90u);
+    TEST_ASSERT(catalog.unused_capacity_units ==
+                DAB_RECEIVE_MSC_CAPACITY_UNITS - 90u);
+    TEST_ASSERT(catalog.overlapping_subchannel_count == 0u);
+    TEST_ASSERT(catalog.invalid_subchannel_count == 0u);
+    TEST_ASSERT(catalog.subchannels[4].valid == 1u);
+    TEST_ASSERT(catalog.subchannels[4].allocation_valid == 1u);
+    TEST_ASSERT(catalog.subchannels[4].start_cu == 120u);
+    TEST_ASSERT(catalog.subchannels[4].size_cu == 90u);
+    TEST_ASSERT(catalog.subchannels[4].bitrate_kbps == 192u);
     TEST_ASSERT(catalog.missing_subchannel_reference_count == 0u);
     TEST_ASSERT(catalog.duplicate_service_id_count == 0u);
     TEST_ASSERT(catalog.database_consistent == 1u);
@@ -392,13 +450,22 @@ void test_receive_catalog_copies_fic_ensemble_services_and_components(void) {
     data_service->is_programme = audio_service->is_programme;
     packet_component->has_subchid = 1u;
     packet_component->subchid = 5u;
+    database.subchannels[5] = database.subchannels[4];
+    database.subchannels[5].subchid = 5u;
+    database.subchannels[5].start_cu = 150u;
+    database.subchannels[6] = database.subchannels[4];
+    database.subchannels[6].subchid = 6u;
+    database.subchannels[6].start_cu = 300u;
+    database.subchannels[6].size_cu = 0u;
     dab_receive_catalog_build(&conflicting,
                               9u,
                               111111111u,
                               213360000u,
                               &database);
     TEST_ASSERT(conflicting.duplicate_service_id_count == 1u);
-    TEST_ASSERT(conflicting.missing_subchannel_reference_count == 1u);
+    TEST_ASSERT(conflicting.missing_subchannel_reference_count == 0u);
+    TEST_ASSERT(conflicting.overlapping_subchannel_count == 2u);
+    TEST_ASSERT(conflicting.invalid_subchannel_count == 1u);
     TEST_ASSERT(conflicting.database_consistent == 0u);
 }
 

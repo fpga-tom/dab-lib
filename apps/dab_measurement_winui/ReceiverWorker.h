@@ -163,6 +163,14 @@ namespace dab::measurement
         uint64_t m_msc_au_crc_checks_offset{ 0u };
         uint64_t m_msc_ber_error_bits_offset{ 0u };
         uint64_t m_msc_ber_compared_bits_offset{ 0u };
+        uint64_t m_msc_input_confidence_sum_offset{ 0u };
+        uint64_t m_msc_input_confidence_samples_offset{ 0u };
+        uint64_t m_msc_deinterleaver_cifs_offset{ 0u };
+        uint64_t m_msc_cif_attempts_offset{ 0u };
+        uint64_t m_msc_cif_successes_offset{ 0u };
+        uint64_t m_msc_cif_failures_offset{ 0u };
+        uint64_t m_msc_output_bytes_offset{ 0u };
+        uint64_t m_msc_cif_discontinuities_offset{ 0u };
         dab_receive_snapshot_t m_last_session_snapshot{};
         uint64_t m_last_session_measurement_sequence{ 0u };
         bool m_last_session_snapshot_valid{ false };

@@ -45,7 +45,9 @@ enum {
     DAB_RECEIVE_FIC_FIB_COUNT = 12u,
     DAB_RECEIVE_FIC_FIB_BYTES = 32u,
     DAB_RECEIVE_FIC_FIG_STAT_CAPACITY = 64u,
-    DAB_RECEIVE_FIC_FIG_RAW_CAPACITY = 32u
+    DAB_RECEIVE_FIC_FIG_RAW_CAPACITY = 32u,
+    DAB_RECEIVE_MSC_CIFS_PER_FRAME = 4u,
+    DAB_RECEIVE_MSC_RAW_CAPACITY = 256u
 };
 
 typedef struct {
@@ -168,9 +170,32 @@ typedef struct {
     float msc_ber;
     uint64_t msc_ber_error_bits;
     uint64_t msc_ber_compared_bits;
+    int msc_selected_subchannel_valid;
+    uint8_t msc_selected_subchannel_id;
+    uint8_t msc_latest_cif_valid_mask;
+    uint8_t msc_puncturing_valid;
+    uint8_t msc_decoder_profile;
+    uint8_t msc_decoder_protection_level;
+    uint8_t msc_decoder_segment_count;
+    uint16_t msc_decoder_bitrate_kbps;
+    uint16_t msc_decoder_size_cu;
+    uint64_t msc_input_confidence_sum;
+    uint64_t msc_input_confidence_samples;
+    float msc_input_confidence_percent;
+    uint64_t msc_deinterleaver_cifs_seen;
+    uint64_t msc_cif_decode_attempts;
+    uint64_t msc_cif_decode_successes;
+    uint64_t msc_cif_decode_failures;
+    uint64_t msc_output_bytes;
+    uint32_t msc_cif_discontinuity_count;
+    uint16_t msc_latest_cif_bytes[DAB_RECEIVE_MSC_CIFS_PER_FRAME];
+    uint32_t msc_raw_data_length;
+    uint8_t msc_raw_data[DAB_RECEIVE_MSC_RAW_CAPACITY];
     int msc_audio_valid;
     int msc_synchronized;
     int msc_superframe_valid;
+    uint16_t msc_dabplus_cif_bytes;
+    uint16_t msc_dabplus_columns_filled;
     uint64_t msc_superframe_generation;
     uint32_t msc_decode_attempts;
     uint32_t msc_decode_failures;
@@ -272,7 +297,9 @@ typedef int (*dab_receive_measurement_callback_t)(
 enum {
     DAB_RECEIVE_CATALOG_LABEL_CAPACITY = 17u,
     DAB_RECEIVE_CATALOG_MAX_SERVICES = 64u,
-    DAB_RECEIVE_CATALOG_MAX_COMPONENTS_PER_SERVICE = 12u
+    DAB_RECEIVE_CATALOG_MAX_COMPONENTS_PER_SERVICE = 12u,
+    DAB_RECEIVE_CATALOG_MAX_SUBCHANNELS = 64u,
+    DAB_RECEIVE_MSC_CAPACITY_UNITS = 864u
 };
 
 typedef enum {
@@ -319,6 +346,21 @@ typedef struct {
         components[DAB_RECEIVE_CATALOG_MAX_COMPONENTS_PER_SERVICE];
 } dab_receive_service_info_t;
 
+typedef struct {
+    uint8_t valid;
+    uint8_t subchannel_id;
+    uint8_t allocation_valid;
+    uint8_t overlaps;
+    uint16_t start_cu;
+    uint16_t size_cu;
+    uint16_t bitrate_kbps;
+    uint8_t protection_kind;
+    uint8_t protection_table_switch;
+    uint8_t protection_index;
+    uint8_t protection_option;
+    uint8_t protection_level;
+} dab_receive_subchannel_info_t;
+
 /*
  * The catalog is a complete owned copy of the currently decoded FIC database.
  * It remains valid only for the duration of the callback, but may be copied as
@@ -339,10 +381,16 @@ typedef struct {
     uint32_t service_count;
     uint32_t service_component_count;
     uint32_t subchannel_count;
+    uint32_t allocated_capacity_units;
+    uint32_t unused_capacity_units;
+    uint32_t overlapping_subchannel_count;
+    uint32_t invalid_subchannel_count;
     uint32_t missing_subchannel_reference_count;
     uint32_t duplicate_service_id_count;
     uint8_t database_consistent;
     dab_receive_service_info_t services[DAB_RECEIVE_CATALOG_MAX_SERVICES];
+    dab_receive_subchannel_info_t
+        subchannels[DAB_RECEIVE_CATALOG_MAX_SUBCHANNELS];
 } dab_receive_catalog_t;
 
 typedef int (*dab_receive_catalog_callback_t)(

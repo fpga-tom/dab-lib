@@ -3045,96 +3045,467 @@
                 </TabViewItem>
 
                 <TabViewItem x:Name="DabMscTab" Header="MSC" IsClosable="False">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="12">
-                        <StackPanel Spacing="12">
-                            <TextBlock x:Name="DabMscFocusText"
-                                       Text="Selected metric: MSC BER"
-                                       Foreground="{StaticResource SpectrumBrush}"
-                                       FontWeight="SemiBold" />
-                            <Border Style="{StaticResource PanelCardStyle}" Padding="14">
-                                <Grid ColumnSpacing="16">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel>
-                                        <TextBlock Text="POST-VITERBI BER" Style="{StaticResource RfMetricLabelStyle}" />
-                                        <TextBlock x:Name="DabMscBerPageValueText" Text="—" Style="{StaticResource RfMetricValueStyle}" />
-                                    </StackPanel>
-                                    <TextBlock Grid.Column="1"
-                                               x:Name="DabMscBerPageDetailText"
-                                               Text="Awaiting decoded and re-encoded MSC bits"
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <Border Style="{StaticResource PanelCardStyle}" Padding="16,12" Margin="12,12,12,0">
+                            <Grid>
+                                <StackPanel>
+                                    <TextBlock Text="MSC MEASUREMENTS" FontSize="22" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="MscHeaderContextText"
+                                               Text="Awaiting selected service and subchannel"
                                                Foreground="{StaticResource MutedTextBrush}"
-                                               VerticalAlignment="Center"
                                                TextWrapping="Wrap" />
-                                </Grid>
-                            </Border>
-                            <Grid ColumnSpacing="10">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <Border Grid.Column="0" Style="{StaticResource RfMetricCardStyle}">
-                                    <StackPanel Spacing="5">
-                                        <TextBlock Text="MSC FRAMES" Style="{StaticResource RfMetricLabelStyle}" />
-                                        <TextBlock x:Name="DabMscFramesText" Text="0" Style="{StaticResource RfMetricValueStyle}" />
-                                        <TextBlock Text="Since receiver start" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
-                                    </StackPanel>
-                                </Border>
-                                <Border Grid.Column="1" Style="{StaticResource RfMetricCardStyle}">
-                                    <StackPanel Spacing="5">
-                                        <TextBlock Text="SYNCHRONISATION" Style="{StaticResource RfMetricLabelStyle}" />
-                                        <TextBlock x:Name="DabMscSyncText" Text="NO" Style="{StaticResource RfMetricValueStyle}" />
-                                        <TextBlock Text="MSC time deinterleaver" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
-                                    </StackPanel>
-                                </Border>
-                                <Border Grid.Column="2" Style="{StaticResource RfMetricCardStyle}">
-                                    <StackPanel Spacing="5">
-                                        <TextBlock Text="SUPERFRAME" Style="{StaticResource RfMetricLabelStyle}" />
-                                        <TextBlock x:Name="DabMscSuperframeText" Text="—" Style="{StaticResource RfMetricValueStyle}" />
-                                        <TextBlock Text="Latest DAB+ superframe" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
-                                    </StackPanel>
-                                </Border>
-                                <Border Grid.Column="3" Style="{StaticResource RfMetricCardStyle}">
-                                    <StackPanel Spacing="5">
-                                        <TextBlock Text="AUDIO PAYLOAD" Style="{StaticResource RfMetricLabelStyle}" />
-                                        <TextBlock x:Name="DabMscAudioText" Text="—" Style="{StaticResource RfMetricValueStyle}" />
-                                        <TextBlock Text="Selected component data" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
-                                    </StackPanel>
-                                </Border>
-                            </Grid>
-                            <Border Style="{StaticResource PanelCardStyle}" Padding="16">
-                                <StackPanel Spacing="10">
-                                    <TextBlock Text="Selected MSC component" FontSize="16" FontWeight="SemiBold" />
-                                    <Grid ColumnSpacing="14" RowSpacing="8">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="170" />
-                                            <ColumnDefinition Width="*" />
-                                        </Grid.ColumnDefinitions>
-                                        <Grid.RowDefinitions>
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                        </Grid.RowDefinitions>
-                                        <TextBlock Text="Service" Foreground="{StaticResource MutedTextBrush}" />
-                                        <TextBlock Grid.Column="1" x:Name="DabMscServiceText" Text="Not selected" />
-                                        <TextBlock Grid.Row="1" Text="Component" Foreground="{StaticResource MutedTextBrush}" />
-                                        <TextBlock Grid.Row="1" Grid.Column="1" x:Name="DabMscComponentText" Text="Awaiting component" />
-                                        <TextBlock Grid.Row="2" Text="Subchannel" Foreground="{StaticResource MutedTextBrush}" />
-                                        <TextBlock Grid.Row="2" Grid.Column="1" x:Name="DabMscSubchannelText" Text="—" FontFamily="Consolas" />
-                                        <TextBlock Grid.Row="3" Text="Protection" Foreground="{StaticResource MutedTextBrush}" />
-                                        <TextBlock Grid.Row="3" Grid.Column="1" x:Name="DabMscProtectionText" Text="—" />
-                                        <TextBlock Grid.Row="4" Text="Generation" Foreground="{StaticResource MutedTextBrush}" />
-                                        <TextBlock Grid.Row="4" Grid.Column="1" x:Name="DabMscGenerationText" Text="0" FontFamily="Consolas" />
-                                    </Grid>
                                 </StackPanel>
-                            </Border>
+                                <StackPanel Orientation="Horizontal"
+                                            Spacing="7"
+                                            HorizontalAlignment="Right"
+                                            VerticalAlignment="Top">
+                                    <Ellipse x:Name="MscHeaderStatusIndicator"
+                                             Width="9"
+                                             Height="9"
+                                             Fill="{StaticResource MutedTextBrush}" />
+                                    <TextBlock x:Name="MscHeaderStatusText"
+                                               Text="IDLE"
+                                               FontWeight="SemiBold" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <TabView x:Name="MscTabView"
+                                 Grid.Row="1"
+                                 Margin="12"
+                                 IsAddTabButtonVisible="False"
+                                 CanDragTabs="False">
+                            <TabViewItem x:Name="MscOverviewTab" Header="Overview" IsClosable="False">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="12">
+                                    <StackPanel Spacing="10">
+                                        <Grid ColumnSpacing="10" RowSpacing="10">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="128" />
+                                                <RowDefinition Height="128" />
+                                            </Grid.RowDefinitions>
+
+                                            <Button Tag="timeline:ber" Click="MscMetricCard_Click"
+                                                    Style="{StaticResource RfMetricCardButtonStyle}">
+                                                <StackPanel Spacing="5">
+                                                    <TextBlock Text="PRE-VITERBI PSEUDO-BER" Style="{StaticResource RfMetricLabelStyle}" />
+                                                    <TextBlock x:Name="MscPreBerValueText" Text="—" Style="{StaticResource RfMetricValueStyle}" />
+                                                    <TextBlock x:Name="MscPreBerDetailText" Text="Awaiting compared coded bits"
+                                                               Foreground="{StaticResource MutedTextBrush}" FontSize="11" TextWrapping="Wrap" />
+                                                </StackPanel>
+                                            </Button>
+                                            <Button Grid.Column="1" Tag="raw:post" Click="MscMetricCard_Click"
+                                                    Style="{StaticResource RfMetricCardButtonStyle}">
+                                                <StackPanel Spacing="5">
+                                                    <TextBlock Text="POST-VITERBI" Style="{StaticResource RfMetricLabelStyle}" />
+                                                    <TextBlock x:Name="MscPostViterbiValueText" Text="—" FontSize="20" FontWeight="SemiBold" />
+                                                    <TextBlock x:Name="MscPostViterbiDetailText" Text="Not directly observable"
+                                                               Foreground="{StaticResource MutedTextBrush}" FontSize="11" TextWrapping="Wrap" />
+                                                </StackPanel>
+                                            </Button>
+                                            <Button Grid.Column="2" Tag="timeline:output" Click="MscMetricCard_Click"
+                                                    Style="{StaticResource RfMetricCardButtonStyle}">
+                                                <StackPanel Spacing="5">
+                                                    <TextBlock Text="OUTPUT RATE" Style="{StaticResource RfMetricLabelStyle}" />
+                                                    <TextBlock x:Name="MscOutputRateValueText" Text="—" Style="{StaticResource RfMetricValueStyle}" />
+                                                    <TextBlock x:Name="MscOutputRateDetailText" Text="Awaiting decoded output"
+                                                               Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                                </StackPanel>
+                                            </Button>
+                                            <Button Grid.Column="3" Tag="timeline:continuity" Click="MscMetricCard_Click"
+                                                    Style="{StaticResource RfMetricCardButtonStyle}">
+                                                <StackPanel Spacing="5">
+                                                    <TextBlock Text="CONTINUITY" Style="{StaticResource RfMetricLabelStyle}" />
+                                                    <TextBlock x:Name="MscContinuityValueText" Text="—" Style="{StaticResource RfMetricValueStyle}" />
+                                                    <TextBlock x:Name="MscContinuityDetailText" Text="Awaiting CIF output"
+                                                               Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                                </StackPanel>
+                                            </Button>
+
+                                            <Button Grid.Row="1" Tag="timeline:viterbi" Click="MscMetricCard_Click"
+                                                    Style="{StaticResource RfMetricCardButtonStyle}">
+                                                <StackPanel Spacing="5">
+                                                    <TextBlock Text="INPUT CONFIDENCE" Style="{StaticResource RfMetricLabelStyle}" />
+                                                    <TextBlock x:Name="MscViterbiQualityValueText" Text="—" Style="{StaticResource RfMetricValueStyle}" />
+                                                    <TextBlock x:Name="MscViterbiQualityDetailText" Text="Viterbi input softbits"
+                                                               Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                                </StackPanel>
+                                            </Button>
+                                            <Button Grid.Row="1" Grid.Column="1" Tag="buffers:deinterleaver" Click="MscMetricCard_Click"
+                                                    Style="{StaticResource RfMetricCardButtonStyle}">
+                                                <StackPanel Spacing="5">
+                                                    <TextBlock Text="TIME DEINTERLEAVER" Style="{StaticResource RfMetricLabelStyle}" />
+                                                    <TextBlock x:Name="MscDeinterleaverValueText" Text="—" FontSize="20" FontWeight="SemiBold" />
+                                                    <TextBlock x:Name="MscDeinterleaverDetailText" Text="0/16 phases"
+                                                               Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                                </StackPanel>
+                                            </Button>
+                                            <Button Grid.Row="1" Grid.Column="2" Tag="buffers:service" Click="MscMetricCard_Click"
+                                                    Style="{StaticResource RfMetricCardButtonStyle}">
+                                                <StackPanel Spacing="5">
+                                                    <TextBlock Text="SERVICE ASSEMBLY" Style="{StaticResource RfMetricLabelStyle}" />
+                                                    <TextBlock x:Name="MscBufferValueText" Text="—" Style="{StaticResource RfMetricValueStyle}" />
+                                                    <TextBlock x:Name="MscBufferDetailText" Text="DAB+ superframe buffer"
+                                                               Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                                </StackPanel>
+                                            </Button>
+                                            <Button Grid.Row="1" Grid.Column="3" Tag="raw:cif" Click="MscMetricCard_Click"
+                                                    Style="{StaticResource RfMetricCardButtonStyle}">
+                                                <StackPanel Spacing="5">
+                                                    <TextBlock Text="CIF STATUS" Style="{StaticResource RfMetricLabelStyle}" />
+                                                    <TextBlock x:Name="MscCifStatusValueText" Text="—" FontSize="20" FontWeight="SemiBold" />
+                                                    <TextBlock x:Name="MscCifStatusDetailText" Text="Awaiting FIC counter"
+                                                               Foreground="{StaticResource MutedTextBrush}" FontSize="11" TextWrapping="Wrap" />
+                                                </StackPanel>
+                                            </Button>
+                                        </Grid>
+                                        <Border Style="{StaticResource PanelCardStyle}" Padding="14">
+                                            <StackPanel Spacing="8">
+                                                <TextBlock Text="Active MSC alarms" FontSize="16" FontWeight="SemiBold" />
+                                                <ListView x:Name="MscAlarmListView" MaxHeight="130" SelectionMode="None" />
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </TabViewItem>
+
+                            <TabViewItem x:Name="MscCapacityTab" Header="Capacity Map" IsClosable="False">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="12">
+                                    <StackPanel Spacing="10">
+                                        <Grid>
+                                            <StackPanel>
+                                                <TextBlock Text="MSC CAPACITY MAP" Style="{StaticResource SectionTitleStyle}" />
+                                                <TextBlock x:Name="MscCapacityCifText" Text="CIF —"
+                                                           Foreground="{StaticResource MutedTextBrush}" />
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                                                <ToggleButton x:Name="MscCompareCapacityToggle"
+                                                              Content="Compare previous"
+                                                              Click="MscCompareCapacity_Click" />
+                                                <Button Content="Export allocation"
+                                                        Click="MscExportCapacity_Click" />
+                                            </StackPanel>
+                                        </Grid>
+                                        <Border Style="{StaticResource PanelCardStyle}" Padding="14">
+                                            <StackPanel Spacing="7">
+                                                <Grid>
+                                                    <TextBlock Text="CU 0" FontFamily="Consolas" />
+                                                    <TextBlock Text="CU 864" HorizontalAlignment="Right" FontFamily="Consolas" />
+                                                </Grid>
+                                                <Canvas x:Name="MscCapacityCanvas"
+                                                        Height="155"
+                                                        Background="{StaticResource PlotBackgroundBrush}" />
+                                                <TextBlock x:Name="MscCapacityHoverText"
+                                                           Text="Hover over an allocation for service and protection details."
+                                                           Foreground="{StaticResource MutedTextBrush}"
+                                                           TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Style="{StaticResource PanelCardStyle}" Padding="14">
+                                            <Grid ColumnSpacing="14" RowSpacing="7">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="165" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="165" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                </Grid.RowDefinitions>
+                                                <TextBlock Text="Selected" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Column="1" x:Name="MscCapacitySelectedText" Text="No subchannel selected" />
+                                                <TextBlock Grid.Column="2" Text="Start address" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Column="3" x:Name="MscCapacityAddressText" Text="—" FontFamily="Consolas" />
+                                                <TextBlock Grid.Row="1" Text="Capacity" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Row="1" Grid.Column="1" x:Name="MscCapacitySizeText" Text="—" FontFamily="Consolas" />
+                                                <TextBlock Grid.Row="1" Grid.Column="2" Text="Bitrate" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Row="1" Grid.Column="3" x:Name="MscCapacityBitrateText" Text="—" FontFamily="Consolas" />
+                                                <TextBlock Grid.Row="2" Text="Protection" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Row="2" Grid.Column="1" x:Name="MscCapacityProtectionText" Text="—" />
+                                                <TextBlock Grid.Row="2" Grid.Column="2" Text="Multiplex use" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Row="2" Grid.Column="3" x:Name="MscCapacityUsageText" Text="—" />
+                                                <TextBlock Grid.Row="3" Grid.ColumnSpan="4"
+                                                           x:Name="MscCapacityConfigSummaryText"
+                                                           Text="Awaiting multiplex allocation"
+                                                           Foreground="{StaticResource MutedTextBrush}"
+                                                           TextWrapping="Wrap" />
+                                            </Grid>
+                                        </Border>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </TabViewItem>
+
+                            <TabViewItem x:Name="MscSubchannelsTab" Header="Subchannels" IsClosable="False">
+                                <Grid Padding="12" RowSpacing="9">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="220" />
+                                    </Grid.RowDefinitions>
+                                    <Grid Margin="10,0,10,3">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="70" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="95" />
+                                            <ColumnDefinition Width="100" />
+                                            <ColumnDefinition Width="120" />
+                                            <ColumnDefinition Width="100" />
+                                            <ColumnDefinition Width="125" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="ID" FontWeight="SemiBold" />
+                                        <TextBlock Grid.Column="1" Text="Service" FontWeight="SemiBold" />
+                                        <TextBlock Grid.Column="2" Text="kbit/s" FontWeight="SemiBold" />
+                                        <TextBlock Grid.Column="3" Text="Protection" FontWeight="SemiBold" />
+                                        <TextBlock Grid.Column="4" Text="Pre-BER" FontWeight="SemiBold" />
+                                        <TextBlock Grid.Column="5" Text="Buffer" FontWeight="SemiBold" />
+                                        <TextBlock Grid.Column="6" Text="Status" FontWeight="SemiBold" />
+                                    </Grid>
+                                    <ListView Grid.Row="1"
+                                              x:Name="MscSubchannelListView"
+                                              IsItemClickEnabled="True"
+                                              ItemClick="MscSubchannelListView_ItemClick"
+                                              SelectionMode="Single" />
+                                    <Border Grid.Row="2" Style="{StaticResource PanelCardStyle}" Padding="14">
+                                        <Grid ColumnSpacing="24">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Grid RowSpacing="5" ColumnSpacing="12">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="175" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                </Grid.RowDefinitions>
+                                                <TextBlock Text="Subchannel ID" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Column="1" x:Name="MscDetailIdText" Text="—" FontFamily="Consolas" />
+                                                <TextBlock Grid.Row="1" Text="Start address" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Row="1" Grid.Column="1" x:Name="MscDetailAddressText" Text="—" />
+                                                <TextBlock Grid.Row="2" Text="Capacity" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Row="2" Grid.Column="1" x:Name="MscDetailCapacityText" Text="—" />
+                                                <TextBlock Grid.Row="3" Text="Protection" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Row="3" Grid.Column="1" x:Name="MscDetailProtectionText" Text="—" />
+                                                <TextBlock Grid.Row="4" Text="Expected bitrate" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Row="4" Grid.Column="1" x:Name="MscDetailExpectedRateText" Text="—" />
+                                                <TextBlock Grid.Row="5" Text="Measured bitrate" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Row="5" Grid.Column="1" x:Name="MscDetailMeasuredRateText" Text="—" />
+                                            </Grid>
+                                            <Grid Grid.Column="1" RowSpacing="5" ColumnSpacing="12">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="175" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                </Grid.RowDefinitions>
+                                                <TextBlock Text="Puncturing profile" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Column="1" x:Name="MscDetailPuncturingText" Text="—" />
+                                                <TextBlock Grid.Row="1" Text="Deinterleaver" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Row="1" Grid.Column="1" x:Name="MscDetailDeinterleaverText" Text="—" />
+                                                <TextBlock Grid.Row="2" Text="Viterbi decoder" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Row="2" Grid.Column="1" x:Name="MscDetailDecoderText" Text="Portable K=7 r=1/4" />
+                                                <TextBlock Grid.Row="3" Text="Input confidence" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Row="3" Grid.Column="1" x:Name="MscDetailViterbiText" Text="—" />
+                                                <TextBlock Grid.Row="4" Text="Decoded CIFs" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Row="4" Grid.Column="1" x:Name="MscDetailDecodedText" Text="—" />
+                                                <TextBlock Grid.Row="5" Text="Dropped / continuity" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Row="5" Grid.Column="1" x:Name="MscDetailDroppedText" Text="—" />
+                                            </Grid>
+                                        </Grid>
+                                    </Border>
+                                </Grid>
+                            </TabViewItem>
+
+                            <TabViewItem x:Name="MscErrorTimelineTab" Header="Error Timeline" IsClosable="False">
+                                <Grid Padding="12" RowSpacing="9">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="120" />
+                                    </Grid.RowDefinitions>
+                                    <Grid>
+                                        <TextBlock Text="SELECTED SUBCHANNEL — ERROR TIMELINE"
+                                                   Style="{StaticResource SectionTitleStyle}"
+                                                   VerticalAlignment="Center" />
+                                        <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                                            <CheckBox x:Name="MscTimelineBerCheckBox" Content="BER" IsChecked="True"
+                                                      Checked="MscTimelineOverlay_Click" Unchecked="MscTimelineOverlay_Click" />
+                                            <CheckBox x:Name="MscTimelineConfidenceCheckBox" Content="Confidence" IsChecked="True"
+                                                      Checked="MscTimelineOverlay_Click" Unchecked="MscTimelineOverlay_Click" />
+                                            <CheckBox x:Name="MscTimelineBufferCheckBox" Content="Buffer" IsChecked="True"
+                                                      Checked="MscTimelineOverlay_Click" Unchecked="MscTimelineOverlay_Click" />
+                                            <CheckBox x:Name="MscTimelineOutputCheckBox" Content="Output" IsChecked="True"
+                                                      Checked="MscTimelineOverlay_Click" Unchecked="MscTimelineOverlay_Click" />
+                                            <CheckBox x:Name="MscTimelineLatencyCheckBox" Content="Latency"
+                                                      Checked="MscTimelineOverlay_Click" Unchecked="MscTimelineOverlay_Click" />
+                                            <ComboBox x:Name="MscTimelinePeriodComboBox" Width="125" SelectedIndex="0">
+                                                <ComboBoxItem Content="60 seconds" Tag="60" />
+                                                <ComboBoxItem Content="10 minutes" Tag="600" />
+                                            </ComboBox>
+                                        </StackPanel>
+                                    </Grid>
+                                    <Border Grid.Row="1" Style="{StaticResource PanelCardStyle}" Padding="10">
+                                        <Canvas x:Name="MscTimelineCanvas" Height="245" Background="{StaticResource PlotBackgroundBrush}">
+                                            <Polyline x:Name="MscTimelineBerTrace" Stroke="{StaticResource WarningBrush}" StrokeThickness="2" />
+                                            <Polyline x:Name="MscTimelineConfidenceTrace" Stroke="{StaticResource MeasurementAccentBrush}" StrokeThickness="2" />
+                                            <Polyline x:Name="MscTimelineBufferTrace" Stroke="{StaticResource SpectrumBrush}" StrokeThickness="2" />
+                                            <Polyline x:Name="MscTimelineOutputTrace" Stroke="#FFB27CFF" StrokeThickness="2" />
+                                            <Polyline x:Name="MscTimelineLatencyTrace" Stroke="#FFFF9F43" StrokeThickness="2" />
+                                            <TextBlock Text="BER" Canvas.Left="6" Canvas.Top="3" FontSize="10" Foreground="{StaticResource WarningBrush}" />
+                                            <TextBlock Text="Confidence" Canvas.Left="6" Canvas.Top="22" FontSize="10" Foreground="{StaticResource MeasurementAccentBrush}" />
+                                            <TextBlock Text="Buffer" Canvas.Left="6" Canvas.Top="41" FontSize="10" Foreground="{StaticResource SpectrumBrush}" />
+                                            <TextBlock Text="Output" Canvas.Left="6" Canvas.Top="60" FontSize="10" Foreground="#FFB27CFF" />
+                                            <TextBlock Text="Latency" Canvas.Left="6" Canvas.Top="79" FontSize="10" Foreground="#FFFF9F43" />
+                                        </Canvas>
+                                    </Border>
+                                    <ListView Grid.Row="2" x:Name="MscErrorEventList" SelectionMode="None" />
+                                </Grid>
+                            </TabViewItem>
+
+                            <TabViewItem x:Name="MscBuffersTab" Header="Buffers" IsClosable="False">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="12">
+                                    <StackPanel Spacing="10">
+                                        <TextBlock Text="BUFFER PIPELINE" Style="{StaticResource SectionTitleStyle}" />
+                                        <Border Style="{StaticResource PanelCardStyle}" Padding="16">
+                                            <Grid RowSpacing="12" ColumnSpacing="18">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="250" />
+                                                    <ColumnDefinition Width="150" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                </Grid.RowDefinitions>
+                                                <TextBlock Text="MSC input CIFs" />
+                                                <TextBlock Grid.Column="1" x:Name="MscBufferInputValueText" Text="—" FontFamily="Consolas" />
+                                                <TextBlock Grid.Column="2" x:Name="MscBufferInputStateText" Text="Awaiting decoder" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Row="1" Text="Time deinterleaver" />
+                                                <TextBlock Grid.Row="1" Grid.Column="1" x:Name="MscBufferTimeValueText" Text="0%" FontFamily="Consolas" />
+                                                <TextBlock Grid.Row="1" Grid.Column="2" x:Name="MscBufferTimeStateText" Text="Filling" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Row="2" Text="Depuncture / Viterbi" />
+                                                <TextBlock Grid.Row="2" Grid.Column="1" Text="Synchronous" FontFamily="Consolas" />
+                                                <TextBlock Grid.Row="2" Grid.Column="2" x:Name="MscBufferViterbiStateText" Text="No queued work" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Row="3" Text="Decoded CIF output" />
+                                                <TextBlock Grid.Row="3" Grid.Column="1" x:Name="MscBufferDecodedValueText" Text="—" FontFamily="Consolas" />
+                                                <TextBlock Grid.Row="3" Grid.Column="2" x:Name="MscBufferDecodedStateText" Text="Awaiting output" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Row="4" Text="DAB+ superframe assembly" />
+                                                <TextBlock Grid.Row="4" Grid.Column="1" x:Name="MscBufferServiceValueText" Text="—" FontFamily="Consolas" />
+                                                <TextBlock Grid.Row="4" Grid.Column="2" x:Name="MscBufferServiceStateText" Text="Awaiting service" Foreground="{StaticResource MutedTextBrush}" />
+                                            </Grid>
+                                        </Border>
+                                        <Border Style="{StaticResource PanelCardStyle}" Padding="16">
+                                            <Grid RowSpacing="8" ColumnSpacing="16">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="230" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                </Grid.RowDefinitions>
+                                                <TextBlock Text="Maximum processing latency" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Column="1" x:Name="MscBufferLatencyText" Text="—" FontFamily="Consolas" />
+                                                <TextBlock Grid.Row="1" Text="Late blocks" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Row="1" Grid.Column="1" x:Name="MscBufferLateText" Text="0" FontFamily="Consolas" />
+                                                <TextBlock Grid.Row="2" Text="Dropped SDR blocks" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Row="2" Grid.Column="1" x:Name="MscBufferDroppedText" Text="0" FontFamily="Consolas" />
+                                                <TextBlock Grid.Row="3" Text="CIF counter discontinuities" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Row="3" Grid.Column="1" x:Name="MscBufferCifGapText" Text="0" FontFamily="Consolas" />
+                                            </Grid>
+                                        </Border>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </TabViewItem>
+
+                            <TabViewItem x:Name="MscRawDataTab" Header="Raw Data" IsClosable="False">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="12">
+                                    <StackPanel Spacing="10">
+                                        <TextBlock Text="SELECTED SUBCHANNEL — RAW DECODED CIF" Style="{StaticResource SectionTitleStyle}" />
+                                        <Border Style="{StaticResource PanelCardStyle}" Padding="14">
+                                            <Grid RowSpacing="7" ColumnSpacing="16">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="175" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="175" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                </Grid.RowDefinitions>
+                                                <TextBlock Text="Subchannel" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Column="1" x:Name="MscRawSubchannelText" Text="—" FontFamily="Consolas" />
+                                                <TextBlock Grid.Column="2" Text="CIF valid mask" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Column="3" x:Name="MscRawValidMaskText" Text="—" FontFamily="Consolas" />
+                                                <TextBlock Grid.Row="1" Text="Decoded bytes / CIF" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3" x:Name="MscRawCifBytesText" Text="—" FontFamily="Consolas" />
+                                                <TextBlock Grid.Row="2" Text="Capture note" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="3"
+                                                           Text="Preview is bounded to 256 decoded bytes from the newest valid CIF; it is not raw RF IQ."
+                                                           Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
+                                            </Grid>
+                                        </Border>
+                                        <Border Style="{StaticResource PanelCardStyle}" Padding="14">
+                                            <StackPanel Spacing="8">
+                                                <TextBlock Text="Decoded and descrambled bytes" FontSize="16" FontWeight="SemiBold" />
+                                                <TextBlock x:Name="MscRawBytesText"
+                                                           Text="Awaiting selected subchannel output."
+                                                           FontFamily="Consolas"
+                                                           TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </TabViewItem>
+                        </TabView>
+
+                        <StackPanel Visibility="Collapsed">
+                            <TextBlock x:Name="DabMscFocusText" />
+                            <TextBlock x:Name="DabMscBerPageValueText" />
+                            <TextBlock x:Name="DabMscBerPageDetailText" />
+                            <TextBlock x:Name="DabMscFramesText" />
+                            <TextBlock x:Name="DabMscSyncText" />
+                            <TextBlock x:Name="DabMscSuperframeText" />
+                            <TextBlock x:Name="DabMscAudioText" />
+                            <TextBlock x:Name="DabMscServiceText" />
+                            <TextBlock x:Name="DabMscComponentText" />
+                            <TextBlock x:Name="DabMscSubchannelText" />
+                            <TextBlock x:Name="DabMscProtectionText" />
+                            <TextBlock x:Name="DabMscGenerationText" />
                         </StackPanel>
-                    </ScrollViewer>
+                    </Grid>
                 </TabViewItem>
 
                 <TabViewItem x:Name="DabPlusTab" Header="DAB+" IsClosable="False">

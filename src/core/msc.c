@@ -1101,8 +1101,9 @@ static uint8_t dab_msc_mother_code(uint8_t bit, uint8_t *state) {
     return code;
 }
 
-static void dab_msc_measure_post_viterbi_ber(dab_msc_subchannel_runtime_t *runtime,
-                                             const uint8_t *decoded_bytes) {
+static void dab_msc_measure_pre_viterbi_pseudo_ber(
+    dab_msc_subchannel_runtime_t *runtime,
+    const uint8_t *decoded_bytes) {
     uint32_t framebits;
     uint32_t trellis_bits;
     uint8_t state = 0u;
@@ -1127,6 +1128,9 @@ static void dab_msc_measure_post_viterbi_ber(dab_msc_subchannel_runtime_t *runti
                 continue;
             }
             compared++;
+            runtime->input_confidence_sum +=
+                (uint64_t)(softbit < 0 ? -softbit : softbit);
+            runtime->input_confidence_samples++;
             if ((softbit > 0 ? 1u : 0u) != ((code >> branch) & 1u)) {
                 errors++;
             }
@@ -1671,6 +1675,9 @@ static int dab_msc_decode_subchannel_cif_runtime(const int8_t *msc_softbits,
                                              workspace->deinterleaved,
                                              config->conv_len);
     if (rc == 0) {
+        runtime->deinterleaver_cifs_seen++;
+    }
+    if (rc == 0) {
         rc = dab_msc_depuncture_cif(workspace->deinterleaved,
                                     config->conv_len,
                                     config,
@@ -1686,7 +1693,7 @@ static int dab_msc_decode_subchannel_cif_runtime(const int8_t *msc_softbits,
                                                   workspace->viterbi);
     }
     if (rc == 0) {
-        dab_msc_measure_post_viterbi_ber(runtime, output_bytes);
+        dab_msc_measure_pre_viterbi_pseudo_ber(runtime, output_bytes);
         dab_msc_descramble_bytes(output_bytes, config->framebits / 8u);
     }
     return rc == 0 ? 0 : -1;
@@ -2195,6 +2202,25 @@ int dab_msc_process_frame_with_fic(dab_msc_state_t *state,
     if (dab_msc_process_frame(state, frame_start_sample, msc_softbits, msc_softbit_count) != 0) {
         return -1;
     }
+    if (db->fig0_ext0_valid != 0u) {
+        const uint16_t current_cif = db->cif_count;
+
+        if (state->cif_counter_valid != 0u && current_cif != state->last_cif_count) {
+            uint16_t high = (uint16_t)((state->last_cif_count >> 8u) & 0x1Fu);
+            uint16_t low = (uint16_t)(state->last_cif_count & 0xFFu);
+
+            low = (uint16_t)(low + DAB_MSC_CIFS_PER_FRAME);
+            if (low >= 250u) {
+                low = (uint16_t)(low - 250u);
+                high = (uint16_t)((high + 1u) % 20u);
+            }
+            if (current_cif != (uint16_t)((high << 8u) | low)) {
+                state->cif_discontinuity_count++;
+            }
+        }
+        state->cif_counter_valid = 1u;
+        state->last_cif_count = current_cif;
+    }
     if (dab_msc_build_layout(&state->layout, db) != 0) {
         return -1;
     }
@@ -2268,6 +2294,7 @@ int dab_msc_process_frame_with_fic(dab_msc_state_t *state,
                 have_state_before_decode = 1;
             }
             memset(decoded_bytes, 0, byte_count);
+            runtime->decoded_cif_attempts++;
             if (dab_msc_decode_subchannel_cif_runtime(msc_softbits,
                                                       msc_softbit_count,
                                                       frame,
@@ -2299,6 +2326,10 @@ int dab_msc_process_frame_with_fic(dab_msc_state_t *state,
                 }
                 decoded->cif_valid[cif_index] = 1u;
                 decoded->byte_count[cif_index] = (uint16_t)byte_count;
+                runtime->decoded_cif_successes++;
+                runtime->decoded_output_bytes += byte_count;
+            } else {
+                runtime->decoded_cif_failures++;
             }
         }
     }

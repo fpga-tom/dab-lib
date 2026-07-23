@@ -125,12 +125,64 @@ void dab_receive_catalog_build(dab_receive_catalog_t *catalog,
     catalog->change_flag = database->change_flag;
     catalog->alarm_flag = database->alarm_flag;
     catalog->cif_count = database->cif_count;
+    {
+        uint8_t occupied[DAB_RECEIVE_MSC_CAPACITY_UNITS] = {0};
+
     for (uint32_t subchannel_index = 0u;
          subchannel_index < DAB_FIC_MAX_SUBCHANNELS;
          ++subchannel_index) {
-        if (database->subchannels[subchannel_index].valid != 0u) {
-            catalog->subchannel_count++;
+        const dab_fic_subchannel_t *source =
+            &database->subchannels[subchannel_index];
+        dab_receive_subchannel_info_t *target =
+            &catalog->subchannels[subchannel_index];
+        dab_msc_subchannel_t resolved = {0};
+        uint32_t end_cu;
+
+        if (source->valid == 0u) {
+            continue;
         }
+        target->valid = 1u;
+        target->subchannel_id = source->subchid;
+        target->start_cu = source->start_cu;
+        target->size_cu = source->size_cu;
+        target->protection_kind = (uint8_t)source->protection_kind;
+        target->protection_table_switch = source->table_switch;
+        target->protection_index = source->protection_index;
+        target->protection_option = source->protection_option;
+        target->protection_level = source->protection_level;
+        catalog->subchannel_count++;
+
+        end_cu = (uint32_t)source->start_cu + (uint32_t)source->size_cu;
+        target->allocation_valid =
+            source->size_cu != 0u &&
+            source->start_cu < DAB_RECEIVE_MSC_CAPACITY_UNITS &&
+            end_cu <= DAB_RECEIVE_MSC_CAPACITY_UNITS &&
+            dab_msc_resolve_subchannel(source, &resolved) == 0;
+        if (target->allocation_valid == 0u) {
+            catalog->invalid_subchannel_count++;
+            continue;
+        }
+        target->bitrate_kbps = resolved.bitrate_kbps;
+        for (uint32_t cu = source->start_cu; cu < end_cu; ++cu) {
+            if (occupied[cu] != 0u) {
+                const uint8_t previous = (uint8_t)(occupied[cu] - 1u);
+                target->overlaps = 1u;
+                catalog->subchannels[previous].overlaps = 1u;
+            } else {
+                occupied[cu] = (uint8_t)(subchannel_index + 1u);
+                catalog->allocated_capacity_units++;
+            }
+        }
+    }
+        for (uint32_t subchannel_index = 0u;
+             subchannel_index < DAB_RECEIVE_CATALOG_MAX_SUBCHANNELS;
+             ++subchannel_index) {
+            if (catalog->subchannels[subchannel_index].overlaps != 0u) {
+                catalog->overlapping_subchannel_count++;
+            }
+        }
+        catalog->unused_capacity_units =
+            DAB_RECEIVE_MSC_CAPACITY_UNITS - catalog->allocated_capacity_units;
     }
     for (uint32_t left = 0u; left < database->service_count; ++left) {
         for (uint32_t right = left + 1u;
@@ -232,7 +284,9 @@ void dab_receive_catalog_build(dab_receive_catalog_t *catalog,
     }
     catalog->database_consistent =
         catalog->missing_subchannel_reference_count == 0u &&
-        catalog->duplicate_service_id_count == 0u;
+        catalog->duplicate_service_id_count == 0u &&
+        catalog->overlapping_subchannel_count == 0u &&
+        catalog->invalid_subchannel_count == 0u;
 }
 
 int dab_receive_catalog_content_equal(const dab_receive_catalog_t *left,
@@ -252,12 +306,20 @@ int dab_receive_catalog_content_equal(const dab_receive_catalog_t *left,
            left->service_count == right->service_count &&
            left->service_component_count == right->service_component_count &&
            left->subchannel_count == right->subchannel_count &&
+           left->allocated_capacity_units == right->allocated_capacity_units &&
+           left->unused_capacity_units == right->unused_capacity_units &&
+           left->overlapping_subchannel_count ==
+               right->overlapping_subchannel_count &&
+           left->invalid_subchannel_count == right->invalid_subchannel_count &&
            left->missing_subchannel_reference_count ==
                right->missing_subchannel_reference_count &&
            left->duplicate_service_id_count ==
                right->duplicate_service_id_count &&
            left->database_consistent == right->database_consistent &&
-           memcmp(left->services, right->services, sizeof(left->services)) == 0;
+           memcmp(left->services, right->services, sizeof(left->services)) == 0 &&
+           memcmp(left->subchannels,
+                  right->subchannels,
+                  sizeof(left->subchannels)) == 0;
 }
 
 static const dab_receive_service_info_t *receive_catalog_find_service(
@@ -445,12 +507,87 @@ void dab_receive_snapshot_build(dab_receive_snapshot_t *snapshot,
 
     if (msc != 0) {
         snapshot->msc_frames_seen = msc->frames_seen;
+        snapshot->msc_cif_discontinuity_count =
+            msc->cif_discontinuity_count;
+        if (msc_audio != 0 && msc_audio->valid != 0u &&
+            msc_audio->subchid < DAB_FIC_MAX_SUBCHANNELS) {
+            const uint8_t subchid = msc_audio->subchid;
+            const dab_msc_subchannel_runtime_t *runtime =
+                &msc->runtimes[subchid];
+            const dab_msc_decoded_subchannel_t *decoded =
+                &msc->decoded_subchannels[subchid];
+
+            if (runtime->valid != 0u) {
+                snapshot->msc_selected_subchannel_valid = 1;
+                snapshot->msc_selected_subchannel_id = subchid;
+                snapshot->msc_puncturing_valid = runtime->config.valid;
+                snapshot->msc_decoder_profile =
+                    (uint8_t)runtime->config.profile;
+                snapshot->msc_decoder_protection_level =
+                    runtime->config.protection_level;
+                snapshot->msc_decoder_segment_count =
+                    runtime->config.segment_count;
+                snapshot->msc_decoder_bitrate_kbps =
+                    runtime->config.bitrate_kbps;
+                snapshot->msc_decoder_size_cu =
+                    runtime->config.size_cu;
+                snapshot->msc_input_confidence_sum =
+                    runtime->input_confidence_sum;
+                snapshot->msc_input_confidence_samples =
+                    runtime->input_confidence_samples;
+                snapshot->msc_input_confidence_percent =
+                    runtime->input_confidence_samples != 0u
+                        ? (float)(100.0 *
+                            (double)runtime->input_confidence_sum /
+                            (127.0 *
+                             (double)runtime->input_confidence_samples))
+                        : 0.0f;
+                snapshot->msc_deinterleaver_cifs_seen =
+                    runtime->deinterleaver_cifs_seen;
+                snapshot->msc_cif_decode_attempts =
+                    runtime->decoded_cif_attempts;
+                snapshot->msc_cif_decode_successes =
+                    runtime->decoded_cif_successes;
+                snapshot->msc_cif_decode_failures =
+                    runtime->decoded_cif_failures;
+                snapshot->msc_output_bytes =
+                    runtime->decoded_output_bytes;
+            }
+            if (decoded->valid != 0u) {
+                int32_t latest_valid_cif = -1;
+
+                for (uint32_t cif_index = 0u;
+                     cif_index < DAB_MSC_CIFS_PER_FRAME;
+                     ++cif_index) {
+                    snapshot->msc_latest_cif_bytes[cif_index] =
+                        decoded->byte_count[cif_index];
+                    if (decoded->cif_valid[cif_index] != 0u) {
+                        snapshot->msc_latest_cif_valid_mask |=
+                            (uint8_t)(1u << cif_index);
+                        latest_valid_cif = (int32_t)cif_index;
+                    }
+                }
+                if (latest_valid_cif >= 0) {
+                    const uint32_t byte_count =
+                        decoded->byte_count[(uint32_t)latest_valid_cif];
+                    snapshot->msc_raw_data_length =
+                        byte_count < DAB_RECEIVE_MSC_RAW_CAPACITY
+                            ? byte_count
+                            : DAB_RECEIVE_MSC_RAW_CAPACITY;
+                    memcpy(snapshot->msc_raw_data,
+                           decoded->data[(uint32_t)latest_valid_cif],
+                           snapshot->msc_raw_data_length);
+                }
+            }
+        }
     }
 
     if (msc_audio != 0 && msc_audio->valid != 0u) {
         snapshot->msc_audio_valid = 1;
         snapshot->msc_synchronized = msc_audio->synchronized != 0u;
         snapshot->msc_superframe_valid = msc_audio->superframe_valid != 0u;
+        snapshot->msc_dabplus_cif_bytes = msc_audio->cif_bytes;
+        snapshot->msc_dabplus_columns_filled = msc_audio->columns_filled;
         snapshot->msc_superframe_generation = msc_audio->generation;
         snapshot->msc_decode_attempts = msc_audio->decode_attempts;
         snapshot->msc_decode_failures = msc_audio->decode_failures;
