@@ -234,6 +234,14 @@ void test_fic_process_frame_decodes_valid_fibs(void) {
     TEST_ASSERT(state.fic_blocks_decoded_last_frame == DAB_FIC_BLOCKS_PER_FRAME);
     TEST_ASSERT(state.valid_fibs_last_frame == DAB_FIC_TOTAL_FIBS_PER_FRAME);
     TEST_ASSERT(state.total_valid_fibs == DAB_FIC_TOTAL_FIBS_PER_FRAME);
+    TEST_ASSERT(state.pre_viterbi_error_bits_last_frame == 0u);
+    TEST_ASSERT(state.pre_viterbi_compared_bits_last_frame ==
+                DAB_FIC_BLOCKS_PER_FRAME * DAB_FIC_DEPARTITIONED_SOFTBITS);
+    TEST_ASSERT(state.pre_viterbi_error_bits_total == 0u);
+    TEST_ASSERT(state.pre_viterbi_compared_bits_total ==
+                DAB_FIC_BLOCKS_PER_FRAME * DAB_FIC_DEPARTITIONED_SOFTBITS);
+    TEST_ASSERT(state.viterbi_quality_last_frame > 75.0f);
+    TEST_ASSERT(state.viterbi_quality_last_frame < 76.0f);
 
     for (fib_index = 0u; fib_index < DAB_FIC_TOTAL_FIBS_PER_FRAME; ++fib_index) {
         TEST_ASSERT(state.fib_crc_ok[fib_index] == 1u);
@@ -313,7 +321,7 @@ void test_fic_cursor_iterates_figs_and_stops_on_padding(void) {
 
 void test_fic_parse_payload_populates_repo(void) {
     dab_fic_repo_t repo = {0};
-    uint8_t fig0_ext0[] = {0x03u, 0x00u, 0x12u, 0x34u};
+    uint8_t fig0_ext0[] = {0x05u, 0x00u, 0x12u, 0x34u, 0xA1u, 0x23u};
     uint8_t fig0_ext1[5] = {0x04u, 0x01u, 0x00u, 0x00u, 0x00u};
     uint8_t fig0_ext2[] = {0x06u, 0x02u, 0x12u, 0x34u, 0x21u, 0x05u, 0x0Eu};
     uint8_t fig1_ext1[] = {
@@ -324,6 +332,8 @@ void test_fic_parse_payload_populates_repo(void) {
     };
     uint8_t payload0[30] = {0};
     uint8_t payload1[30] = {0};
+    uint8_t counter_update[30] = {0};
+    uint8_t flag_update[30] = {0};
     uint32_t bit_pos = 16u;
 
     test_fic_write_bits(fig0_ext1, &bit_pos, 3u, 6u);
@@ -343,6 +353,10 @@ void test_fic_parse_payload_populates_repo(void) {
     TEST_ASSERT(dab_fic_parse_fib_payload(&repo, payload0, sizeof(payload0)) == 0);
     TEST_ASSERT(dab_fic_parse_fib_payload(&repo, payload1, sizeof(payload1)) == 0);
     TEST_ASSERT(repo.current.eid == 0x1234u);
+    TEST_ASSERT(repo.current.fig0_ext0_valid == 1u);
+    TEST_ASSERT(repo.current.change_flag == 2u);
+    TEST_ASSERT(repo.current.alarm_flag == 1u);
+    TEST_ASSERT(repo.current.cif_count == 0x0123u);
     TEST_ASSERT(repo.current.subchannels[3].valid == 1u);
     TEST_ASSERT(repo.current.subchannels[3].start_cu == 100u);
     TEST_ASSERT(repo.current.subchannels[3].protection_kind == DAB_FIC_PROTECTION_UEP);
@@ -359,6 +373,39 @@ void test_fic_parse_payload_populates_repo(void) {
     TEST_ASSERT(repo.current.services[0].components[0].primary == 1u);
     TEST_ASSERT(repo.current.label_count == 1u);
     TEST_ASSERT(strcmp(repo.current.labels[0].text, "TEST SERVICE") == 0);
+    TEST_ASSERT(repo.total_figs == 4u);
+    TEST_ASSERT(repo.fig_stat_count == 4u);
+    TEST_ASSERT(repo.fig_stats[0].type == DAB_FIC_FIG_TYPE_0);
+    TEST_ASSERT(repo.fig_stats[0].ext == 0u);
+    TEST_ASSERT(repo.fig_stats[0].supported == 1u);
+    TEST_ASSERT(repo.fig_stats[0].total_count == 1u);
+    TEST_ASSERT(repo.fig_stats[0].change_count == 0u);
+    TEST_ASSERT(repo.fig_stats[0].raw_length == sizeof(fig0_ext0));
+    TEST_ASSERT(memcmp(repo.fig_stats[0].raw,
+                       fig0_ext0,
+                       sizeof(fig0_ext0)) == 0);
+
+    memcpy(counter_update, fig0_ext0, sizeof(fig0_ext0));
+    counter_update[5] = 0x24u;
+    counter_update[sizeof(fig0_ext0)] = 0xFFu;
+    repo.current_frame_index = 7u;
+    TEST_ASSERT(dab_fic_parse_fib_payload(&repo,
+                                          counter_update,
+                                          sizeof(counter_update)) == 0);
+    TEST_ASSERT(repo.fig_stats[0].total_count == 2u);
+    TEST_ASSERT(repo.fig_stats[0].change_count == 0u);
+    TEST_ASSERT(repo.fig_stats[0].raw[5] == 0x24u);
+
+    memcpy(flag_update, counter_update, sizeof(counter_update));
+    flag_update[4] = 0x61u;
+    repo.current_frame_index = 8u;
+    TEST_ASSERT(dab_fic_parse_fib_payload(&repo,
+                                          flag_update,
+                                          sizeof(flag_update)) == 0);
+    TEST_ASSERT(repo.fig_stats[0].total_count == 3u);
+    TEST_ASSERT(repo.fig_stats[0].change_count == 1u);
+    TEST_ASSERT(repo.fig_stats[0].last_change_frame == 8u);
+    TEST_ASSERT(repo.fig_stats[0].previous_raw[4] == 0xA1u);
 }
 
 void test_fic_parse_payload_populates_packet_component_from_fig0_ext3(void) {

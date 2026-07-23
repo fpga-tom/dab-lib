@@ -2,7 +2,12 @@
 #include "MainWindow.xaml.h"
 
 #include <cstring>
+#include <cwctype>
 #include <limits>
+
+extern "C" {
+#include "dab/core/fic.h"
+}
 
 #if __has_include("MainWindow.g.cpp")
 #include "MainWindow.g.cpp"
@@ -152,6 +157,90 @@ namespace
         wchar_t buffer[24]{};
         swprintf_s(buffer, L"%02u:%02u:%02u", time.wHour, time.wMinute, time.wSecond);
         return hstring{ buffer };
+    }
+
+    hstring history_clock_ms_text(uint64_t wall_time_100ns)
+    {
+        FILETIME const utc = file_time_from_value(wall_time_100ns);
+        FILETIME local{};
+        SYSTEMTIME time{};
+        if (!FileTimeToLocalFileTime(&utc, &local) ||
+            !FileTimeToSystemTime(&local, &time))
+        {
+            return L"--:--:--.---";
+        }
+        wchar_t buffer[32]{};
+        swprintf_s(buffer,
+                   L"%02u:%02u:%02u.%03u",
+                   time.wHour,
+                   time.wMinute,
+                   time.wSecond,
+                   time.wMilliseconds);
+        return hstring{ buffer };
+    }
+
+    hstring format_scientific(float value)
+    {
+        wchar_t buffer[40]{};
+        swprintf_s(buffer, L"%.2e", static_cast<double>(value));
+        return hstring{ buffer };
+    }
+
+    hstring bytes_to_hex(uint8_t const* bytes, uint32_t length)
+    {
+        if (bytes == nullptr || length == 0u)
+        {
+            return L"—";
+        }
+        std::wstring result;
+        result.reserve(static_cast<size_t>(length) * 3u);
+        for (uint32_t index = 0u; index < length; ++index)
+        {
+            wchar_t byte[4]{};
+            swprintf_s(byte, L"%02X", bytes[index]);
+            if (!result.empty())
+            {
+                result.push_back(L' ');
+            }
+            result += byte;
+        }
+        return hstring{ result };
+    }
+
+    hstring fic_fig_purpose(uint8_t type, uint8_t extension)
+    {
+        if (type == 0u)
+        {
+            switch (extension)
+            {
+            case 0u: return L"Ensemble configuration";
+            case 1u: return L"Subchannel organisation";
+            case 2u: return L"Service organisation";
+            case 3u: return L"Packet-mode component";
+            case 5u: return L"Service component language";
+            case 8u: return L"Service component definition";
+            case 9u: return L"Country / LTO / ECC";
+            case 10u: return L"Date and time";
+            case 13u: return L"User application information";
+            case 17u: return L"Programme type";
+            case 18u: return L"Announcement support";
+            case 19u: return L"Announcement switching";
+            case 21u: return L"Frequency information";
+            default: return L"FIG 0 signalling";
+            }
+        }
+        if (type == 1u)
+        {
+            switch (extension)
+            {
+            case 0u: return L"Ensemble label";
+            case 1u: return L"Service label";
+            case 4u: return L"Service component label";
+            case 5u: return L"Data service label";
+            default: return L"FIG 1 label";
+            }
+        }
+        return L"Unsupported FIG type";
     }
 
     std::wstring history_iso_utc(uint64_t wall_time_100ns)
@@ -383,16 +472,19 @@ namespace winrt::DabMeasurementWinUI::implementation
         if (metric == L"fic:crc")
         {
             DabTabView().SelectedItem(DabFicTab());
+            FicTabView().SelectedItem(FicFibTimelineTab());
             DabFicFocusText().Text(L"Selected metric: FIC CRC");
         }
         else if (metric == L"fic:fig")
         {
             DabTabView().SelectedItem(DabFicTab());
+            FicTabView().SelectedItem(FicFigBrowserTab());
             DabFicFocusText().Text(L"Selected metric: FIG parsing");
         }
         else if (metric == L"fic:reconfiguration")
         {
             DabTabView().SelectedItem(DabFicTab());
+            FicTabView().SelectedItem(FicDatabaseTab());
             DabFicFocusText().Text(L"Selected metric: FIC database reconfiguration");
         }
         else if (metric == L"msc:ber")
@@ -420,6 +512,202 @@ namespace winrt::DabMeasurementWinUI::implementation
             {
                 DabPlusFocusText().Text(L"Selected metric: audio-unit CRC");
             }
+        }
+    }
+
+    void MainWindow::FicMetricCard_Click(IInspectable const& sender,
+                                          RoutedEventArgs const&)
+    {
+        auto const button = sender.try_as<Button>();
+        if (!button || !button.Tag())
+        {
+            return;
+        }
+        hstring const metric = unbox_value<hstring>(button.Tag());
+        std::wstring_view const metric_view{ metric.c_str(), metric.size() };
+        if (metric_view.starts_with(L"fib:"))
+        {
+            FicTabView().SelectedItem(FicFibTimelineTab());
+        }
+        else if (metric_view.starts_with(L"fig:"))
+        {
+            FicTabView().SelectedItem(FicFigBrowserTab());
+        }
+        else if (metric_view.starts_with(L"database:"))
+        {
+            FicTabView().SelectedItem(FicDatabaseTab());
+        }
+        else
+        {
+            FicTabView().SelectedItem(FicOverviewTab());
+        }
+        DabFicFocusText().Text(L"Selected metric: " + metric);
+    }
+
+    void MainWindow::FicTimelineResume_Click(IInspectable const&,
+                                              RoutedEventArgs const&)
+    {
+        m_fic_timeline_frozen = false;
+        FicTimelineResumeButton().Content(box_value(L"Live"));
+        FicTabView().SelectedItem(FicFibTimelineTab());
+        FicRawCaptureStateText().Text(L"Live timeline");
+        UpdateFicTimelineVisuals();
+        RefreshFicFailureList();
+    }
+
+    void MainWindow::FicFailureListView_ItemClick(
+        IInspectable const&,
+        ItemClickEventArgs const& args)
+    {
+        auto const row = args.ClickedItem().try_as<FrameworkElement>();
+        if (!row || !row.Tag())
+        {
+            return;
+        }
+        size_t const index = static_cast<size_t>(
+            unbox_value<uint64_t>(row.Tag()));
+        if (index >= m_fic_fib_history.size())
+        {
+            return;
+        }
+        m_fic_timeline_frozen = true;
+        FicTimelineResumeButton().Content(box_value(L"Frozen"));
+        InspectFicHistoryEntry(index);
+        FicTabView().SelectedItem(FicRawInspectorTab());
+    }
+
+    void MainWindow::FicFigFilter_Changed(IInspectable const&,
+                                           SelectionChangedEventArgs const&)
+    {
+        RefreshFicBrowser();
+    }
+
+    void MainWindow::FicFigSearch_Changed(IInspectable const&,
+                                           TextChangedEventArgs const&)
+    {
+        RefreshFicBrowser();
+    }
+
+    void MainWindow::FicFigChangedOnly_Click(IInspectable const&,
+                                              RoutedEventArgs const&)
+    {
+        RefreshFicBrowser();
+    }
+
+    void MainWindow::FicFigListView_SelectionChanged(
+        IInspectable const&,
+        SelectionChangedEventArgs const&)
+    {
+        auto const row = FicFigListView().SelectedItem().try_as<FrameworkElement>();
+        if (!row || !row.Tag())
+        {
+            return;
+        }
+        m_fic_selected_fig_index = unbox_value<uint32_t>(row.Tag());
+        UpdateSelectedFig();
+    }
+
+    void MainWindow::FicFreezeOnChange_Click(IInspectable const&,
+                                              RoutedEventArgs const&)
+    {
+        if (!FicFigBrowserStatusText())
+        {
+            return;
+        }
+        bool const enabled = FicFreezeOnChangeCheckBox().IsChecked() &&
+                             FicFreezeOnChangeCheckBox().IsChecked().Value();
+        if (!enabled && m_fic_browser_frozen)
+        {
+            m_fic_browser_frozen = false;
+            FicFigBrowserStatusText().Text(L"LIVE");
+            AddTimelineEvent(L"FIG browser resumed");
+        }
+        else
+        {
+            FicFigBrowserStatusText().Text(
+                enabled ? L"LIVE · freeze on change armed" : L"LIVE");
+        }
+    }
+
+    void MainWindow::FicCaptureIqOnChange_Click(IInspectable const&,
+                                                 RoutedEventArgs const&)
+    {
+        if (!FicFigBrowserStatusText())
+        {
+            return;
+        }
+        bool const armed = FicCaptureIqOnChangeCheckBox().IsChecked() &&
+                           FicCaptureIqOnChangeCheckBox().IsChecked().Value();
+        FicFigBrowserStatusText().Text(
+            armed ? L"ARMED · latest null-scope IQ will be captured on change" : L"LIVE");
+        AddTimelineEvent(armed
+            ? L"FIC configuration-change IQ capture armed"
+            : L"FIC configuration-change IQ capture disarmed");
+    }
+
+    void MainWindow::FicCopySelectedFig_Click(IInspectable const&,
+                                               RoutedEventArgs const&)
+    {
+        if (m_fic_selected_fig_index >= m_fic_fig_stat_count)
+        {
+            FicFigBrowserStatusText().Text(L"Select a FIG first");
+            return;
+        }
+        using namespace Windows::ApplicationModel::DataTransfer;
+        DataPackage package;
+        package.SetText(FicFigSelectedTitleText().Text() + L"\r\n" +
+                        FicFigSelectedDecodedText().Text() + L"\r\n" +
+                        FicFigSelectedRawText().Text());
+        Clipboard::SetContent(package);
+        FicFigBrowserStatusText().Text(L"Selected FIG copied");
+    }
+
+    winrt::fire_and_forget MainWindow::FicExportSelectedFig_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        auto lifetime = get_strong();
+        if (m_fic_selected_fig_index >= m_fic_fig_stat_count)
+        {
+            FicFigBrowserStatusText().Text(L"Select a FIG first");
+            co_return;
+        }
+        try
+        {
+            auto const& stat = m_fic_fig_stats[m_fic_selected_fig_index];
+            std::wstring text = FicFigSelectedTitleText().Text().c_str();
+            text += L"\r\n";
+            text += FicFigSelectedDecodedText().Text().c_str();
+            text += L"\r\nCurrent: ";
+            text += FicFigSelectedRawText().Text().c_str();
+            text += L"\r\nPrevious: ";
+            text += FicFigSelectedPreviousText().Text().c_str();
+            text += L"\r\n";
+
+            using namespace Windows::Storage;
+            SYSTEMTIME now{};
+            GetLocalTime(&now);
+            wchar_t filename[96]{};
+            swprintf_s(filename,
+                       L"DAB_FIG_%u_%u_%04u%02u%02u_%02u%02u%02u.txt",
+                       stat.type,
+                       stat.extension,
+                       now.wYear,
+                       now.wMonth,
+                       now.wDay,
+                       now.wHour,
+                       now.wMinute,
+                       now.wSecond);
+            auto const file = co_await DownloadsFolder::CreateFileAsync(
+                filename,
+                CreationCollisionOption::GenerateUniqueName);
+            co_await FileIO::WriteTextAsync(file, hstring{ text });
+            FicFigBrowserStatusText().Text(L"Exported · " + file.Path());
+            AddTimelineEvent(L"FIC FIG exported to " + file.Path());
+        }
+        catch (hresult_error const& error)
+        {
+            FicFigBrowserStatusText().Text(L"Export failed · " + error.message());
         }
     }
 
@@ -1027,9 +1315,16 @@ namespace winrt::DabMeasurementWinUI::implementation
         RoutedEventArgs const&)
     {
         auto lifetime = get_strong();
+        bool const fic_configuration_capture = m_fic_capture_in_progress;
         if (m_rf_null_focus_count == 0u)
         {
             RfNullCaptureStatusText().Text(L"No triggered IQ capture available");
+            if (fic_configuration_capture)
+            {
+                FicFigBrowserStatusText().Text(
+                    L"Configuration changed · no recent triggered IQ available");
+            }
+            m_fic_capture_in_progress = false;
             co_return;
         }
         try
@@ -1063,7 +1358,9 @@ namespace winrt::DabMeasurementWinUI::implementation
             GetLocalTime(&now);
             wchar_t filename[96]{};
             swprintf_s(filename,
-                       L"DAB_NullScope_%04u%02u%02u_%02u%02u%02u_%03u.ci16",
+                       fic_configuration_capture
+                           ? L"DAB_FICChange_%04u%02u%02u_%02u%02u%02u_%03u.ci16"
+                           : L"DAB_NullScope_%04u%02u%02u_%02u%02u%02u_%03u.ci16",
                        now.wYear,
                        now.wMonth,
                        now.wDay,
@@ -1121,13 +1418,36 @@ namespace winrt::DabMeasurementWinUI::implementation
                 throw_hresult(HRESULT_FROM_WIN32(write_error));
             }
             RfNullCaptureStatusText().Text(L"Saved " + hstring{ filename });
-            AddTimelineEvent(L"Triggered null IQ capture saved to " + hstring{ path });
+            if (fic_configuration_capture)
+            {
+                FicFigBrowserStatusText().Text(
+                    L"Configuration-change IQ saved · " + hstring{ filename });
+                AddTimelineEvent(
+                    L"FIC configuration-change IQ capture saved to " +
+                    hstring{ path });
+            }
+            else
+            {
+                AddTimelineEvent(
+                    L"Triggered null IQ capture saved to " + hstring{ path });
+            }
         }
         catch (hresult_error const& error)
         {
             RfNullCaptureStatusText().Text(L"IQ capture failed");
-            AddTimelineEvent(L"Null IQ capture failed: " + error.message());
+            if (fic_configuration_capture)
+            {
+                FicFigBrowserStatusText().Text(L"Configuration-change IQ capture failed");
+                AddTimelineEvent(
+                    L"FIC configuration-change IQ capture failed: " +
+                    error.message());
+            }
+            else
+            {
+                AddTimelineEvent(L"Null IQ capture failed: " + error.message());
+            }
         }
+        m_fic_capture_in_progress = false;
         co_return;
     }
 
@@ -1213,6 +1533,24 @@ namespace winrt::DabMeasurementWinUI::implementation
         m_receiver.JoinFinished();
         StartPendingServiceRestart();
 
+        std::vector<dab_receive_snapshot_t> fic_snapshots;
+        uint64_t fic_history_version = 0u;
+        if (m_mailbox.ReadSince(m_fic_mailbox_history_version,
+                                fic_snapshots,
+                                fic_history_version))
+        {
+            m_fic_mailbox_history_version = fic_history_version;
+            for (auto const& fic_snapshot : fic_snapshots)
+            {
+                AppendFicFrameTelemetry(fic_snapshot);
+            }
+            if (!m_fic_timeline_frozen)
+            {
+                UpdateFicTimelineVisuals();
+                RefreshFicFailureList();
+            }
+        }
+
         dab_receive_snapshot_t snapshot{};
         uint64_t snapshot_version = 0;
         if (m_mailbox.TryReadLatest(m_mailbox_version, snapshot, snapshot_version))
@@ -1290,6 +1628,8 @@ namespace winrt::DabMeasurementWinUI::implementation
         {
             ClearCatalogView();
             ResetDabOverviewHistory();
+            ResetFicMeasurementSession();
+            m_fic_mailbox_history_version = m_mailbox_version;
             m_rf_history_write = 0u;
             m_rf_history_count = 0u;
             m_latest_mer_valid = false;
@@ -1886,9 +2226,775 @@ namespace winrt::DabMeasurementWinUI::implementation
         }
     }
 
+    void MainWindow::ApplyFicSnapshot(dab_receive_snapshot_t const& snapshot)
+    {
+        bool const valid = snapshot.locked != 0 &&
+                           snapshot.fic_valid_fibs_last_frame != 0u;
+        Brush const status_brush = Application::Current().Resources().Lookup(
+            box_value(hstring{ valid
+                ? L"MeasurementAccentBrush"
+                : (snapshot.locked != 0 ? L"WarningBrush" : L"MutedTextBrush") })).as<Brush>();
+        FicHeaderStatusIndicator().Fill(status_brush);
+        FicHeaderStatusText().Foreground(status_brush);
+        FicHeaderStatusText().Text(valid ? L"VALID" :
+            (snapshot.locked != 0 ? L"DEGRADED" : L"NOT LOCKED"));
+
+        hstring ensemble{ L"Awaiting ensemble" };
+        hstring ensemble_id{ L"—" };
+        if (m_have_catalog)
+        {
+            ensemble = fic_label_text(m_latest_catalog.ensemble_label);
+            if (ensemble.empty())
+            {
+                ensemble = L"Unnamed ensemble";
+            }
+            wchar_t id[24]{};
+            swprintf_s(id, L"0x%04X", m_latest_catalog.ensemble_id);
+            ensemble_id = id;
+        }
+        uint64_t const stable_seconds = m_tick >= m_dab_catalog_changed_tick
+            ? (m_tick - m_dab_catalog_changed_tick) / 4u
+            : 0u;
+        FicHeaderContextText().Text(
+            L"Ensemble " + ensemble_id + L" · " + ensemble +
+            L" · Configuration stable for " +
+            format_duration(stable_seconds * 1000000000ull));
+
+        constexpr uint64_t fibs_per_frame = DAB_RECEIVE_FIC_FIB_COUNT;
+        uint64_t const total_fibs =
+            static_cast<uint64_t>(snapshot.fic_frames_seen) * fibs_per_frame;
+        uint64_t const valid_fibs = snapshot.fic_total_valid_fibs;
+        uint64_t const crc_errors = total_fibs >= valid_fibs
+            ? total_fibs - valid_fibs
+            : 0u;
+        bool const have_fibs = total_fibs != 0u;
+        float const valid_percent = have_fibs
+            ? 100.0f * static_cast<float>(
+                static_cast<double>(valid_fibs) / static_cast<double>(total_fibs))
+            : 0.0f;
+        FicCrcValidValueText().Text(have_fibs
+            ? format_float(valid_percent, L"%", 2)
+            : hstring{ L"—" });
+        FicCrcValidDetailText().Text(have_fibs
+            ? to_hstring(valid_fibs) + L" / " + to_hstring(total_fibs)
+            : hstring{ L"Awaiting decoded FIBs" });
+        if (crc_errors > m_fic_last_total_errors)
+        {
+            m_fic_last_failure_tick = m_tick;
+        }
+        m_fic_last_total_errors = crc_errors;
+        FicCrcErrorsValueText().Text(to_hstring(crc_errors));
+        if (crc_errors == 0u)
+        {
+            FicCrcErrorsDetailText().Text(L"No errors since session start");
+        }
+        else
+        {
+            uint64_t const elapsed_seconds =
+                m_tick >= m_fic_last_failure_tick
+                    ? (m_tick - m_fic_last_failure_tick) / 4u
+                    : 0u;
+            FicCrcErrorsDetailText().Text(
+                L"Last " + format_duration(elapsed_seconds * 1000000000ull) + L" ago");
+        }
+
+        FicPreBerValueText().Text(snapshot.fic_pre_viterbi_ber_valid != 0
+            ? format_scientific(snapshot.fic_pre_viterbi_ber)
+            : hstring{ L"—" });
+        FicPreBerDetailText().Text(snapshot.fic_pre_viterbi_ber_valid == 0
+            ? hstring{ L"Awaiting compared channel bits" }
+            : (snapshot.fic_pre_viterbi_ber < 1.0e-3f
+                ? hstring{ L"Stable" }
+                : hstring{ L"Degraded" }));
+        FicFigErrorsValueText().Text(
+            to_hstring(snapshot.fic_total_fig_parse_errors));
+        FicLockValueText().Text(valid ? L"Locked" :
+            (snapshot.locked != 0 ? L"Partial" : L"Unlocked"));
+        FicLockDetailText().Text(snapshot.sync_lock_duration_ns != 0u
+            ? format_duration(snapshot.sync_lock_duration_ns)
+            : hstring{ L"Awaiting frame lock" });
+        FicViterbiValueText().Text(snapshot.fic_frames_seen != 0u
+            ? format_float(snapshot.fic_viterbi_quality_percent, L"%", 1)
+            : hstring{ L"—" });
+        FicViterbiDetailText().Text(snapshot.fic_frames_seen == 0u
+            ? hstring{ L"Awaiting channel softbits" }
+            : (snapshot.fic_viterbi_quality_percent >= 70.0f
+                ? hstring{ L"Good input confidence" }
+                : hstring{ L"Low input confidence" }));
+
+        uint64_t const rate_timestamp = snapshot.timestamp_ns;
+        if (m_fic_previous_rate_timestamp_ns != 0u &&
+            rate_timestamp > m_fic_previous_rate_timestamp_ns &&
+            snapshot.fic_total_figs >= m_fic_previous_rate_count)
+        {
+            double const seconds =
+                static_cast<double>(rate_timestamp -
+                                    m_fic_previous_rate_timestamp_ns) /
+                1000000000.0;
+            float const instantaneous = static_cast<float>(
+                static_cast<double>(snapshot.fic_total_figs -
+                                    m_fic_previous_rate_count) /
+                seconds);
+            m_fic_rate = m_fic_rate == 0.0f
+                ? instantaneous
+                : 0.75f * m_fic_rate + 0.25f * instantaneous;
+        }
+
+        uint64_t change_total = 0u;
+        if (!m_fic_browser_frozen)
+        {
+            double const stat_seconds =
+                m_fic_previous_rate_timestamp_ns != 0u &&
+                rate_timestamp > m_fic_previous_rate_timestamp_ns
+                    ? static_cast<double>(rate_timestamp -
+                                          m_fic_previous_rate_timestamp_ns) /
+                        1000000000.0
+                    : 0.0;
+            m_fic_fig_stat_count = (std::min)(
+                snapshot.fic_fig_stat_count,
+                static_cast<uint32_t>(DAB_RECEIVE_FIC_FIG_STAT_CAPACITY));
+            for (uint32_t index = 0u; index < m_fic_fig_stat_count; ++index)
+            {
+                auto const& source = snapshot.fic_fig_stats[index];
+                size_t const key =
+                    (static_cast<size_t>(source.type & 0x07u) << 5u) |
+                    static_cast<size_t>(source.extension & 0x1Fu);
+                if (stat_seconds > 0.0 &&
+                    source.total_count >= m_fic_fig_previous_counts[key])
+                {
+                    float const instantaneous = static_cast<float>(
+                        static_cast<double>(
+                            source.total_count - m_fic_fig_previous_counts[key]) /
+                        stat_seconds);
+                    m_fic_fig_rates[key] = m_fic_fig_rates[key] == 0.0f
+                        ? instantaneous
+                        : 0.75f * m_fic_fig_rates[key] + 0.25f * instantaneous;
+                }
+                m_fic_fig_previous_counts[key] = source.total_count;
+                m_fic_fig_stats[index] = source;
+                if (source.supported != 0u)
+                {
+                    change_total += source.change_count;
+                }
+            }
+            m_fic_latest_frame_index = snapshot.fic_frames_seen;
+            m_fic_latest_timestamp_ns = snapshot.timestamp_ns;
+        }
+        m_fic_previous_rate_count = snapshot.fic_total_figs;
+        m_fic_previous_rate_timestamp_ns = rate_timestamp;
+
+        FicFigRateValueText().Text(snapshot.fic_total_figs != 0u
+            ? format_float(m_fic_rate, L" FIG/s", 1)
+            : hstring{ L"—" });
+        FicFigRateDetailText().Text(
+            to_hstring(m_fic_fig_stat_count) + L" type/extension pairs active");
+        if (snapshot.fic_change_flag == 0u)
+        {
+            FicReconfigValueText().Text(L"NONE PENDING");
+            FicReconfigDetailText().Text(m_have_catalog
+                ? hstring{ L"Database current" }
+                : hstring{ L"Awaiting database" });
+        }
+        else
+        {
+            FicReconfigValueText().Text(
+                L"CHANGE FLAG " + to_hstring(snapshot.fic_change_flag));
+            FicReconfigDetailText().Text(snapshot.fic_alarm_flag != 0u
+                ? hstring{ L"Alarm flag set" }
+                : hstring{ L"Configuration transition signalled" });
+        }
+
+        bool const configuration_changed =
+            !m_fic_browser_frozen &&
+            m_fic_change_baseline_valid &&
+            change_total > m_fic_last_seen_change_total;
+        if (configuration_changed)
+        {
+            m_fic_last_seen_change_total = change_total;
+            if (FicCaptureIqOnChangeCheckBox().IsChecked() &&
+                FicCaptureIqOnChangeCheckBox().IsChecked().Value())
+            {
+                m_fic_capture_in_progress = true;
+                RfNullCaptureIq_Click(IInspectable{ nullptr },
+                                      RoutedEventArgs{ nullptr });
+            }
+            if (FicFreezeOnChangeCheckBox().IsChecked() &&
+                FicFreezeOnChangeCheckBox().IsChecked().Value())
+            {
+                m_fic_browser_frozen = true;
+                FicFigBrowserStatusText().Text(L"FROZEN · FIG content changed");
+                AddTimelineEvent(L"FIG browser frozen on signalling change");
+            }
+        }
+        if (!m_fic_browser_frozen)
+        {
+            m_fic_last_seen_change_total = change_total;
+            m_fic_change_baseline_valid = true;
+            RefreshFicBrowser();
+        }
+    }
+
+    void MainWindow::AppendFicFrameTelemetry(
+        dab_receive_snapshot_t const& snapshot)
+    {
+        if (snapshot.fic_frames_seen == 0u ||
+            snapshot.fic_frame_start_sample == 0u ||
+            (!m_fic_fib_history.empty() &&
+             m_fic_fib_history.back().frame_start_sample ==
+                snapshot.fic_frame_start_sample))
+        {
+            return;
+        }
+
+        uint64_t const wall_time = current_wall_time_100ns();
+        for (uint32_t fib = 0u; fib < DAB_RECEIVE_FIC_FIB_COUNT; ++fib)
+        {
+            uint32_t const block = fib / 3u;
+            FicFibHistoryEntry entry{};
+            entry.timestamp_ns = snapshot.timestamp_ns;
+            entry.wall_time_100ns = wall_time;
+            entry.frame_start_sample = snapshot.fic_frame_start_sample;
+            entry.frame_index = snapshot.fic_frames_seen;
+            entry.fib_index = static_cast<uint8_t>(fib);
+            entry.crc_valid =
+                (snapshot.fic_crc_valid_mask & (1u << fib)) != 0u;
+            entry.pre_viterbi_ber =
+                snapshot.fic_block_pre_viterbi_ber[block];
+            entry.viterbi_quality_percent =
+                snapshot.fic_block_viterbi_quality_percent[block];
+            std::copy(std::begin(snapshot.fic_decoded_fibs[fib]),
+                      std::end(snapshot.fic_decoded_fibs[fib]),
+                      entry.raw.begin());
+            m_fic_fib_history.push_back(entry);
+        }
+        while (m_fic_fib_history.size() > fic_fib_history_capacity)
+        {
+            m_fic_fib_history.pop_front();
+        }
+    }
+
+    void MainWindow::UpdateFicTimelineVisuals()
+    {
+        auto cells = FicCrcTimelineCells().Children();
+        cells.Clear();
+        PointCollection quality_points;
+        PointCollection ber_points;
+        if (m_fic_fib_history.empty())
+        {
+            FicViterbiTimelineTrace().Points(quality_points);
+            FicBerTimelineTrace().Points(ber_points);
+            return;
+        }
+
+        uint64_t period_seconds = 10u;
+        auto const period_item =
+            FicTimelinePeriodComboBox().SelectedItem().try_as<ComboBoxItem>();
+        if (period_item && period_item.Tag())
+        {
+            period_seconds = std::wcstoull(
+                unbox_value<hstring>(period_item.Tag()).c_str(),
+                nullptr,
+                10);
+        }
+        uint64_t const latest_ns = m_fic_fib_history.back().timestamp_ns;
+        uint64_t const start_ns = latest_ns > period_seconds * 1000000000ull
+            ? latest_ns - period_seconds * 1000000000ull
+            : 0u;
+        size_t first = 0u;
+        while (first < m_fic_fib_history.size() &&
+               m_fic_fib_history[first].timestamp_ns < start_ns)
+        {
+            ++first;
+        }
+        if (first >= m_fic_fib_history.size())
+        {
+            return;
+        }
+
+        size_t const count = m_fic_fib_history.size() - first;
+        size_t const cell_first = count > 80u
+            ? m_fic_fib_history.size() - 80u
+            : first;
+        Brush const valid_brush = Application::Current().Resources().Lookup(
+            box_value(hstring{ L"MeasurementAccentBrush" })).as<Brush>();
+        Brush const error_brush = Application::Current().Resources().Lookup(
+            box_value(hstring{ L"WarningBrush" })).as<Brush>();
+        for (size_t index = cell_first;
+             index < m_fic_fib_history.size();
+             ++index)
+        {
+            winrt::Microsoft::UI::Xaml::Shapes::Rectangle cell;
+            cell.Width(8.0);
+            cell.Height(14.0);
+            cell.RadiusX(1.0);
+            cell.RadiusY(1.0);
+            cell.Fill(m_fic_fib_history[index].crc_valid
+                ? valid_brush
+                : error_brush);
+            cells.Append(cell);
+        }
+
+        constexpr float left = 105.0f;
+        constexpr float width = 790.0f;
+        for (size_t point = 0u; point < count; ++point)
+        {
+            auto const& entry = m_fic_fib_history[first + point];
+            float const x = count > 1u
+                ? left + width * static_cast<float>(point) /
+                    static_cast<float>(count - 1u)
+                : left + width;
+            float const quality = std::clamp(
+                entry.viterbi_quality_percent / 100.0f,
+                0.0f,
+                1.0f);
+            quality_points.Append(Point{ x, 58.0f - quality * 28.0f });
+            float const log_ber = std::log10(
+                std::clamp(entry.pre_viterbi_ber, 1.0e-7f, 1.0e-1f));
+            float const good = std::clamp((-1.0f - log_ber) / 6.0f,
+                                          0.0f,
+                                          1.0f);
+            ber_points.Append(Point{ x, 118.0f - good * 28.0f });
+        }
+        FicViterbiTimelineTrace().Points(quality_points);
+        FicBerTimelineTrace().Points(ber_points);
+    }
+
+    void MainWindow::RefreshFicFailureList()
+    {
+        auto items = FicFailureListView().Items();
+        items.Clear();
+        if (m_fic_fib_history.empty())
+        {
+            return;
+        }
+        uint64_t const latest_ns = m_fic_fib_history.back().timestamp_ns;
+        uint64_t const start_ns = latest_ns > 10000000000ull
+            ? latest_ns - 10000000000ull
+            : 0u;
+        uint32_t added = 0u;
+        for (size_t reverse = m_fic_fib_history.size();
+             reverse > 0u && added < 40u;
+             --reverse)
+        {
+            size_t const index = reverse - 1u;
+            auto const& entry = m_fic_fib_history[index];
+            if (entry.timestamp_ns < start_ns)
+            {
+                break;
+            }
+            if (entry.crc_valid)
+            {
+                continue;
+            }
+
+            StackPanel row;
+            row.Orientation(Orientation::Horizontal);
+            row.Tag(box_value(static_cast<uint64_t>(index)));
+            auto append = [&](hstring const& text, double width)
+            {
+                TextBlock value;
+                value.Text(text);
+                value.Width(width);
+                value.TextTrimming(TextTrimming::CharacterEllipsis);
+                row.Children().Append(value);
+            };
+            append(history_clock_ms_text(entry.wall_time_100ns), 145.0);
+            append(to_hstring(entry.frame_index), 150.0);
+            append(to_hstring(entry.fib_index), 60.0);
+            append(L"Error", 80.0);
+            append(format_scientific(entry.pre_viterbi_ber), 115.0);
+            TextBlock action;
+            action.Text(L"Inspect →");
+            action.Foreground(Application::Current().Resources().Lookup(
+                box_value(hstring{ L"SpectrumBrush" })).as<Brush>());
+            row.Children().Append(action);
+            items.Append(row);
+            ++added;
+        }
+        if (added == 0u)
+        {
+            ListViewItem empty;
+            empty.Content(box_value(L"No CRC failures in the last 10 seconds"));
+            empty.IsEnabled(false);
+            items.Append(empty);
+        }
+    }
+
+    void MainWindow::RefreshFicBrowser()
+    {
+        if (!FicFigListView() ||
+            !FicFigFilterComboBox() ||
+            !FicFigChangedOnlyCheckBox() ||
+            !FicFigSearchTextBox())
+        {
+            return;
+        }
+        auto items = FicFigListView().Items();
+        items.Clear();
+        hstring filter{ L"all" };
+        auto const filter_item =
+            FicFigFilterComboBox().SelectedItem().try_as<ComboBoxItem>();
+        if (filter_item && filter_item.Tag())
+        {
+            filter = unbox_value<hstring>(filter_item.Tag());
+        }
+        bool const changed_only = FicFigChangedOnlyCheckBox().IsChecked() &&
+                                  FicFigChangedOnlyCheckBox().IsChecked().Value();
+        std::wstring search{ FicFigSearchTextBox().Text().c_str() };
+        std::transform(search.begin(),
+                       search.end(),
+                       search.begin(),
+                       [](wchar_t value) { return std::towlower(value); });
+
+        int32_t selected_row = -1;
+        for (uint32_t index = 0u; index < m_fic_fig_stat_count; ++index)
+        {
+            auto const& stat = m_fic_fig_stats[index];
+            if (stat.used == 0u)
+            {
+                continue;
+            }
+            bool const malformed = stat.malformed_count != 0u;
+            bool const changed = stat.change_count != 0u;
+            if ((filter == L"supported" && stat.supported == 0u) ||
+                (filter == L"unsupported" && stat.supported != 0u) ||
+                (filter == L"malformed" && !malformed) ||
+                (filter == L"changed" && !changed) ||
+                (changed_only && !changed))
+            {
+                continue;
+            }
+            hstring const purpose = fic_fig_purpose(stat.type, stat.extension);
+            wchar_t identity[40]{};
+            swprintf_s(identity,
+                       stat.extension == 0xFFu ? L"FIG %u" : L"FIG %u/%u",
+                       stat.type,
+                       stat.extension);
+            std::wstring searchable = identity;
+            searchable += L" ";
+            searchable += purpose.c_str();
+            std::transform(searchable.begin(),
+                           searchable.end(),
+                           searchable.begin(),
+                           [](wchar_t value) { return std::towlower(value); });
+            if (!search.empty() && searchable.find(search) == std::wstring::npos)
+            {
+                continue;
+            }
+
+            StackPanel row;
+            row.Orientation(Orientation::Horizontal);
+            row.Tag(box_value(index));
+            auto append = [&](hstring const& text, double width)
+            {
+                TextBlock value;
+                value.Text(text);
+                value.Width(width);
+                value.TextTrimming(TextTrimming::CharacterEllipsis);
+                row.Children().Append(value);
+            };
+            append(L"FIG " + to_hstring(stat.type), 90.0);
+            append(stat.extension == 0xFFu
+                ? hstring{ L"—" }
+                : to_hstring(stat.extension), 90.0);
+            append(purpose, 330.0);
+            size_t const key =
+                (static_cast<size_t>(stat.type & 0x07u) << 5u) |
+                static_cast<size_t>(stat.extension & 0x1Fu);
+            append(format_float(m_fic_fig_rates[key], L"/s", 1), 100.0);
+            uint32_t const age_frames =
+                m_fic_latest_frame_index >= stat.last_seen_frame
+                    ? m_fic_latest_frame_index - stat.last_seen_frame
+                    : 0u;
+            append(format_float(static_cast<float>(age_frames) * 96.0f,
+                                L" ms",
+                                0), 110.0);
+            append(malformed ? hstring{ L"Malformed" } :
+                (stat.supported != 0u ? hstring{ L"Decoded" }
+                                     : hstring{ L"Unsupported" }), 100.0);
+            if (index == m_fic_selected_fig_index)
+            {
+                selected_row = static_cast<int32_t>(items.Size());
+            }
+            items.Append(row);
+        }
+        if (selected_row >= 0)
+        {
+            FicFigListView().SelectedIndex(selected_row);
+        }
+        else if (items.Size() != 0u)
+        {
+            FicFigListView().SelectedIndex(0);
+        }
+    }
+
+    void MainWindow::UpdateSelectedFig()
+    {
+        if (m_fic_selected_fig_index >= m_fic_fig_stat_count)
+        {
+            return;
+        }
+        auto const& stat = m_fic_fig_stats[m_fic_selected_fig_index];
+        hstring const extension = stat.extension == 0xFFu
+            ? hstring{ L"—" }
+            : to_hstring(stat.extension);
+        FicFigSelectedTitleText().Text(
+            L"FIG " + to_hstring(stat.type) + L" / extension " + extension +
+            L" · " + fic_fig_purpose(stat.type, stat.extension));
+        FicFigSelectedRawText().Text(
+            bytes_to_hex(stat.raw, stat.raw_length));
+        FicFigSelectedPreviousText().Text(stat.previous_raw_length != 0u
+            ? bytes_to_hex(stat.previous_raw, stat.previous_raw_length)
+            : hstring{ L"No previous differing occurrence" });
+
+        hstring decoded =
+            L"Occurrences: " + to_hstring(stat.total_count) +
+            L" · changes: " + to_hstring(stat.change_count) +
+            L" · malformed: " + to_hstring(stat.malformed_count) +
+            L" · " + (stat.supported != 0u
+                ? hstring{ L"decoded by this receiver" }
+                : hstring{ L"retained as unsupported raw signalling" });
+        if (stat.type == 0u && stat.extension == 0u && stat.raw_length >= 6u)
+        {
+            uint16_t const eid =
+                static_cast<uint16_t>((stat.raw[2] << 8u) | stat.raw[3]);
+            uint8_t const change = (stat.raw[4] >> 6u) & 0x03u;
+            uint8_t const alarm = (stat.raw[4] >> 5u) & 0x01u;
+            uint16_t const cif =
+                static_cast<uint16_t>(((stat.raw[4] & 0x1Fu) << 8u) |
+                                      stat.raw[5]);
+            wchar_t details[160]{};
+            swprintf_s(details,
+                       L"Ensemble ID 0x%04X · change flag %u · alarm %s · CIF counter %u",
+                       eid,
+                       change,
+                       alarm != 0u ? L"set" : L"not set",
+                       cif);
+            decoded = details;
+        }
+        FicFigSelectedDecodedText().Text(decoded);
+    }
+
+    void MainWindow::InspectFicHistoryEntry(size_t index)
+    {
+        if (index >= m_fic_fib_history.size())
+        {
+            return;
+        }
+        auto const& entry = m_fic_fib_history[index];
+        FicRawTimestampText().Text(history_clock_ms_text(entry.wall_time_100ns));
+        FicRawFrameText().Text(
+            to_hstring(entry.frame_index) + L" / " +
+            to_hstring(entry.fib_index));
+        FicRawCrcText().Text(entry.crc_valid ? L"VALID" : L"ERROR");
+        FicRawBerText().Text(format_scientific(entry.pre_viterbi_ber));
+        FicRawCaptureStateText().Text(L"Frozen from FIB timeline");
+        FicRawBytesText().Text(bytes_to_hex(entry.raw.data(),
+                                            static_cast<uint32_t>(entry.raw.size())));
+
+        dab_fic_cursor_t cursor{};
+        dab_fic_cursor_init(&cursor, entry.raw.data(), 30u);
+        std::wstring decoded;
+        for (;;)
+        {
+            dab_fic_fig_t fig{};
+            dab_fic_fig_view_t view{};
+            int const next = dab_fic_cursor_next_fig(&cursor, &fig);
+            if (next == 0)
+            {
+                break;
+            }
+            if (next < 0)
+            {
+                decoded += L"Malformed FIG framing at end of FIB\r\n";
+                break;
+            }
+            uint8_t extension = 0xFFu;
+            if (dab_fic_fig_view_from_raw(&fig, &view) == 0)
+            {
+                if (fig.type == 0u)
+                {
+                    extension = view.ext;
+                }
+                else if (fig.type == 1u && fig.length != 0u)
+                {
+                    extension = fig.payload[0] & 0x07u;
+                }
+            }
+            wchar_t line[160]{};
+            if (extension == 0xFFu)
+            {
+                swprintf_s(line,
+                           L"FIG %u · %u bytes · %s\r\n",
+                           fig.type,
+                           fig.length,
+                           fic_fig_purpose(fig.type, extension).c_str());
+            }
+            else
+            {
+                swprintf_s(line,
+                           L"FIG %u/%u · %u bytes · %s\r\n",
+                           fig.type,
+                           extension,
+                           fig.length,
+                           fic_fig_purpose(fig.type, extension).c_str());
+            }
+            decoded += line;
+        }
+        FicRawDecodedText().Text(decoded.empty()
+            ? hstring{ L"No complete FIG could be decoded from this FIB." }
+            : hstring{ decoded });
+    }
+
+    void MainWindow::UpdateFicDatabase()
+    {
+        if (!m_have_catalog)
+        {
+            return;
+        }
+        Brush const good = Application::Current().Resources().Lookup(
+            box_value(hstring{ L"MeasurementAccentBrush" })).as<Brush>();
+        Brush const warning = Application::Current().Resources().Lookup(
+            box_value(hstring{ L"WarningBrush" })).as<Brush>();
+        bool const consistent = m_latest_catalog.database_consistent != 0u;
+        FicDatabaseStatusIndicator().Fill(consistent ? good : warning);
+        FicDatabaseStatusText().Foreground(consistent ? good : warning);
+        FicDatabaseStatusText().Text(consistent ? L"CONSISTENT" : L"CONFLICTS");
+
+        hstring label = fic_label_text(m_latest_catalog.ensemble_label);
+        if (label.empty())
+        {
+            label = L"Unnamed ensemble";
+        }
+        wchar_t ensemble[96]{};
+        swprintf_s(ensemble,
+                   L"%s · ID 0x%04X",
+                   label.c_str(),
+                   m_latest_catalog.ensemble_id);
+        FicDatabaseEnsembleText().Text(ensemble);
+        FicDatabaseServicesText().Text(to_hstring(m_latest_catalog.service_count));
+        FicDatabaseComponentsText().Text(
+            to_hstring(m_latest_catalog.service_component_count));
+        FicDatabaseSubchannelsText().Text(
+            to_hstring(m_latest_catalog.subchannel_count));
+        FicDatabaseRevisionText().Text(to_hstring(m_latest_catalog.sequence));
+        FicDatabaseLastChangeText().Text(m_fic_database_last_change);
+        FicDatabaseMissingText().Text(
+            to_hstring(m_latest_catalog.missing_subchannel_reference_count));
+        FicDatabaseDuplicateText().Text(
+            to_hstring(m_latest_catalog.duplicate_service_id_count));
+        FicDatabaseChangeSummaryText().Text(m_fic_database_change_summary);
+
+        auto items = FicDatabaseListView().Items();
+        items.Clear();
+        for (uint32_t service_index = 0u;
+             service_index < m_latest_catalog.service_count;
+             ++service_index)
+        {
+            auto const& service = m_latest_catalog.services[service_index];
+            hstring service_label = fic_label_text(service.label);
+            bool duplicate_service_id = false;
+            for (uint32_t other_index = 0u;
+                 other_index < m_latest_catalog.service_count;
+                 ++other_index)
+            {
+                if (other_index != service_index &&
+                    m_latest_catalog.services[other_index].service_id ==
+                        service.service_id &&
+                    m_latest_catalog.services[other_index].is_programme ==
+                        service.is_programme)
+                {
+                    duplicate_service_id = true;
+                    break;
+                }
+            }
+            if (service_label.empty())
+            {
+                service_label = L"Unnamed service";
+            }
+            for (uint32_t component_index = 0u;
+                 component_index < service.component_count;
+                 ++component_index)
+            {
+                auto const& component = service.components[component_index];
+                bool const missing =
+                    component.has_subchannel != 0u &&
+                    component.subchannel_valid == 0u;
+                wchar_t sid[24]{};
+                swprintf_s(sid, L"0x%08X", service.service_id);
+                StackPanel row;
+                row.Orientation(Orientation::Horizontal);
+                auto append = [&](hstring const& text,
+                                  double width,
+                                  Brush const* foreground = nullptr)
+                {
+                    TextBlock value;
+                    value.Text(text);
+                    value.Width(width);
+                    value.TextTrimming(TextTrimming::CharacterEllipsis);
+                    if (foreground != nullptr)
+                    {
+                        value.Foreground(*foreground);
+                    }
+                    row.Children().Append(value);
+                };
+                append(sid,
+                       145.0,
+                       duplicate_service_id ? &warning : nullptr);
+                append(service_label, 330.0);
+                append(component_kind_text(component.kind), 130.0);
+                append(component.has_subchannel != 0u
+                    ? to_hstring(component.subchannel_id)
+                    : hstring{ L"—" }, 110.0);
+                hstring const status =
+                    missing && duplicate_service_id ? hstring{ L"Conflict" } :
+                    (missing ? hstring{ L"Missing" } :
+                    (duplicate_service_id ? hstring{ L"Duplicate" }
+                                          : hstring{ L"Valid" }));
+                append(status,
+                       100.0,
+                       missing || duplicate_service_id ? &warning : &good);
+                items.Append(row);
+            }
+        }
+    }
+
+    void MainWindow::ResetFicMeasurementSession()
+    {
+        m_fic_fib_history.clear();
+        m_fic_fig_stats = {};
+        m_fic_fig_stat_count = 0u;
+        m_fic_selected_fig_index = UINT32_MAX;
+        m_fic_timeline_frozen = false;
+        m_fic_browser_frozen = false;
+        m_fic_last_failure_tick = 0u;
+        m_fic_last_total_errors = 0u;
+        m_fic_previous_rate_count = 0u;
+        m_fic_previous_rate_timestamp_ns = 0u;
+        m_fic_rate = 0.0f;
+        m_fic_fig_previous_counts = {};
+        m_fic_fig_rates = {};
+        m_fic_last_seen_change_total = 0u;
+        m_fic_change_baseline_valid = false;
+        m_fic_latest_frame_index = 0u;
+        m_fic_latest_timestamp_ns = 0u;
+        m_fic_capture_in_progress = false;
+        m_fic_database_last_change = L"—";
+        m_fic_database_change_summary = L"No database received";
+        FicTimelineResumeButton().Content(box_value(L"Live"));
+        FicCrcTimelineCells().Children().Clear();
+        PointCollection empty;
+        FicViterbiTimelineTrace().Points(empty);
+        FicBerTimelineTrace().Points(PointCollection{});
+        FicFailureListView().Items().Clear();
+        FicFigListView().Items().Clear();
+        FicDatabaseListView().Items().Clear();
+    }
+
     void MainWindow::ApplyDabSnapshot(dab_receive_snapshot_t const& snapshot)
     {
         UpdateDabContext();
+        ApplyFicSnapshot(snapshot);
 
         bool const locked = snapshot.locked != 0;
         DabModeBadgeText().Text(L"● LIVE");
@@ -3639,6 +4745,47 @@ namespace winrt::DabMeasurementWinUI::implementation
     {
         bool const catalog_changed =
             !m_have_catalog || catalog.sequence != m_latest_catalog.sequence;
+        uint32_t appeared = 0u;
+        uint32_t disappeared = 0u;
+        if (m_have_catalog && catalog_changed)
+        {
+            auto contains = [](dab_receive_catalog_t const& source,
+                               uint32_t sid,
+                               uint8_t is_programme)
+            {
+                for (uint32_t index = 0u;
+                     index < source.service_count;
+                     ++index)
+                {
+                    if (source.services[index].service_id == sid &&
+                        source.services[index].is_programme == is_programme)
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            };
+            for (uint32_t index = 0u; index < catalog.service_count; ++index)
+            {
+                if (!contains(m_latest_catalog,
+                              catalog.services[index].service_id,
+                              catalog.services[index].is_programme))
+                {
+                    ++appeared;
+                }
+            }
+            for (uint32_t index = 0u;
+                 index < m_latest_catalog.service_count;
+                 ++index)
+            {
+                if (!contains(catalog,
+                              m_latest_catalog.services[index].service_id,
+                              m_latest_catalog.services[index].is_programme))
+                {
+                    ++disappeared;
+                }
+            }
+        }
         uint32_t selected_service_id = 0u;
         bool preserve_selection = false;
         int32_t const old_selected_index = ServicesListView().SelectedIndex();
@@ -3655,6 +4802,34 @@ namespace winrt::DabMeasurementWinUI::implementation
         if (catalog_changed)
         {
             m_dab_catalog_changed_tick = m_tick;
+            SYSTEMTIME now{};
+            GetLocalTime(&now);
+            wchar_t changed_at[40]{};
+            swprintf_s(changed_at,
+                       L"%04u-%02u-%02u %02u:%02u:%02u",
+                       now.wYear,
+                       now.wMonth,
+                       now.wDay,
+                       now.wHour,
+                       now.wMinute,
+                       now.wSecond);
+            m_fic_database_last_change = changed_at;
+            if (catalog.sequence <= 1u)
+            {
+                m_fic_database_change_summary =
+                    L"Initial multiplex database acquired";
+            }
+            else if (appeared != 0u || disappeared != 0u)
+            {
+                m_fic_database_change_summary =
+                    to_hstring(appeared) + L" service(s) appeared · " +
+                    to_hstring(disappeared) + L" disappeared";
+            }
+            else
+            {
+                m_fic_database_change_summary =
+                    L"Signalling definitions updated without service loss";
+            }
         }
 
         hstring const ensemble_label = fic_label_text(catalog.ensemble_label);
@@ -3734,6 +4909,7 @@ namespace winrt::DabMeasurementWinUI::implementation
 
         hstring const timeline_name = EnsembleNameText().Text();
         UpdateDabContext();
+        UpdateFicDatabase();
         AddTimelineEvent(L"FIC catalog · " + timeline_name + L" · " +
                          to_hstring(catalog.service_count) + L" services");
     }

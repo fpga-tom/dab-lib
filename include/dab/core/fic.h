@@ -6,6 +6,10 @@
 
 #include "dab/core/tframe.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define DAB_FIC_BLOCKS_PER_FRAME 4u
 #define DAB_FIC_FIBS_PER_BLOCK 3u
 #define DAB_FIC_BYTES_PER_FIB 32u
@@ -18,6 +22,8 @@
 #define DAB_FIC_MAX_SERVICES 64u
 #define DAB_FIC_MAX_COMPONENTS_PER_SERVICE 12u
 #define DAB_FIC_MAX_LABELS 128u
+#define DAB_FIC_MAX_FIG_STATS 64u
+#define DAB_FIC_MAX_FIG_RAW_BYTES 32u
 
 typedef enum {
     DAB_FIC_FIG_TYPE_0 = 0,
@@ -117,6 +123,10 @@ typedef struct {
 
 typedef struct {
     uint16_t eid;
+    uint8_t fig0_ext0_valid;
+    uint8_t change_flag;
+    uint8_t alarm_flag;
+    uint16_t cif_count;
     dab_fic_subchannel_t subchannels[DAB_FIC_MAX_SUBCHANNELS];
     dab_fic_service_t services[DAB_FIC_MAX_SERVICES];
     uint16_t service_count;
@@ -125,10 +135,29 @@ typedef struct {
 } dab_fic_database_t;
 
 typedef struct {
+    uint8_t used;
+    uint8_t type;
+    uint8_t ext;
+    uint8_t supported;
+    uint64_t total_count;
+    uint64_t change_count;
+    uint64_t malformed_count;
+    uint32_t last_seen_frame;
+    uint32_t last_change_frame;
+    uint8_t raw_length;
+    uint8_t previous_raw_length;
+    uint8_t raw[DAB_FIC_MAX_FIG_RAW_BYTES];
+    uint8_t previous_raw[DAB_FIC_MAX_FIG_RAW_BYTES];
+} dab_fic_fig_stat_t;
+
+typedef struct {
     dab_fic_database_t current;
     dab_fic_database_t next;
     uint64_t total_figs;
     uint64_t total_fig_parse_errors;
+    uint32_t current_frame_index;
+    uint32_t fig_stat_count;
+    dab_fic_fig_stat_t fig_stats[DAB_FIC_MAX_FIG_STATS];
 } dab_fic_repo_t;
 
 typedef struct {
@@ -138,6 +167,9 @@ typedef struct {
     uint32_t scramble_variant;
     uint32_t byte_variant;
     uint32_t valid_fibs;
+    uint64_t pre_viterbi_error_bits;
+    uint64_t pre_viterbi_compared_bits;
+    float viterbi_quality_percent;
 } dab_fic_debug_block_t;
 
 typedef struct dab_fic_decoder_workspace dab_fic_decoder_workspace_t;
@@ -148,6 +180,11 @@ typedef struct {
     uint32_t fic_blocks_decoded_last_frame;
     uint32_t valid_fibs_last_frame;
     uint32_t total_valid_fibs;
+    uint64_t pre_viterbi_error_bits_last_frame;
+    uint64_t pre_viterbi_compared_bits_last_frame;
+    uint64_t pre_viterbi_error_bits_total;
+    uint64_t pre_viterbi_compared_bits_total;
+    float viterbi_quality_last_frame;
     dab_fic_debug_block_t block_info_last_frame[DAB_FIC_BLOCKS_PER_FRAME];
     dab_fic_repo_t repo;
     uint8_t decoded_fibs[DAB_FIC_TOTAL_FIBS_PER_FRAME][DAB_FIC_BYTES_PER_FIB];
@@ -190,5 +227,9 @@ int dab_fic_fig_view_from_raw(const dab_fic_fig_t *fig, dab_fic_fig_view_t *view
 void dab_fic_bit_reader_init(dab_fic_bit_reader_t *reader, const uint8_t *data, size_t size);
 int dab_fic_bit_reader_get(dab_fic_bit_reader_t *reader, uint8_t bit_count, uint32_t *value);
 int dab_fic_parse_fib_payload(dab_fic_repo_t *repo, const uint8_t *fib_payload, size_t payload_size);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

@@ -40,8 +40,29 @@ typedef int (*dab_receive_callback_t)(const dab_receive_event_t *event, void *us
 typedef int (*dab_receive_cancel_callback_t)(void *user);
 
 enum {
-    DAB_RECEIVE_ADC_HISTOGRAM_BIN_COUNT = 64u
+    DAB_RECEIVE_ADC_HISTOGRAM_BIN_COUNT = 64u,
+    DAB_RECEIVE_FIC_BLOCK_COUNT = 4u,
+    DAB_RECEIVE_FIC_FIB_COUNT = 12u,
+    DAB_RECEIVE_FIC_FIB_BYTES = 32u,
+    DAB_RECEIVE_FIC_FIG_STAT_CAPACITY = 64u,
+    DAB_RECEIVE_FIC_FIG_RAW_CAPACITY = 32u
 };
+
+typedef struct {
+    uint8_t used;
+    uint8_t type;
+    uint8_t extension;
+    uint8_t supported;
+    uint64_t total_count;
+    uint64_t change_count;
+    uint64_t malformed_count;
+    uint32_t last_seen_frame;
+    uint32_t last_change_frame;
+    uint8_t raw_length;
+    uint8_t previous_raw_length;
+    uint8_t raw[DAB_RECEIVE_FIC_FIG_RAW_CAPACITY];
+    uint8_t previous_raw[DAB_RECEIVE_FIC_FIG_RAW_CAPACITY];
+} dab_receive_fic_fig_stat_t;
 
 typedef struct {
     uint64_t sequence;
@@ -124,8 +145,23 @@ typedef struct {
     uint32_t fic_blocks_decoded_last_frame;
     uint32_t fic_valid_fibs_last_frame;
     uint32_t fic_total_valid_fibs;
+    uint8_t fic_change_flag;
+    uint8_t fic_alarm_flag;
+    uint16_t fic_cif_count;
+    uint64_t fic_frame_start_sample;
+    uint16_t fic_crc_valid_mask;
+    uint8_t fic_decoded_fibs[DAB_RECEIVE_FIC_FIB_COUNT][DAB_RECEIVE_FIC_FIB_BYTES];
+    int fic_pre_viterbi_ber_valid;
+    float fic_pre_viterbi_ber;
+    uint64_t fic_pre_viterbi_error_bits;
+    uint64_t fic_pre_viterbi_compared_bits;
+    float fic_viterbi_quality_percent;
+    float fic_block_pre_viterbi_ber[DAB_RECEIVE_FIC_BLOCK_COUNT];
+    float fic_block_viterbi_quality_percent[DAB_RECEIVE_FIC_BLOCK_COUNT];
     uint64_t fic_total_figs;
     uint64_t fic_total_fig_parse_errors;
+    uint32_t fic_fig_stat_count;
+    dab_receive_fic_fig_stat_t fic_fig_stats[DAB_RECEIVE_FIC_FIG_STAT_CAPACITY];
 
     uint32_t msc_frames_seen;
     int msc_ber_valid;
@@ -294,9 +330,18 @@ typedef struct {
     uint64_t timestamp_ns;
     uint64_t frequency_hz;
     uint16_t ensemble_id;
+    uint8_t fig0_ext0_valid;
+    uint8_t change_flag;
+    uint8_t alarm_flag;
+    uint16_t cif_count;
     uint8_t ensemble_label_charset;
     char ensemble_label[DAB_RECEIVE_CATALOG_LABEL_CAPACITY];
     uint32_t service_count;
+    uint32_t service_component_count;
+    uint32_t subchannel_count;
+    uint32_t missing_subchannel_reference_count;
+    uint32_t duplicate_service_id_count;
+    uint8_t database_consistent;
     dab_receive_service_info_t services[DAB_RECEIVE_CATALOG_MAX_SERVICES];
 } dab_receive_catalog_t;
 

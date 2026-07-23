@@ -151,6 +151,72 @@ static int dab_fic_viterbi_decode(const int16_t *symbols,
     return rc;
 }
 
+static uint8_t dab_fic_mother_code(uint8_t bit, uint8_t *state) {
+    const uint8_t x0 = (uint8_t)((((*state >> 5u) & 1u) ^
+                                  ((*state >> 4u) & 1u) ^
+                                  ((*state >> 2u) & 1u) ^
+                                  ((*state >> 1u) & 1u) ^
+                                  (bit & 1u)) & 1u);
+    const uint8_t x1 = (uint8_t)((((*state >> 5u) & 1u) ^
+                                  ((*state >> 2u) & 1u) ^
+                                  ((*state >> 1u) & 1u) ^
+                                  ((*state >> 0u) & 1u) ^
+                                  (bit & 1u)) & 1u);
+    const uint8_t x2 = (uint8_t)((((*state >> 5u) & 1u) ^
+                                  ((*state >> 3u) & 1u) ^
+                                  ((*state >> 0u) & 1u) ^
+                                  (bit & 1u)) & 1u);
+    const uint8_t code = (uint8_t)(x0 | (x1 << 1u) | (x2 << 2u) | (x0 << 3u));
+
+    *state = (uint8_t)(((*state << 1u) & 0x3Fu) | (bit & 1u));
+    return code;
+}
+
+static void dab_fic_measure_pre_viterbi(const int16_t *symbols,
+                                        uint32_t polarity_variant,
+                                        const uint8_t *decoded_bits,
+                                        dab_fic_debug_block_t *measurement) {
+    uint8_t state = 0u;
+    uint64_t errors = 0u;
+    uint64_t compared = 0u;
+    uint64_t confidence_sum = 0u;
+
+    if (symbols == 0 || decoded_bits == 0 || measurement == 0) {
+        return;
+    }
+    for (uint32_t bit_index = 0u; bit_index < DAB_FIC_TRELLIS_BITS; ++bit_index) {
+        const uint8_t bit = bit_index < DAB_FIC_INFO_BITS
+            ? (uint8_t)((decoded_bits[bit_index >> 3u] >>
+                         (7u - (bit_index & 7u))) & 1u)
+            : 0u;
+        const uint8_t code = dab_fic_mother_code(bit, &state);
+
+        for (uint32_t branch = 0u; branch < 4u; ++branch) {
+            int16_t symbol = symbols[(bit_index * 4u) + branch];
+            uint16_t magnitude;
+
+            if (symbol == 0) {
+                continue;
+            }
+            if (polarity_variant != 0u) {
+                symbol = (int16_t)-symbol;
+            }
+            magnitude = (uint16_t)(symbol < 0 ? -symbol : symbol);
+            confidence_sum += magnitude > 127u ? 127u : magnitude;
+            compared++;
+            if ((symbol > 0 ? 1u : 0u) != ((code >> branch) & 1u)) {
+                errors++;
+            }
+        }
+    }
+
+    measurement->pre_viterbi_error_bits = errors;
+    measurement->pre_viterbi_compared_bits = compared;
+    measurement->viterbi_quality_percent = compared != 0u
+        ? (float)(100.0 * (double)confidence_sum / (127.0 * (double)compared))
+        : 0.0f;
+}
+
 static uint8_t dab_fic_prbs_bit(int reset) {
     static uint16_t reg = 0x1FFu;
     const uint8_t o = (uint8_t)((reg & 0x100u) != 0u);
@@ -448,6 +514,13 @@ static int dab_fic_parse_fig0_ext0(dab_fic_repo_t *repo, const dab_fic_fig_view_
         return -1;
     }
     db->eid = dab_fic_rd16be(view->data);
+    if (view->data_len >= 4u) {
+        db->fig0_ext0_valid = 1u;
+        db->change_flag = (uint8_t)((view->data[2] >> 6u) & 0x03u);
+        db->alarm_flag = (uint8_t)((view->data[2] >> 5u) & 0x01u);
+        db->cif_count = (uint16_t)((((uint16_t)view->data[2] & 0x1Fu) << 8u) |
+                                   view->data[3]);
+    }
     return 0;
 }
 
@@ -715,6 +788,131 @@ static int dab_fic_parse_fig1(dab_fic_repo_t *repo, const dab_fic_fig_view_t *vi
     return dab_fic_store_label(db, &label);
 }
 
+static uint8_t dab_fic_fig_extension(const dab_fic_fig_t *fig) {
+    if (fig == 0 || fig->payload == 0 || fig->length == 0u) {
+        return 0xFFu;
+    }
+    if (fig->type == DAB_FIC_FIG_TYPE_0) {
+        return (uint8_t)(fig->payload[0] & 0x1Fu);
+    }
+    if (fig->type == DAB_FIC_FIG_TYPE_1) {
+        return (uint8_t)(fig->payload[0] & 0x07u);
+    }
+    return 0xFFu;
+}
+
+static uint8_t dab_fic_fig_supported(uint8_t type, uint8_t ext) {
+    if (type == DAB_FIC_FIG_TYPE_0) {
+        return (uint8_t)(ext <= 3u);
+    }
+    if (type == DAB_FIC_FIG_TYPE_1) {
+        return (uint8_t)(ext == 0u || ext == 1u || ext == 4u || ext == 5u);
+    }
+    return 0u;
+}
+
+static dab_fic_fig_stat_t *dab_fic_find_or_add_fig_stat(dab_fic_repo_t *repo,
+                                                        uint8_t type,
+                                                        uint8_t ext) {
+    uint32_t index;
+
+    if (repo == 0) {
+        return 0;
+    }
+    for (index = 0u; index < repo->fig_stat_count; ++index) {
+        dab_fic_fig_stat_t *stat = &repo->fig_stats[index];
+        if (stat->used != 0u && stat->type == type && stat->ext == ext) {
+            return stat;
+        }
+    }
+    if (repo->fig_stat_count >= DAB_FIC_MAX_FIG_STATS) {
+        return 0;
+    }
+
+    {
+        dab_fic_fig_stat_t *stat = &repo->fig_stats[repo->fig_stat_count++];
+        *stat = (dab_fic_fig_stat_t){0};
+        stat->used = 1u;
+        stat->type = type;
+        stat->ext = ext;
+        stat->supported = dab_fic_fig_supported(type, ext);
+        return stat;
+    }
+}
+
+static int dab_fic_fig_occurrence_changed(const dab_fic_fig_stat_t *stat,
+                                          const uint8_t *raw,
+                                          uint8_t raw_length) {
+    if (stat->raw_length == 0u) {
+        return 0;
+    }
+    if (stat->raw_length != raw_length) {
+        return 1;
+    }
+
+    /*
+     * FIG 0/0 carries a 13-bit CIF counter which advances continuously. It is
+     * useful in the raw inspector, but it is not a multiplex configuration
+     * change. Compare the ensemble and signalling flags while deliberately
+     * ignoring only those counter bits.
+     */
+    if (stat->type == DAB_FIC_FIG_TYPE_0 &&
+        stat->ext == 0u &&
+        raw_length >= 6u) {
+        if (memcmp(stat->raw, raw, 4u) != 0 ||
+            (stat->raw[4] & 0xE0u) != (raw[4] & 0xE0u)) {
+            return 1;
+        }
+        return raw_length > 6u &&
+               memcmp(stat->raw + 6u, raw + 6u, raw_length - 6u) != 0;
+    }
+
+    return memcmp(stat->raw, raw, raw_length) != 0;
+}
+
+static void dab_fic_record_fig(dab_fic_repo_t *repo,
+                               const dab_fic_fig_t *fig,
+                               uint8_t malformed) {
+    dab_fic_fig_stat_t *stat;
+    uint8_t raw[DAB_FIC_MAX_FIG_RAW_BYTES] = {0};
+    uint8_t raw_length;
+    uint8_t ext;
+    int changed;
+
+    if (repo == 0 || fig == 0 || fig->payload == 0) {
+        return;
+    }
+    ext = dab_fic_fig_extension(fig);
+    stat = dab_fic_find_or_add_fig_stat(repo, fig->type, ext);
+    if (stat == 0) {
+        return;
+    }
+
+    raw_length = (uint8_t)(1u + fig->length);
+    if (raw_length > DAB_FIC_MAX_FIG_RAW_BYTES) {
+        raw_length = DAB_FIC_MAX_FIG_RAW_BYTES;
+    }
+    raw[0] = (uint8_t)((fig->type << 5u) | (fig->length & 0x1Fu));
+    if (raw_length > 1u) {
+        memcpy(raw + 1u, fig->payload, raw_length - 1u);
+    }
+
+    changed = dab_fic_fig_occurrence_changed(stat, raw, raw_length);
+    if (changed) {
+        memcpy(stat->previous_raw, stat->raw, sizeof(stat->previous_raw));
+        stat->previous_raw_length = stat->raw_length;
+        stat->change_count++;
+        stat->last_change_frame = repo->current_frame_index;
+    }
+    memcpy(stat->raw, raw, sizeof(stat->raw));
+    stat->raw_length = raw_length;
+    stat->total_count++;
+    stat->last_seen_frame = repo->current_frame_index;
+    if (malformed != 0u) {
+        stat->malformed_count++;
+    }
+}
+
 int dab_fic_parse_fib_payload(dab_fic_repo_t *repo, const uint8_t *fib_payload, size_t payload_size) {
     dab_fic_cursor_t cursor;
 
@@ -730,15 +928,29 @@ int dab_fic_parse_fib_payload(dab_fic_repo_t *repo, const uint8_t *fib_payload, 
 
         if (next <= 0) {
             if (next < 0) {
+                dab_fic_fig_t malformed_fig = {0};
+                const uint8_t header = cursor.data[0];
+
                 repo->total_fig_parse_errors++;
+                malformed_fig.type = (uint8_t)(header >> 5u);
+                malformed_fig.length = cursor.remaining > 1u
+                    ? (uint8_t)((cursor.remaining - 1u) >
+                                (DAB_FIC_MAX_FIG_RAW_BYTES - 1u)
+                                    ? (DAB_FIC_MAX_FIG_RAW_BYTES - 1u)
+                                    : (cursor.remaining - 1u))
+                    : 0u;
+                malformed_fig.payload = cursor.data + 1u;
+                dab_fic_record_fig(repo, &malformed_fig, 1u);
             }
             return next < 0 ? -1 : 0;
         }
         repo->total_figs++;
         if (dab_fic_fig_view_from_raw(&fig, &view) != 0) {
             repo->total_fig_parse_errors++;
+            dab_fic_record_fig(repo, &fig, 1u);
             continue;
         }
+        dab_fic_record_fig(repo, &fig, 0u);
 
         if (view.type == DAB_FIC_FIG_TYPE_0) {
             if (view.ext == 0u) {
@@ -779,7 +991,8 @@ static int dab_fic_decode_block_variant(const int16_t *unpunctured,
                                         uint32_t polarity_variant,
                                         uint32_t pack_variant,
                                         uint8_t decoded_block[DAB_FIC_BYTES_PER_BLOCK],
-                                        dab_fic_decoder_workspace_t *workspace) {
+                                        dab_fic_decoder_workspace_t *workspace,
+                                        dab_fic_debug_block_t *measurement) {
     uint8_t packed_block[DAB_FIC_BYTES_PER_BLOCK];
     uint8_t scrambled_block[DAB_FIC_BYTES_PER_BLOCK];
 
@@ -798,6 +1011,12 @@ static int dab_fic_decode_block_variant(const int16_t *unpunctured,
     } else if (dab_fic_viterbi_decode(unpunctured, polarity_variant, packed_block) != 0) {
         return -1;
     }
+    if (measurement != 0) {
+        dab_fic_measure_pre_viterbi(unpunctured,
+                                    polarity_variant,
+                                    packed_block,
+                                    measurement);
+    }
     dab_fic_unpack_viterbi_bytes(packed_block, pack_variant, scrambled_block);
     dab_fic_descramble_block(scrambled_block, decoded_block);
     return 0;
@@ -815,7 +1034,12 @@ static int dab_fic_decode_block(const int8_t *frame_softbits,
     if (dab_fic_depuncture_block(depunctured, unpunctured) != 0) {
         return -1;
     }
-    if (dab_fic_decode_block_variant(unpunctured, 0u, 0u, decoded_block, workspace) != 0) {
+    if (dab_fic_decode_block_variant(unpunctured,
+                                     0u,
+                                     0u,
+                                     decoded_block,
+                                     workspace,
+                                     debug_block) != 0) {
         return -1;
     }
 
@@ -920,6 +1144,10 @@ int dab_fic_process_frame(dab_fic_state_t *state,
     state->last_frame_start_sample = frame_start_sample;
     state->fic_blocks_decoded_last_frame = 0u;
     state->valid_fibs_last_frame = 0u;
+    state->pre_viterbi_error_bits_last_frame = 0u;
+    state->pre_viterbi_compared_bits_last_frame = 0u;
+    state->viterbi_quality_last_frame = 0.0f;
+    state->repo.current_frame_index = state->frames_seen;
     memset(state->block_info_last_frame, 0, sizeof(state->block_info_last_frame));
     memset(state->decoded_fibs, 0, sizeof(state->decoded_fibs));
     memset(state->fib_crc_ok, 0, sizeof(state->fib_crc_ok));
@@ -938,6 +1166,17 @@ int dab_fic_process_frame(dab_fic_state_t *state,
         }
 
         state->fic_blocks_decoded_last_frame++;
+        state->pre_viterbi_error_bits_last_frame +=
+            block_info->pre_viterbi_error_bits;
+        state->pre_viterbi_compared_bits_last_frame +=
+            block_info->pre_viterbi_compared_bits;
+        state->pre_viterbi_error_bits_total +=
+            block_info->pre_viterbi_error_bits;
+        state->pre_viterbi_compared_bits_total +=
+            block_info->pre_viterbi_compared_bits;
+        state->viterbi_quality_last_frame +=
+            block_info->viterbi_quality_percent *
+            (float)block_info->pre_viterbi_compared_bits;
         for (fib_index = 0u; fib_index < DAB_FIC_FIBS_PER_BLOCK; ++fib_index) {
             const uint32_t global_fib_index = (block_index * DAB_FIC_FIBS_PER_BLOCK) + fib_index;
             uint8_t *dst = state->decoded_fibs[global_fib_index];
@@ -952,6 +1191,10 @@ int dab_fic_process_frame(dab_fic_state_t *state,
                 state->total_valid_fibs++;
             }
         }
+    }
+    if (state->pre_viterbi_compared_bits_last_frame != 0u) {
+        state->viterbi_quality_last_frame /=
+            (float)state->pre_viterbi_compared_bits_last_frame;
     }
 
     return 0;
@@ -989,6 +1232,7 @@ int dab_fic_debug_analyze_frame(const int8_t *fic_softbits,
                                                             polarity_variant,
                                                             pack_variant,
                                                             candidate,
+                                                            0,
                                                             0);
                 uint32_t valid;
 

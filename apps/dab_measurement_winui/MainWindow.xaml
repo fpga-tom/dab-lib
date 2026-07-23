@@ -2591,78 +2591,457 @@
                 </TabViewItem>
 
                 <TabViewItem x:Name="DabFicTab" Header="FIC" IsClosable="False">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="12">
-                        <StackPanel Spacing="12">
-                            <TextBlock x:Name="DabFicFocusText"
-                                       Text="Selected metric: FIC CRC"
-                                       Foreground="{StaticResource SpectrumBrush}"
-                                       FontWeight="SemiBold" />
-                            <Grid ColumnSpacing="10">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <Border Margin="12,12,12,0"
+                                Style="{StaticResource PanelCardStyle}"
+                                Padding="16,12">
+                            <Grid ColumnSpacing="12">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <Border Grid.Column="0" Style="{StaticResource RfMetricCardStyle}">
-                                    <StackPanel Spacing="5">
-                                        <TextBlock Text="FIC FRAMES" Style="{StaticResource RfMetricLabelStyle}" />
-                                        <TextBlock x:Name="DabFicFramesText" Text="0" Style="{StaticResource RfMetricValueStyle}" />
-                                        <TextBlock Text="Since receiver start" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
-                                    </StackPanel>
-                                </Border>
-                                <Border Grid.Column="1" Style="{StaticResource RfMetricCardStyle}">
-                                    <StackPanel Spacing="5">
-                                        <TextBlock Text="LATEST BLOCKS" Style="{StaticResource RfMetricLabelStyle}" />
-                                        <TextBlock x:Name="DabFicBlocksText" Text="0" Style="{StaticResource RfMetricValueStyle}" />
-                                        <TextBlock Text="Decoded in latest frame" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
-                                    </StackPanel>
-                                </Border>
-                                <Border Grid.Column="2" Style="{StaticResource RfMetricCardStyle}">
-                                    <StackPanel Spacing="5">
-                                        <TextBlock Text="VALID FIBs" Style="{StaticResource RfMetricLabelStyle}" />
-                                        <TextBlock x:Name="DabFicValidText" Text="0 / 12" Style="{StaticResource RfMetricValueStyle}" />
-                                        <TextBlock Text="Latest FIC frame" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
-                                    </StackPanel>
-                                </Border>
-                                <Border Grid.Column="3" Style="{StaticResource RfMetricCardStyle}">
-                                    <StackPanel Spacing="5">
-                                        <TextBlock Text="FIB SUCCESS" Style="{StaticResource RfMetricLabelStyle}" />
-                                        <TextBlock x:Name="DabFicQualityText" Text="—" Style="{StaticResource RfMetricValueStyle}" />
-                                        <TextBlock Text="Aggregate CRC-valid FIBs" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
-                                    </StackPanel>
-                                </Border>
+                                <StackPanel Spacing="3">
+                                    <TextBlock Text="FIC MEASUREMENTS" FontSize="21" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="FicHeaderContextText"
+                                               Text="Awaiting ensemble · Configuration stability unavailable"
+                                               Foreground="{StaticResource MutedTextBrush}" />
+                                    <TextBlock x:Name="DabFicFocusText"
+                                               Text="Selected metric: FIC overview"
+                                               Foreground="{StaticResource SpectrumBrush}"
+                                               FontSize="11" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1"
+                                            Orientation="Horizontal"
+                                            Spacing="7"
+                                            VerticalAlignment="Center">
+                                    <Ellipse x:Name="FicHeaderStatusIndicator"
+                                             Width="10"
+                                             Height="10"
+                                             Fill="{StaticResource MutedTextBrush}" />
+                                    <TextBlock x:Name="FicHeaderStatusText"
+                                               Text="IDLE"
+                                               FontWeight="SemiBold"
+                                               Foreground="{StaticResource MutedTextBrush}" />
+                                </StackPanel>
                             </Grid>
-                            <Border Style="{StaticResource PanelCardStyle}" Padding="16">
-                                <StackPanel Spacing="10">
-                                    <TextBlock Text="Fast Information Channel catalogue" FontSize="16" FontWeight="SemiBold" />
-                                    <Grid ColumnSpacing="14" RowSpacing="8">
+                        </Border>
+
+                        <TabView x:Name="FicTabView"
+                                 Grid.Row="1"
+                                 Margin="0,6,0,0"
+                                 IsAddTabButtonVisible="False"
+                                 TabWidthMode="SizeToContent">
+                            <TabViewItem x:Name="FicOverviewTab" Header="Overview" IsClosable="False">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="12">
+                                    <Grid ColumnSpacing="10" RowSpacing="10">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="170" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="*" />
                                         </Grid.ColumnDefinitions>
                                         <Grid.RowDefinitions>
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="145" />
+                                            <RowDefinition Height="145" />
                                         </Grid.RowDefinitions>
-                                        <TextBlock Text="Ensemble" Foreground="{StaticResource MutedTextBrush}" />
-                                        <TextBlock Grid.Column="1" x:Name="DabFicEnsembleText" Text="Awaiting FIC" />
-                                        <TextBlock Grid.Row="1" Text="Ensemble ID" Foreground="{StaticResource MutedTextBrush}" />
-                                        <TextBlock Grid.Row="1" Grid.Column="1" x:Name="DabFicEnsembleIdText" Text="—" FontFamily="Consolas" />
-                                        <TextBlock Grid.Row="2" Text="Decoded services" Foreground="{StaticResource MutedTextBrush}" />
-                                        <TextBlock Grid.Row="2" Grid.Column="1" x:Name="DabFicServicesText" Text="0" FontFamily="Consolas" />
-                                        <TextBlock Grid.Row="3" Text="Catalogue generation" Foreground="{StaticResource MutedTextBrush}" />
-                                        <TextBlock Grid.Row="3" Grid.Column="1" x:Name="DabFicCatalogSequenceText" Text="—" FontFamily="Consolas" />
-                                        <TextBlock Grid.Row="4" Text="Total CRC-valid FIBs" Foreground="{StaticResource MutedTextBrush}" />
-                                        <TextBlock Grid.Row="4" Grid.Column="1" x:Name="DabFicTotalText" Text="0" FontFamily="Consolas" />
+
+                                        <Button Grid.Row="0" Grid.Column="0" Tag="fib:valid" Click="FicMetricCard_Click"
+                                                Padding="0" Background="Transparent" BorderThickness="0" HorizontalContentAlignment="Stretch">
+                                            <Border Style="{StaticResource RfMetricCardStyle}">
+                                                <StackPanel Spacing="5">
+                                                    <TextBlock Text="FIB CRC VALID" Style="{StaticResource RfMetricLabelStyle}" />
+                                                    <TextBlock x:Name="FicCrcValidValueText" Text="—" Style="{StaticResource RfMetricValueStyle}" />
+                                                    <TextBlock x:Name="FicCrcValidDetailText" Text="Awaiting decoded FIBs" FontSize="11" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
+                                                </StackPanel>
+                                            </Border>
+                                        </Button>
+                                        <Button Grid.Row="0" Grid.Column="1" Tag="fib:errors" Click="FicMetricCard_Click"
+                                                Padding="0" Background="Transparent" BorderThickness="0" HorizontalContentAlignment="Stretch">
+                                            <Border Style="{StaticResource RfMetricCardStyle}">
+                                                <StackPanel Spacing="5">
+                                                    <TextBlock Text="FIB CRC ERRORS" Style="{StaticResource RfMetricLabelStyle}" />
+                                                    <TextBlock x:Name="FicCrcErrorsValueText" Text="0" Style="{StaticResource RfMetricValueStyle}" />
+                                                    <TextBlock x:Name="FicCrcErrorsDetailText" Text="No errors since session start" FontSize="11" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
+                                                </StackPanel>
+                                            </Border>
+                                        </Button>
+                                        <Button Grid.Row="0" Grid.Column="2" Tag="fib:ber" Click="FicMetricCard_Click"
+                                                Padding="0" Background="Transparent" BorderThickness="0" HorizontalContentAlignment="Stretch">
+                                            <Border Style="{StaticResource RfMetricCardStyle}">
+                                                <StackPanel Spacing="5">
+                                                    <TextBlock Text="PRE-VITERBI BER" Style="{StaticResource RfMetricLabelStyle}" />
+                                                    <TextBlock x:Name="FicPreBerValueText" Text="—" Style="{StaticResource RfMetricValueStyle}" />
+                                                    <TextBlock x:Name="FicPreBerDetailText" Text="Awaiting compared channel bits" FontSize="11" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
+                                                </StackPanel>
+                                            </Border>
+                                        </Button>
+                                        <Button Grid.Row="0" Grid.Column="3" Tag="fig:errors" Click="FicMetricCard_Click"
+                                                Padding="0" Background="Transparent" BorderThickness="0" HorizontalContentAlignment="Stretch">
+                                            <Border Style="{StaticResource RfMetricCardStyle}">
+                                                <StackPanel Spacing="5">
+                                                    <TextBlock Text="FIG PARSE ERRORS" Style="{StaticResource RfMetricLabelStyle}" />
+                                                    <TextBlock x:Name="FicFigErrorsValueText" Text="0" Style="{StaticResource RfMetricValueStyle}" />
+                                                    <TextBlock Text="Malformed FIGs since session start" FontSize="11" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
+                                                </StackPanel>
+                                            </Border>
+                                        </Button>
+
+                                        <Button Grid.Row="1" Grid.Column="0" Tag="fic:lock" Click="FicMetricCard_Click"
+                                                Padding="0" Background="Transparent" BorderThickness="0" HorizontalContentAlignment="Stretch">
+                                            <Border Style="{StaticResource RfMetricCardStyle}">
+                                                <StackPanel Spacing="5">
+                                                    <TextBlock Text="FIC LOCK" Style="{StaticResource RfMetricLabelStyle}" />
+                                                    <TextBlock x:Name="FicLockValueText" Text="IDLE" Style="{StaticResource RfMetricValueStyle}" />
+                                                    <TextBlock x:Name="FicLockDetailText" Text="Receiver stopped" FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
+                                                </StackPanel>
+                                            </Border>
+                                        </Button>
+                                        <Button Grid.Row="1" Grid.Column="1" Tag="fib:viterbi" Click="FicMetricCard_Click"
+                                                Padding="0" Background="Transparent" BorderThickness="0" HorizontalContentAlignment="Stretch">
+                                            <Border Style="{StaticResource RfMetricCardStyle}">
+                                                <StackPanel Spacing="5">
+                                                    <TextBlock Text="VITERBI QUALITY" Style="{StaticResource RfMetricLabelStyle}" />
+                                                    <TextBlock x:Name="FicViterbiValueText" Text="—" Style="{StaticResource RfMetricValueStyle}" />
+                                                    <TextBlock x:Name="FicViterbiDetailText" Text="Input confidence" FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
+                                                </StackPanel>
+                                            </Border>
+                                        </Button>
+                                        <Button Grid.Row="1" Grid.Column="2" Tag="fig:rate" Click="FicMetricCard_Click"
+                                                Padding="0" Background="Transparent" BorderThickness="0" HorizontalContentAlignment="Stretch">
+                                            <Border Style="{StaticResource RfMetricCardStyle}">
+                                                <StackPanel Spacing="5">
+                                                    <TextBlock Text="FIG RATE" Style="{StaticResource RfMetricLabelStyle}" />
+                                                    <TextBlock x:Name="FicFigRateValueText" Text="—" Style="{StaticResource RfMetricValueStyle}" />
+                                                    <TextBlock x:Name="FicFigRateDetailText" Text="0 types active" FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
+                                                </StackPanel>
+                                            </Border>
+                                        </Button>
+                                        <Button Grid.Row="1" Grid.Column="3" Tag="database:reconfiguration" Click="FicMetricCard_Click"
+                                                Padding="0" Background="Transparent" BorderThickness="0" HorizontalContentAlignment="Stretch">
+                                            <Border Style="{StaticResource RfMetricCardStyle}">
+                                                <StackPanel Spacing="5">
+                                                    <TextBlock Text="RECONFIGURATION" Style="{StaticResource RfMetricLabelStyle}" />
+                                                    <TextBlock x:Name="FicReconfigValueText" Text="NONE PENDING" FontSize="20" FontWeight="SemiBold" FontFamily="Consolas" />
+                                                    <TextBlock x:Name="FicReconfigDetailText" Text="Awaiting database" FontSize="11" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
+                                                </StackPanel>
+                                            </Border>
+                                        </Button>
                                     </Grid>
-                                </StackPanel>
-                            </Border>
+                                </ScrollViewer>
+                            </TabViewItem>
+
+                            <TabViewItem x:Name="FicFibTimelineTab" Header="FIB Timeline" IsClosable="False">
+                                <Grid Padding="12" RowSpacing="10">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="215" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+                                    <Grid>
+                                        <TextBlock Text="FIB TIMELINE" Style="{StaticResource SectionTitleStyle}" VerticalAlignment="Center" />
+                                        <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                                            <ComboBox x:Name="FicTimelinePeriodComboBox" Width="125" SelectedIndex="1">
+                                                <ComboBoxItem Content="Last 5 s" Tag="5" />
+                                                <ComboBoxItem Content="Last 10 s" Tag="10" />
+                                            </ComboBox>
+                                            <Button x:Name="FicTimelineResumeButton" Content="Live" Click="FicTimelineResume_Click" />
+                                        </StackPanel>
+                                    </Grid>
+                                    <Border Grid.Row="1" Style="{StaticResource PanelCardStyle}" Padding="14">
+                                        <StackPanel Spacing="10">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="100" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="Valid CRC" Foreground="{StaticResource MutedTextBrush}" />
+                                                <StackPanel Grid.Column="1"
+                                                            x:Name="FicCrcTimelineCells"
+                                                            Orientation="Horizontal"
+                                                            Spacing="2" />
+                                            </Grid>
+                                            <Viewbox Stretch="Fill" Height="142">
+                                                <Canvas Width="900" Height="132">
+                                                    <TextBlock Text="Viterbi metric" Canvas.Left="0" Canvas.Top="22" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                                    <TextBlock Text="BER" Canvas.Left="0" Canvas.Top="82" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                                    <Line X1="105" Y1="45" X2="895" Y2="45" Stroke="#253D556E" />
+                                                    <Line X1="105" Y1="105" X2="895" Y2="105" Stroke="#253D556E" />
+                                                    <Polyline x:Name="FicViterbiTimelineTrace" Stroke="{StaticResource MeasurementAccentBrush}" StrokeThickness="2" />
+                                                    <Polyline x:Name="FicBerTimelineTrace" Stroke="{StaticResource SpectrumBrush}" StrokeThickness="2" />
+                                                </Canvas>
+                                            </Viewbox>
+                                        </StackPanel>
+                                    </Border>
+                                    <Grid Grid.Row="2">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="*" />
+                                        </Grid.RowDefinitions>
+                                        <Grid Margin="10,0,10,5">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="145" />
+                                                <ColumnDefinition Width="150" />
+                                                <ColumnDefinition Width="60" />
+                                                <ColumnDefinition Width="80" />
+                                                <ColumnDefinition Width="115" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="Time" FontWeight="SemiBold" />
+                                            <TextBlock Grid.Column="1" Text="Frame" FontWeight="SemiBold" />
+                                            <TextBlock Grid.Column="2" Text="FIB" FontWeight="SemiBold" />
+                                            <TextBlock Grid.Column="3" Text="CRC" FontWeight="SemiBold" />
+                                            <TextBlock Grid.Column="4" Text="BER" FontWeight="SemiBold" />
+                                            <TextBlock Grid.Column="5" Text="Action" FontWeight="SemiBold" />
+                                        </Grid>
+                                        <ListView Grid.Row="1"
+                                                  x:Name="FicFailureListView"
+                                                  IsItemClickEnabled="True"
+                                                  ItemClick="FicFailureListView_ItemClick"
+                                                  SelectionMode="Single" />
+                                    </Grid>
+                                </Grid>
+                            </TabViewItem>
+
+                            <TabViewItem x:Name="FicFigBrowserTab" Header="FIG Browser" IsClosable="False">
+                                <Grid Padding="12" RowSpacing="10">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="235" />
+                                    </Grid.RowDefinitions>
+                                    <Grid>
+                                        <TextBlock Text="FIG BROWSER" Style="{StaticResource SectionTitleStyle}" VerticalAlignment="Center" />
+                                        <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                                            <ComboBox x:Name="FicFigFilterComboBox"
+                                                      Width="155"
+                                                      SelectedIndex="0"
+                                                      SelectionChanged="FicFigFilter_Changed">
+                                                <ComboBoxItem Content="All FIGs" Tag="all" />
+                                                <ComboBoxItem Content="Supported" Tag="supported" />
+                                                <ComboBoxItem Content="Unsupported" Tag="unsupported" />
+                                                <ComboBoxItem Content="Malformed" Tag="malformed" />
+                                                <ComboBoxItem Content="Changed" Tag="changed" />
+                                            </ComboBox>
+                                            <TextBox x:Name="FicFigSearchTextBox"
+                                                     Width="180"
+                                                     PlaceholderText="Search type or purpose"
+                                                     TextChanged="FicFigSearch_Changed" />
+                                        </StackPanel>
+                                    </Grid>
+                                    <Grid Grid.Row="1">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="*" />
+                                        </Grid.RowDefinitions>
+                                        <Grid Margin="10,0,10,5">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="90" />
+                                                <ColumnDefinition Width="90" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="100" />
+                                                <ColumnDefinition Width="110" />
+                                                <ColumnDefinition Width="100" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="FIG" FontWeight="SemiBold" />
+                                            <TextBlock Grid.Column="1" Text="Extension" FontWeight="SemiBold" />
+                                            <TextBlock Grid.Column="2" Text="Purpose" FontWeight="SemiBold" />
+                                            <TextBlock Grid.Column="3" Text="Rate" FontWeight="SemiBold" />
+                                            <TextBlock Grid.Column="4" Text="Last seen" FontWeight="SemiBold" />
+                                            <TextBlock Grid.Column="5" Text="Status" FontWeight="SemiBold" />
+                                        </Grid>
+                                        <ListView Grid.Row="1"
+                                                  x:Name="FicFigListView"
+                                                  SelectionMode="Single"
+                                                  SelectionChanged="FicFigListView_SelectionChanged" />
+                                    </Grid>
+                                    <Border Grid.Row="2" Style="{StaticResource PanelCardStyle}" Padding="14">
+                                        <Grid ColumnSpacing="16">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="300" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Spacing="7">
+                                                <TextBlock Text="Selected FIG" FontSize="16" FontWeight="SemiBold" />
+                                                <TextBlock x:Name="FicFigSelectedTitleText" Text="Select a FIG occurrence" FontFamily="Consolas" />
+                                                <TextBlock x:Name="FicFigSelectedDecodedText"
+                                                           Text="Decoded values will appear here."
+                                                           TextWrapping="Wrap"
+                                                           Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Text="Current raw bytes" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                                <TextBlock x:Name="FicFigSelectedRawText" Text="—" FontFamily="Consolas" TextWrapping="Wrap" />
+                                                <TextBlock Text="Previous occurrence" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                                <TextBlock x:Name="FicFigSelectedPreviousText" Text="—" FontFamily="Consolas" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Spacing="8">
+                                                <CheckBox x:Name="FicFigChangedOnlyCheckBox" Content="Show only changed FIGs" Click="FicFigChangedOnly_Click" />
+                                                <CheckBox x:Name="FicFreezeOnChangeCheckBox" Content="Freeze browser on change" Click="FicFreezeOnChange_Click" />
+                                                <CheckBox x:Name="FicCaptureIqOnChangeCheckBox" Content="Arm IQ capture on configuration change" Click="FicCaptureIqOnChange_Click" />
+                                                <Button Content="Copy decoded values" Click="FicCopySelectedFig_Click" />
+                                                <Button Content="Export selected FIG" Click="FicExportSelectedFig_Click" />
+                                                <TextBlock x:Name="FicFigBrowserStatusText"
+                                                           Text="LIVE"
+                                                           Foreground="{StaticResource MeasurementAccentBrush}"
+                                                           FontSize="11" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                </Grid>
+                            </TabViewItem>
+
+                            <TabViewItem x:Name="FicDatabaseTab" Header="Multiplex Database" IsClosable="False">
+                                <Grid Padding="12" RowSpacing="10">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="205" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+                                    <Grid>
+                                        <TextBlock Text="MULTIPLEX DATABASE" Style="{StaticResource SectionTitleStyle}" />
+                                        <StackPanel Orientation="Horizontal" Spacing="7" HorizontalAlignment="Right">
+                                            <Ellipse x:Name="FicDatabaseStatusIndicator" Width="9" Height="9" Fill="{StaticResource MutedTextBrush}" />
+                                            <TextBlock x:Name="FicDatabaseStatusText" Text="AWAITING DATABASE" FontWeight="SemiBold" />
+                                        </StackPanel>
+                                    </Grid>
+                                    <Border Grid.Row="1" Style="{StaticResource PanelCardStyle}" Padding="14">
+                                        <Grid ColumnSpacing="20" RowSpacing="7">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="190" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="190" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+                                            <TextBlock Text="Ensemble" Foreground="{StaticResource MutedTextBrush}" />
+                                            <TextBlock Grid.Column="1" x:Name="FicDatabaseEnsembleText" Text="Awaiting FIC" />
+                                            <TextBlock Grid.Column="2" Text="Services" Foreground="{StaticResource MutedTextBrush}" />
+                                            <TextBlock Grid.Column="3" x:Name="FicDatabaseServicesText" Text="0" FontFamily="Consolas" />
+                                            <TextBlock Grid.Row="1" Text="Service components" Foreground="{StaticResource MutedTextBrush}" />
+                                            <TextBlock Grid.Row="1" Grid.Column="1" x:Name="FicDatabaseComponentsText" Text="0" FontFamily="Consolas" />
+                                            <TextBlock Grid.Row="1" Grid.Column="2" Text="Subchannels" Foreground="{StaticResource MutedTextBrush}" />
+                                            <TextBlock Grid.Row="1" Grid.Column="3" x:Name="FicDatabaseSubchannelsText" Text="0" FontFamily="Consolas" />
+                                            <TextBlock Grid.Row="2" Text="Announcements" Foreground="{StaticResource MutedTextBrush}" />
+                                            <TextBlock Grid.Row="2" Grid.Column="1" Text="Not decoded" Foreground="{StaticResource MutedTextBrush}" />
+                                            <TextBlock Grid.Row="2" Grid.Column="2" Text="ECC" Foreground="{StaticResource MutedTextBrush}" />
+                                            <TextBlock Grid.Row="2" Grid.Column="3" Text="Not decoded" Foreground="{StaticResource MutedTextBrush}" />
+                                            <TextBlock Grid.Row="3" Text="Database revision" Foreground="{StaticResource MutedTextBrush}" />
+                                            <TextBlock Grid.Row="3" Grid.Column="1" x:Name="FicDatabaseRevisionText" Text="—" FontFamily="Consolas" />
+                                            <TextBlock Grid.Row="3" Grid.Column="2" Text="Last change" Foreground="{StaticResource MutedTextBrush}" />
+                                            <TextBlock Grid.Row="3" Grid.Column="3" x:Name="FicDatabaseLastChangeText" Text="—" FontFamily="Consolas" />
+                                            <TextBlock Grid.Row="4" Text="Missing subchannels" Foreground="{StaticResource MutedTextBrush}" />
+                                            <TextBlock Grid.Row="4" Grid.Column="1" x:Name="FicDatabaseMissingText" Text="0" FontFamily="Consolas" />
+                                            <TextBlock Grid.Row="4" Grid.Column="2" Text="Duplicate service IDs" Foreground="{StaticResource MutedTextBrush}" />
+                                            <TextBlock Grid.Row="4" Grid.Column="3" x:Name="FicDatabaseDuplicateText" Text="0" FontFamily="Consolas" />
+                                            <TextBlock Grid.Row="5" Grid.ColumnSpan="4"
+                                                       x:Name="FicDatabaseChangeSummaryText"
+                                                       Text="No database received"
+                                                       Foreground="{StaticResource MutedTextBrush}" />
+                                        </Grid>
+                                    </Border>
+                                    <Grid Grid.Row="2">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="*" />
+                                        </Grid.RowDefinitions>
+                                        <Grid Margin="10,0,10,5">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="145" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="130" />
+                                                <ColumnDefinition Width="110" />
+                                                <ColumnDefinition Width="100" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="Service ID" FontWeight="SemiBold" />
+                                            <TextBlock Grid.Column="1" Text="Label" FontWeight="SemiBold" />
+                                            <TextBlock Grid.Column="2" Text="Component" FontWeight="SemiBold" />
+                                            <TextBlock Grid.Column="3" Text="Subchannel" FontWeight="SemiBold" />
+                                            <TextBlock Grid.Column="4" Text="Status" FontWeight="SemiBold" />
+                                        </Grid>
+                                        <ListView Grid.Row="1" x:Name="FicDatabaseListView" SelectionMode="None" />
+                                    </Grid>
+                                </Grid>
+                            </TabViewItem>
+
+                            <TabViewItem x:Name="FicRawInspectorTab" Header="Raw Inspector" IsClosable="False">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="12">
+                                    <StackPanel Spacing="12">
+                                        <Grid>
+                                            <TextBlock Text="RAW FIB INSPECTOR" Style="{StaticResource SectionTitleStyle}" />
+                                            <Button Content="Return to live timeline"
+                                                    HorizontalAlignment="Right"
+                                                    Click="FicTimelineResume_Click" />
+                                        </Grid>
+                                        <Border Style="{StaticResource PanelCardStyle}" Padding="14">
+                                            <Grid ColumnSpacing="14" RowSpacing="7">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="150" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="150" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                </Grid.RowDefinitions>
+                                                <TextBlock Text="Timestamp" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Column="1" x:Name="FicRawTimestampText" Text="—" FontFamily="Consolas" />
+                                                <TextBlock Grid.Column="2" Text="Frame / FIB" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Column="3" x:Name="FicRawFrameText" Text="—" FontFamily="Consolas" />
+                                                <TextBlock Grid.Row="1" Text="CRC" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Row="1" Grid.Column="1" x:Name="FicRawCrcText" Text="—" FontFamily="Consolas" />
+                                                <TextBlock Grid.Row="1" Grid.Column="2" Text="Pre-Viterbi BER" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Row="1" Grid.Column="3" x:Name="FicRawBerText" Text="—" FontFamily="Consolas" />
+                                                <TextBlock Grid.Row="2" Text="Capture state" Foreground="{StaticResource MutedTextBrush}" />
+                                                <TextBlock Grid.Row="2" Grid.Column="1" x:Name="FicRawCaptureStateText" Text="Live timeline" />
+                                            </Grid>
+                                        </Border>
+                                        <Border Style="{StaticResource PanelCardStyle}" Padding="14">
+                                            <StackPanel Spacing="8">
+                                                <TextBlock Text="Decoded FIB bytes" FontSize="16" FontWeight="SemiBold" />
+                                                <TextBlock x:Name="FicRawBytesText"
+                                                           Text="Select a failed FIB from the timeline."
+                                                           FontFamily="Consolas"
+                                                           TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Style="{StaticResource PanelCardStyle}" Padding="14">
+                                            <StackPanel Spacing="8">
+                                                <TextBlock Text="FIG contents" FontSize="16" FontWeight="SemiBold" />
+                                                <TextBlock x:Name="FicRawDecodedText"
+                                                           Text="No FIB selected."
+                                                           TextWrapping="Wrap"
+                                                           Foreground="{StaticResource MutedTextBrush}" />
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </TabViewItem>
+                        </TabView>
+
+                        <StackPanel Visibility="Collapsed">
+                            <TextBlock x:Name="DabFicFramesText" />
+                            <TextBlock x:Name="DabFicBlocksText" />
+                            <TextBlock x:Name="DabFicValidText" />
+                            <TextBlock x:Name="DabFicQualityText" />
+                            <TextBlock x:Name="DabFicEnsembleText" />
+                            <TextBlock x:Name="DabFicEnsembleIdText" />
+                            <TextBlock x:Name="DabFicServicesText" />
+                            <TextBlock x:Name="DabFicCatalogSequenceText" />
+                            <TextBlock x:Name="DabFicTotalText" />
                         </StackPanel>
-                    </ScrollViewer>
+                    </Grid>
                 </TabViewItem>
 
                 <TabViewItem x:Name="DabMscTab" Header="MSC" IsClosable="False">

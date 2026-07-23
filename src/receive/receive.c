@@ -121,6 +121,28 @@ void dab_receive_catalog_build(dab_receive_catalog_t *catalog,
     }
 
     catalog->ensemble_id = database->eid;
+    catalog->fig0_ext0_valid = database->fig0_ext0_valid;
+    catalog->change_flag = database->change_flag;
+    catalog->alarm_flag = database->alarm_flag;
+    catalog->cif_count = database->cif_count;
+    for (uint32_t subchannel_index = 0u;
+         subchannel_index < DAB_FIC_MAX_SUBCHANNELS;
+         ++subchannel_index) {
+        if (database->subchannels[subchannel_index].valid != 0u) {
+            catalog->subchannel_count++;
+        }
+    }
+    for (uint32_t left = 0u; left < database->service_count; ++left) {
+        for (uint32_t right = left + 1u;
+             right < database->service_count;
+             ++right) {
+            if (database->services[left].sid == database->services[right].sid &&
+                database->services[left].is_programme ==
+                    database->services[right].is_programme) {
+                catalog->duplicate_service_id_count++;
+            }
+        }
+    }
     ensemble_label = receive_catalog_find_label(database,
                                                   DAB_FIC_LABEL_SCOPE_ENSEMBLE,
                                                   0u,
@@ -179,6 +201,7 @@ void dab_receive_catalog_build(dab_receive_catalog_t *catalog,
             component->has_packet_address = source_component->has_packet_addr;
             component->packet_address = source_component->packet_addr;
             component->data_group = source_component->dg_flag;
+            catalog->service_component_count++;
 
             if (source_component->has_subchid != 0u &&
                 source_component->subchid < DAB_FIC_MAX_SUBCHANNELS) {
@@ -198,11 +221,18 @@ void dab_receive_catalog_build(dab_receive_catalog_t *catalog,
                         component->subchannel_bitrate_kbps =
                             resolved_subchannel.bitrate_kbps;
                     }
+                } else {
+                    catalog->missing_subchannel_reference_count++;
                 }
+            } else if (source_component->has_subchid != 0u) {
+                catalog->missing_subchannel_reference_count++;
             }
         }
         catalog->service_count++;
     }
+    catalog->database_consistent =
+        catalog->missing_subchannel_reference_count == 0u &&
+        catalog->duplicate_service_id_count == 0u;
 }
 
 int dab_receive_catalog_content_equal(const dab_receive_catalog_t *left,
@@ -212,11 +242,21 @@ int dab_receive_catalog_content_equal(const dab_receive_catalog_t *left,
     }
     return left->frequency_hz == right->frequency_hz &&
            left->ensemble_id == right->ensemble_id &&
+           left->fig0_ext0_valid == right->fig0_ext0_valid &&
+           left->change_flag == right->change_flag &&
+           left->alarm_flag == right->alarm_flag &&
            left->ensemble_label_charset == right->ensemble_label_charset &&
            memcmp(left->ensemble_label,
                   right->ensemble_label,
                   sizeof(left->ensemble_label)) == 0 &&
            left->service_count == right->service_count &&
+           left->service_component_count == right->service_component_count &&
+           left->subchannel_count == right->subchannel_count &&
+           left->missing_subchannel_reference_count ==
+               right->missing_subchannel_reference_count &&
+           left->duplicate_service_id_count ==
+               right->duplicate_service_id_count &&
+           left->database_consistent == right->database_consistent &&
            memcmp(left->services, right->services, sizeof(left->services)) == 0;
 }
 
@@ -332,8 +372,75 @@ void dab_receive_snapshot_build(dab_receive_snapshot_t *snapshot,
         snapshot->fic_blocks_decoded_last_frame = fic->fic_blocks_decoded_last_frame;
         snapshot->fic_valid_fibs_last_frame = fic->valid_fibs_last_frame;
         snapshot->fic_total_valid_fibs = fic->total_valid_fibs;
+        snapshot->fic_change_flag = fic->repo.current.change_flag;
+        snapshot->fic_alarm_flag = fic->repo.current.alarm_flag;
+        snapshot->fic_cif_count = fic->repo.current.cif_count;
+        snapshot->fic_frame_start_sample = fic->last_frame_start_sample;
+        for (uint32_t fib_index = 0u;
+             fib_index < DAB_RECEIVE_FIC_FIB_COUNT;
+             ++fib_index) {
+            if (fic->fib_crc_ok[fib_index] != 0u) {
+                snapshot->fic_crc_valid_mask |= (uint16_t)(1u << fib_index);
+            }
+            memcpy(snapshot->fic_decoded_fibs[fib_index],
+                   fic->decoded_fibs[fib_index],
+                   DAB_RECEIVE_FIC_FIB_BYTES);
+        }
+        snapshot->fic_pre_viterbi_ber_valid =
+            fic->pre_viterbi_compared_bits_total != 0u;
+        snapshot->fic_pre_viterbi_error_bits =
+            fic->pre_viterbi_error_bits_total;
+        snapshot->fic_pre_viterbi_compared_bits =
+            fic->pre_viterbi_compared_bits_total;
+        snapshot->fic_pre_viterbi_ber =
+            fic->pre_viterbi_compared_bits_total != 0u
+                ? (float)((double)fic->pre_viterbi_error_bits_total /
+                          (double)fic->pre_viterbi_compared_bits_total)
+                : 0.0f;
+        snapshot->fic_viterbi_quality_percent =
+            fic->viterbi_quality_last_frame;
+        for (uint32_t block_index = 0u;
+             block_index < DAB_RECEIVE_FIC_BLOCK_COUNT;
+             ++block_index) {
+            const dab_fic_debug_block_t *block =
+                &fic->block_info_last_frame[block_index];
+            snapshot->fic_block_pre_viterbi_ber[block_index] =
+                block->pre_viterbi_compared_bits != 0u
+                    ? (float)((double)block->pre_viterbi_error_bits /
+                              (double)block->pre_viterbi_compared_bits)
+                    : 0.0f;
+            snapshot->fic_block_viterbi_quality_percent[block_index] =
+                block->viterbi_quality_percent;
+        }
         snapshot->fic_total_figs = fic->repo.total_figs;
         snapshot->fic_total_fig_parse_errors = fic->repo.total_fig_parse_errors;
+        snapshot->fic_fig_stat_count =
+            fic->repo.fig_stat_count < DAB_RECEIVE_FIC_FIG_STAT_CAPACITY
+                ? fic->repo.fig_stat_count
+                : DAB_RECEIVE_FIC_FIG_STAT_CAPACITY;
+        for (uint32_t fig_index = 0u;
+             fig_index < snapshot->fic_fig_stat_count;
+             ++fig_index) {
+            const dab_fic_fig_stat_t *source = &fic->repo.fig_stats[fig_index];
+            dab_receive_fic_fig_stat_t *target =
+                &snapshot->fic_fig_stats[fig_index];
+
+            target->used = source->used;
+            target->type = source->type;
+            target->extension = source->ext;
+            target->supported = source->supported;
+            target->total_count = source->total_count;
+            target->change_count = source->change_count;
+            target->malformed_count = source->malformed_count;
+            target->last_seen_frame = source->last_seen_frame;
+            target->last_change_frame = source->last_change_frame;
+            target->raw_length = source->raw_length;
+            target->previous_raw_length = source->previous_raw_length;
+            memcpy(target->raw, source->raw, sizeof(target->raw));
+            memcpy(target->previous_raw,
+                   source->previous_raw,
+                   sizeof(target->previous_raw));
+        }
     }
 
     if (msc != 0) {

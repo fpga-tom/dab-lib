@@ -47,6 +47,7 @@ void test_receive_snapshot_maps_receiver_measurements_and_counters(void) {
     dab_fic_state_t fic = {0};
     dab_msc_state_t msc = {0};
     dab_msc_dabplus_debug_t msc_audio = {0};
+    uint32_t index;
 
     memset(&snapshot, 0xA5, sizeof(snapshot));
     sync.state.mode = DAB_SYNC_MODE_TRACK;
@@ -80,8 +81,42 @@ void test_receive_snapshot_maps_receiver_measurements_and_counters(void) {
     fic.fic_blocks_decoded_last_frame = 3u;
     fic.valid_fibs_last_frame = 9u;
     fic.total_valid_fibs = 123u;
+    fic.last_frame_start_sample = 987600u;
+    fic.repo.current.fig0_ext0_valid = 1u;
+    fic.repo.current.change_flag = 2u;
+    fic.repo.current.alarm_flag = 1u;
+    fic.repo.current.cif_count = 0x1234u;
     fic.repo.total_figs = 456u;
     fic.repo.total_fig_parse_errors = 3u;
+    fic.pre_viterbi_error_bits_total = 23u;
+    fic.pre_viterbi_compared_bits_total = 23000u;
+    fic.viterbi_quality_last_frame = 86.5f;
+    for (index = 0u; index < DAB_RECEIVE_FIC_FIB_COUNT; ++index) {
+        fic.fib_crc_ok[index] = (uint8_t)((index % 3u) != 0u);
+        fic.decoded_fibs[index][0] = (uint8_t)(0x80u + index);
+    }
+    for (index = 0u; index < DAB_RECEIVE_FIC_BLOCK_COUNT; ++index) {
+        fic.block_info_last_frame[index].pre_viterbi_error_bits = index + 1u;
+        fic.block_info_last_frame[index].pre_viterbi_compared_bits = 1000u;
+        fic.block_info_last_frame[index].viterbi_quality_percent =
+            80.0f + (float)index;
+    }
+    fic.repo.fig_stat_count = 1u;
+    fic.repo.fig_stats[0].used = 1u;
+    fic.repo.fig_stats[0].type = DAB_FIC_FIG_TYPE_0;
+    fic.repo.fig_stats[0].ext = 2u;
+    fic.repo.fig_stats[0].supported = 1u;
+    fic.repo.fig_stats[0].total_count = 20u;
+    fic.repo.fig_stats[0].change_count = 1u;
+    fic.repo.fig_stats[0].malformed_count = 2u;
+    fic.repo.fig_stats[0].last_seen_frame = 20u;
+    fic.repo.fig_stats[0].last_change_frame = 11u;
+    fic.repo.fig_stats[0].raw_length = 3u;
+    fic.repo.fig_stats[0].previous_raw_length = 3u;
+    fic.repo.fig_stats[0].raw[0] = 0x02u;
+    fic.repo.fig_stats[0].raw[1] = 0x02u;
+    fic.repo.fig_stats[0].raw[2] = 0x42u;
+    fic.repo.fig_stats[0].previous_raw[2] = 0x41u;
     msc.frames_seen = 20u;
 
     msc_audio.valid = 1u;
@@ -151,8 +186,29 @@ void test_receive_snapshot_maps_receiver_measurements_and_counters(void) {
     TEST_ASSERT(snapshot.fic_blocks_decoded_last_frame == 3u);
     TEST_ASSERT(snapshot.fic_valid_fibs_last_frame == 9u);
     TEST_ASSERT(snapshot.fic_total_valid_fibs == 123u);
+    TEST_ASSERT(snapshot.fic_change_flag == 2u);
+    TEST_ASSERT(snapshot.fic_alarm_flag == 1u);
+    TEST_ASSERT(snapshot.fic_cif_count == 0x1234u);
+    TEST_ASSERT(snapshot.fic_frame_start_sample == 987600u);
+    TEST_ASSERT(snapshot.fic_crc_valid_mask == 0x0DB6u);
+    TEST_ASSERT(snapshot.fic_decoded_fibs[5][0] == 0x85u);
+    TEST_ASSERT(snapshot.fic_pre_viterbi_ber_valid == 1);
+    TEST_ASSERT(fabsf(snapshot.fic_pre_viterbi_ber - 0.001f) < 0.0000001f);
+    TEST_ASSERT(snapshot.fic_pre_viterbi_error_bits == 23u);
+    TEST_ASSERT(snapshot.fic_pre_viterbi_compared_bits == 23000u);
+    TEST_ASSERT(snapshot.fic_viterbi_quality_percent == 86.5f);
+    TEST_ASSERT(fabsf(snapshot.fic_block_pre_viterbi_ber[3] - 0.004f) <
+                0.0000001f);
+    TEST_ASSERT(snapshot.fic_block_viterbi_quality_percent[3] == 83.0f);
     TEST_ASSERT(snapshot.fic_total_figs == 456u);
     TEST_ASSERT(snapshot.fic_total_fig_parse_errors == 3u);
+    TEST_ASSERT(snapshot.fic_fig_stat_count == 1u);
+    TEST_ASSERT(snapshot.fic_fig_stats[0].extension == 2u);
+    TEST_ASSERT(snapshot.fic_fig_stats[0].total_count == 20u);
+    TEST_ASSERT(snapshot.fic_fig_stats[0].change_count == 1u);
+    TEST_ASSERT(snapshot.fic_fig_stats[0].malformed_count == 2u);
+    TEST_ASSERT(snapshot.fic_fig_stats[0].raw[2] == 0x42u);
+    TEST_ASSERT(snapshot.fic_fig_stats[0].previous_raw[2] == 0x41u);
     TEST_ASSERT(snapshot.msc_frames_seen == 20u);
     TEST_ASSERT(snapshot.msc_ber_valid == 1);
     TEST_ASSERT(fabsf(snapshot.msc_ber - 0.00021f) < 0.0000001f);
@@ -220,12 +276,17 @@ void test_receive_catalog_copies_fic_ensemble_services_and_components(void) {
     dab_fic_database_t database = {0};
     dab_receive_catalog_t catalog;
     dab_receive_catalog_t same_content;
+    dab_receive_catalog_t conflicting;
     dab_fic_service_t *audio_service = &database.services[0];
     dab_fic_service_t *data_service = &database.services[1];
     dab_fic_service_component_t *audio_component = &audio_service->components[0];
     dab_fic_service_component_t *packet_component = &data_service->components[0];
 
     database.eid = 0xE0C1u;
+    database.fig0_ext0_valid = 1u;
+    database.change_flag = 2u;
+    database.alarm_flag = 1u;
+    database.cif_count = 0x1234u;
     database.service_count = 2u;
     database.subchannels[4].valid = 1u;
     database.subchannels[4].subchid = 4u;
@@ -281,8 +342,17 @@ void test_receive_catalog_copies_fic_ensemble_services_and_components(void) {
     TEST_ASSERT(catalog.timestamp_ns == 123456789u);
     TEST_ASSERT(catalog.frequency_hz == 213360000u);
     TEST_ASSERT(catalog.ensemble_id == 0xE0C1u);
+    TEST_ASSERT(catalog.fig0_ext0_valid == 1u);
+    TEST_ASSERT(catalog.change_flag == 2u);
+    TEST_ASSERT(catalog.alarm_flag == 1u);
+    TEST_ASSERT(catalog.cif_count == 0x1234u);
     TEST_ASSERT(strcmp(catalog.ensemble_label, "TEST ENSEMBLE") == 0);
     TEST_ASSERT(catalog.service_count == 2u);
+    TEST_ASSERT(catalog.service_component_count == 2u);
+    TEST_ASSERT(catalog.subchannel_count == 1u);
+    TEST_ASSERT(catalog.missing_subchannel_reference_count == 0u);
+    TEST_ASSERT(catalog.duplicate_service_id_count == 0u);
+    TEST_ASSERT(catalog.database_consistent == 1u);
     TEST_ASSERT(catalog.services[0].service_id == 0x1001u);
     TEST_ASSERT(strcmp(catalog.services[0].label, "TEST AUDIO") == 0);
     TEST_ASSERT(catalog.services[0].component_count == 1u);
@@ -317,6 +387,19 @@ void test_receive_catalog_copies_fic_ensemble_services_and_components(void) {
     TEST_ASSERT(dab_receive_catalog_is_regression(&catalog, &same_content) != 0);
     same_content.frequency_hz = 220352000u;
     TEST_ASSERT(dab_receive_catalog_is_regression(&catalog, &same_content) == 0);
+
+    data_service->sid = audio_service->sid;
+    data_service->is_programme = audio_service->is_programme;
+    packet_component->has_subchid = 1u;
+    packet_component->subchid = 5u;
+    dab_receive_catalog_build(&conflicting,
+                              9u,
+                              111111111u,
+                              213360000u,
+                              &database);
+    TEST_ASSERT(conflicting.duplicate_service_id_count == 1u);
+    TEST_ASSERT(conflicting.missing_subchannel_reference_count == 1u);
+    TEST_ASSERT(conflicting.database_consistent == 0u);
 }
 
 void test_receive_measurement_builds_bounded_signal_payloads(void) {

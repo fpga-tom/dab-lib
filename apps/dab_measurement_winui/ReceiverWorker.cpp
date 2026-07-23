@@ -51,6 +51,11 @@ namespace dab::measurement
         m_fic_valid_fibs_offset = 0u;
         m_fic_figs_offset = 0u;
         m_fic_fig_errors_offset = 0u;
+        m_fic_pre_viterbi_error_bits_offset = 0u;
+        m_fic_pre_viterbi_compared_bits_offset = 0u;
+        m_fic_fig_count_offsets.fill(0u);
+        m_fic_fig_change_offsets.fill(0u);
+        m_fic_fig_malformed_offsets.fill(0u);
         m_msc_frames_offset = 0u;
         m_msc_generation_offset = 0u;
         m_msc_decode_attempts_offset = 0u;
@@ -198,6 +203,39 @@ namespace dab::measurement
             worker->m_fic_valid_fibs_offset + snapshot->fic_total_valid_fibs);
         adjusted.fic_total_figs += worker->m_fic_figs_offset;
         adjusted.fic_total_fig_parse_errors += worker->m_fic_fig_errors_offset;
+        adjusted.fic_pre_viterbi_error_bits +=
+            worker->m_fic_pre_viterbi_error_bits_offset;
+        adjusted.fic_pre_viterbi_compared_bits +=
+            worker->m_fic_pre_viterbi_compared_bits_offset;
+        adjusted.fic_pre_viterbi_ber_valid =
+            adjusted.fic_pre_viterbi_compared_bits != 0u;
+        adjusted.fic_pre_viterbi_ber = adjusted.fic_pre_viterbi_ber_valid
+            ? static_cast<float>(
+                static_cast<double>(adjusted.fic_pre_viterbi_error_bits) /
+                static_cast<double>(adjusted.fic_pre_viterbi_compared_bits))
+            : 0.0f;
+        for (uint32_t index = 0u;
+             index < adjusted.fic_fig_stat_count;
+             ++index)
+        {
+            auto& stat = adjusted.fic_fig_stats[index];
+            size_t const key =
+                (static_cast<size_t>(stat.type & 0x07u) << 5u) |
+                static_cast<size_t>(stat.extension & 0x1Fu);
+            if (stat.total_count != 0u)
+            {
+                stat.last_seen_frame = saturate_u32(
+                    worker->m_fic_frames_offset + stat.last_seen_frame);
+            }
+            if (stat.change_count != 0u)
+            {
+                stat.last_change_frame = saturate_u32(
+                    worker->m_fic_frames_offset + stat.last_change_frame);
+            }
+            stat.total_count += worker->m_fic_fig_count_offsets[key];
+            stat.change_count += worker->m_fic_fig_change_offsets[key];
+            stat.malformed_count += worker->m_fic_fig_malformed_offsets[key];
+        }
         adjusted.msc_frames_seen = saturate_u32(
             worker->m_msc_frames_offset + snapshot->msc_frames_seen);
         adjusted.msc_superframe_generation += worker->m_msc_generation_offset;
@@ -703,6 +741,22 @@ namespace dab::measurement
             m_fic_valid_fibs_offset += m_last_session_snapshot.fic_total_valid_fibs;
             m_fic_figs_offset += m_last_session_snapshot.fic_total_figs;
             m_fic_fig_errors_offset += m_last_session_snapshot.fic_total_fig_parse_errors;
+            m_fic_pre_viterbi_error_bits_offset +=
+                m_last_session_snapshot.fic_pre_viterbi_error_bits;
+            m_fic_pre_viterbi_compared_bits_offset +=
+                m_last_session_snapshot.fic_pre_viterbi_compared_bits;
+            for (uint32_t index = 0u;
+                 index < m_last_session_snapshot.fic_fig_stat_count;
+                 ++index)
+            {
+                auto const& stat = m_last_session_snapshot.fic_fig_stats[index];
+                size_t const key =
+                    (static_cast<size_t>(stat.type & 0x07u) << 5u) |
+                    static_cast<size_t>(stat.extension & 0x1Fu);
+                m_fic_fig_count_offsets[key] += stat.total_count;
+                m_fic_fig_change_offsets[key] += stat.change_count;
+                m_fic_fig_malformed_offsets[key] += stat.malformed_count;
+            }
             m_msc_frames_offset += m_last_session_snapshot.msc_frames_seen;
             m_msc_generation_offset += m_last_session_snapshot.msc_superframe_generation;
             m_msc_decode_attempts_offset += m_last_session_snapshot.msc_decode_attempts;

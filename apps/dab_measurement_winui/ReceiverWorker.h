@@ -149,6 +149,11 @@ namespace dab::measurement
         uint64_t m_fic_valid_fibs_offset{ 0u };
         uint64_t m_fic_figs_offset{ 0u };
         uint64_t m_fic_fig_errors_offset{ 0u };
+        uint64_t m_fic_pre_viterbi_error_bits_offset{ 0u };
+        uint64_t m_fic_pre_viterbi_compared_bits_offset{ 0u };
+        std::array<uint64_t, 256u> m_fic_fig_count_offsets{};
+        std::array<uint64_t, 256u> m_fic_fig_change_offsets{};
+        std::array<uint64_t, 256u> m_fic_fig_malformed_offsets{};
         uint64_t m_msc_frames_offset{ 0u };
         uint64_t m_msc_generation_offset{ 0u };
         uint64_t m_msc_decode_attempts_offset{ 0u };
