@@ -28,5 +28,9 @@ local.properties
 build-android/
 adab/app/src/main/jniLibs/**/*.so
 !adab/app/src/main/jniLibs/README.md
-apps/
+# Visual Studio / C++/WinRT generated artifacts
+Generated Files/
+obj/
+*.user
+.vs/
 build-audio-backends/
