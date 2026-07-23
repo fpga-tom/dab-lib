@@ -1,0 +1,91 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="C:\Users\tomas\source\repos\fpga-tom\dab-lib\tests\test_audio_eq.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\tomas\source\repos\fpga-tom\dab-lib\tests\test_audio_output.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\tomas\source\repos\fpga-tom\dab-lib\tests\test_main.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\tomas\source\repos\fpga-tom\dab-lib\tests\test_audio_spectrum.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\tomas\source\repos\fpga-tom\dab-lib\tests\test_block_pool.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\tomas\source\repos\fpga-tom\dab-lib\tests\test_frontend.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\tomas\source\repos\fpga-tom\dab-lib\tests\test_fic.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\tomas\source\repos\fpga-tom\dab-lib\tests\test_hal.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\tomas\source\repos\fpga-tom\dab-lib\tests\test_msc.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\tomas\source\repos\fpga-tom\dab-lib\tests\test_null_detect.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\tomas\source\repos\fpga-tom\dab-lib\tests\test_ofdm.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\tomas\source\repos\fpga-tom\dab-lib\tests\test_os_shared_lib.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\tomas\source\repos\fpga-tom\dab-lib\tests\test_sdrplay_api.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\tomas\source\repos\fpga-tom\dab-lib\tests\test_sdrplay.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\tomas\source\repos\fpga-tom\dab-lib\tests\test_rtlsdr_api.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\tomas\source\repos\fpga-tom\dab-lib\tests\test_rtlsdr.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\tomas\source\repos\fpga-tom\dab-lib\tests\test_sample_history.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\tomas\source\repos\fpga-tom\dab-lib\tests\test_pc_queue.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\tomas\source\repos\fpga-tom\dab-lib\tests\test_simd.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\tomas\source\repos\fpga-tom\dab-lib\tests\test_prs_acquire.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\tomas\source\repos\fpga-tom\dab-lib\tests\test_prs_fft.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\tomas\source\repos\fpga-tom\dab-lib\tests\test_prs_ref.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\tomas\source\repos\fpga-tom\dab-lib\tests\test_prs_score.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\tomas\source\repos\fpga-tom\dab-lib\tests\test_prs_template.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\tomas\source\repos\fpga-tom\dab-lib\tests\test_sync.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\tomas\source\repos\fpga-tom\dab-lib\tests\test_tframe.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\tomas\source\repos\fpga-tom\dab-lib\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{5BDD960B-36A8-3790-8109-BBD8375E5B46}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

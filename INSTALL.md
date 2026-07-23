@@ -17,6 +17,16 @@ After the SDRplay software is installed, connect your SDRplay device.
 3. Select a station from the list.
 4. Press the `Start` button to begin listening.
 
+## Audio Output
+
+Open `Settings` > `Audio Settings...` to select the audio output backend:
+
+- `Automatic` prefers native Windows Audio (WASAPI) and falls back to PortAudio.
+- `Windows Audio (WASAPI)` uses the default Windows multimedia output device.
+- `PortAudio` uses the bundled PortAudio runtime.
+
+Stop and restart playback after changing the audio output backend.
+
 ## Notes
 
 - The station list is saved automatically for your Windows user profile.

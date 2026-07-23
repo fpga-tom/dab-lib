@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 
+#include "dab/audio/audio_output.h"
 #include "dab/core/audio_spectrum.h"
 
 #ifdef __cplusplus
@@ -54,9 +55,16 @@ typedef struct {
     int gain_db;
 } dab_gui_sdr_settings_t;
 
+typedef struct {
+    dab_audio_output_backend_t backend;
+} dab_gui_audio_settings_t;
+
 void dab_gui_sdr_default_settings(dab_gui_sdr_settings_t *settings);
 void dab_gui_sdr_set_settings(const dab_gui_sdr_settings_t *settings);
 void dab_gui_sdr_get_settings(dab_gui_sdr_settings_t *settings);
+void dab_gui_audio_default_settings(dab_gui_audio_settings_t *settings);
+void dab_gui_audio_set_settings(const dab_gui_audio_settings_t *settings);
+void dab_gui_audio_get_settings(dab_gui_audio_settings_t *settings);
 
 int dab_gui_scan_run(const char *output_path, dab_gui_scan_event_callback_t callback, void *user);
 void dab_gui_scan_cancel_current(void);

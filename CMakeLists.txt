@@ -102,7 +102,9 @@ function(dab_set_windows_stack_size target_name stack_bytes)
 endfunction()
 
 set(DAB_AUDIO_PLAYBACK_AVAILABLE OFF)
-set(DAB_AUDIO_LINK_TARGETS "")
+set(DAB_AUDIO_DECODER_AVAILABLE OFF)
+set(DAB_AUDIO_OUTPUT_AVAILABLE OFF)
+set(DAB_AUDIO_DECODER_LINK_TARGETS "")
 set(DAB_AUDIO_RUNTIME_DLLS "")
 set(DAB_WXWIDGETS_FOUND OFF)
 set(DAB_WXWIDGETS_TARGET "")
@@ -118,7 +120,6 @@ if(WIN32 AND DAB_USE_BUNDLED_WINDOWS_DEPS)
             IMPORTED_LOCATION ${DAB_LIBS_DIR}/portaudio_x64.dll
             INTERFACE_INCLUDE_DIRECTORIES ${DAB_LIBS_INCLUDE_DIR}
         )
-        list(APPEND DAB_AUDIO_LINK_TARGETS dab_portaudio)
         list(APPEND DAB_AUDIO_RUNTIME_DLLS ${DAB_LIBS_DIR}/portaudio_x64.dll)
         set(DAB_PORTAUDIO_FOUND ON)
     endif()
@@ -132,13 +133,10 @@ if(WIN32 AND DAB_USE_BUNDLED_WINDOWS_DEPS)
             IMPORTED_LOCATION ${DAB_LIBS_DIR}/libfaad2_dll.dll
             INTERFACE_INCLUDE_DIRECTORIES ${DAB_LIBS_INCLUDE_DIR}
         )
-        list(APPEND DAB_AUDIO_LINK_TARGETS dab_faad2)
+        list(APPEND DAB_AUDIO_DECODER_LINK_TARGETS dab_faad2)
         list(APPEND DAB_AUDIO_RUNTIME_DLLS ${DAB_LIBS_DIR}/libfaad2_dll.dll)
         set(DAB_FAAD2_FOUND ON)
-    endif()
-
-    if(DAB_PORTAUDIO_FOUND AND DAB_FAAD2_FOUND)
-        set(DAB_AUDIO_PLAYBACK_AVAILABLE ON)
+        set(DAB_AUDIO_DECODER_AVAILABLE ON)
     endif()
 
     if(EXISTS ${DAB_LIBS_INCLUDE_DIR}/wx/wx.h)
@@ -209,16 +207,54 @@ elseif(PkgConfig_FOUND)
     pkg_check_modules(FAAD2 IMPORTED_TARGET QUIET faad2)
     pkg_check_modules(PORTAUDIO IMPORTED_TARGET QUIET portaudio-2.0)
 
-    if(PORTAUDIO_FOUND AND (FDK_AAC_FOUND OR FAAD2_FOUND))
-        set(DAB_AUDIO_PLAYBACK_AVAILABLE ON)
-        list(APPEND DAB_AUDIO_LINK_TARGETS PkgConfig::PORTAUDIO)
-        if(FDK_AAC_FOUND)
-            list(APPEND DAB_AUDIO_LINK_TARGETS PkgConfig::FDK_AAC)
-        endif()
-        if(FAAD2_FOUND)
-            list(APPEND DAB_AUDIO_LINK_TARGETS PkgConfig::FAAD2)
-        endif()
+    if(PORTAUDIO_FOUND)
+        set(DAB_PORTAUDIO_FOUND ON)
     endif()
+    if(FDK_AAC_FOUND)
+        list(APPEND DAB_AUDIO_DECODER_LINK_TARGETS PkgConfig::FDK_AAC)
+        set(DAB_AUDIO_DECODER_AVAILABLE ON)
+    endif()
+    if(FAAD2_FOUND)
+        list(APPEND DAB_AUDIO_DECODER_LINK_TARGETS PkgConfig::FAAD2)
+        set(DAB_AUDIO_DECODER_AVAILABLE ON)
+    endif()
+endif()
+
+set(DAB_AUDIO_OUTPUT_SOURCES
+    src/audio/audio_output.c
+)
+if(DAB_PORTAUDIO_FOUND)
+    list(APPEND DAB_AUDIO_OUTPUT_SOURCES src/audio/audio_output_portaudio.c)
+    set(DAB_AUDIO_OUTPUT_AVAILABLE ON)
+endif()
+if(WIN32)
+    list(APPEND DAB_AUDIO_OUTPUT_SOURCES src/audio/audio_output_wasapi.c)
+    set(DAB_AUDIO_OUTPUT_AVAILABLE ON)
+endif()
+
+add_library(dab_audio_output STATIC ${DAB_AUDIO_OUTPUT_SOURCES})
+target_include_directories(dab_audio_output
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/audio
+)
+if(DAB_PORTAUDIO_FOUND)
+    target_compile_definitions(dab_audio_output PRIVATE DAB_AUDIO_OUTPUT_HAVE_PORTAUDIO=1)
+    if(WIN32 AND DAB_USE_BUNDLED_WINDOWS_DEPS)
+        target_link_libraries(dab_audio_output PRIVATE dab_portaudio)
+    else()
+        target_link_libraries(dab_audio_output PRIVATE PkgConfig::PORTAUDIO)
+    endif()
+endif()
+if(WIN32)
+    target_compile_definitions(dab_audio_output PRIVATE DAB_AUDIO_OUTPUT_HAVE_WASAPI=1)
+    target_link_libraries(dab_audio_output PRIVATE ole32)
+endif()
+
+set(DAB_AUDIO_LINK_TARGETS dab_audio_output ${DAB_AUDIO_DECODER_LINK_TARGETS})
+if(DAB_AUDIO_DECODER_AVAILABLE AND DAB_AUDIO_OUTPUT_AVAILABLE)
+    set(DAB_AUDIO_PLAYBACK_AVAILABLE ON)
 endif()
 
 add_library(dab STATIC
@@ -554,6 +590,7 @@ if(DAB_BUILD_TESTS)
 
     add_executable(dab_tests
         tests/test_audio_eq.c
+        tests/test_audio_output.c
         tests/test_main.c
         tests/test_audio_spectrum.c
         tests/test_block_pool.c
@@ -581,6 +618,7 @@ if(DAB_BUILD_TESTS)
     )
 
     target_link_libraries(dab_tests PRIVATE dab)
+    target_link_libraries(dab_tests PRIVATE dab_audio_output)
     target_include_directories(dab_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/hal/sdrplay
         ${CMAKE_CURRENT_SOURCE_DIR}/src/hal/rtlsdr

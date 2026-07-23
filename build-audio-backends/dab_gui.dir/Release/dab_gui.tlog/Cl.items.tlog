@@ -1,0 +1,6 @@
+C:\Users\tomas\source\repos\fpga-tom\dab-lib\src\gui\main.cpp;C:\Users\tomas\source\repos\fpga-tom\dab-lib\build-audio-backends\dab_gui.dir\Release\main.obj
+C:\Users\tomas\source\repos\fpga-tom\dab-lib\src\gui\main_frame.cpp;C:\Users\tomas\source\repos\fpga-tom\dab-lib\build-audio-backends\dab_gui.dir\Release\main_frame.obj
+C:\Users\tomas\source\repos\fpga-tom\dab-lib\src\gui\dab_gui_settings.c;C:\Users\tomas\source\repos\fpga-tom\dab-lib\build-audio-backends\dab_gui.dir\Release\dab_gui_settings.obj
+C:\Users\tomas\source\repos\fpga-tom\dab-lib\src\gui\embedded_audio_playback_backend.c;C:\Users\tomas\source\repos\fpga-tom\dab-lib\build-audio-backends\dab_gui.dir\Release\embedded_audio_playback_backend.obj
+C:\Users\tomas\source\repos\fpga-tom\dab-lib\src\gui\embedded_audio_scan_backend.c;C:\Users\tomas\source\repos\fpga-tom\dab-lib\build-audio-backends\dab_gui.dir\Release\embedded_audio_scan_backend.obj
+C:\Users\tomas\source\repos\fpga-tom\dab-lib\tools\audio_playback.c;C:\Users\tomas\source\repos\fpga-tom\dab-lib\build-audio-backends\dab_gui.dir\Release\audio_playback.obj

@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "dab/config.h"
+#include "dab/audio/audio_output.h"
 #include "dab/core/audio_eq.h"
 #include "dab/core/audio_spectrum.h"
 #include "dab/core/msc.h"
@@ -18,7 +19,6 @@
 #include "dab/os/os_cond.h"
 #include "dab/os/os_mutex.h"
 #include "dab/os/os_thread.h"
-#include <portaudio.h>
 
 enum {
     DAB_AUDIO_DECODER_NONE = 0,
@@ -34,7 +34,8 @@ typedef struct {
 #if defined(DAB_HAVE_FAAD2)
     NeAACDecHandle faad_decoder;
 #endif
-    PaStream *stream;
+    dab_audio_output_t *output;
+    dab_audio_output_backend_t output_backend;
     uint8_t decoder_backend;
     uint8_t configured;
     uint8_t debug_enabled;
@@ -56,6 +57,8 @@ typedef struct {
     uint8_t ring_ready;
     uint8_t thread_running;
     uint8_t thread_stop;
+    uint8_t output_ready;
+    uint8_t output_failed;
     uint8_t prebuffer_done;
     uint64_t last_generation;
     uint32_t missing_superframe_reports;

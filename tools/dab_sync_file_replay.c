@@ -798,6 +798,7 @@ int main(int argc, char **argv) {
     int rc = 1;
 #if defined(DAB_HAVE_AUDIO_PLAYBACK)
     dab_audio_playback_t audio = {0};
+    audio.output_backend = dab_audio_output_backend_from_string(getenv("DAB_AUDIO_BACKEND"));
     audio.debug_enabled = (uint8_t)(audio_debug_enabled != 0);
 #endif
     dab_msc_deinterleaver_t selected_debug_deinterleaver = {0};

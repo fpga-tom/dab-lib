@@ -1,0 +1,12 @@
+set(runtime_dlls
+    "C:/Users/tomas/source/repos/fpga-tom/dab-lib/libs/portaudio_x64.dll"
+    "C:/Users/tomas/source/repos/fpga-tom/dab-lib/libs/libfaad2_dll.dll"
+    "C:/Users/tomas/source/repos/fpga-tom/dab-lib/libs/wxbase32ud_vc14x_x64.dll"
+    ""
+    "C:/Users/tomas/source/repos/fpga-tom/dab-lib/libs/wxmsw32ud_adv_vc14x_x64.dll"
+    ""
+    "C:/Users/tomas/source/repos/fpga-tom/dab-lib/libs/wxmsw32ud_core_vc14x_x64.dll"
+    ""
+    "C:/Users/tomas/source/repos/fpga-tom/dab-lib/libs/wxmsw32ud_gl_vc14x_x64.dll"
+    ""
+)

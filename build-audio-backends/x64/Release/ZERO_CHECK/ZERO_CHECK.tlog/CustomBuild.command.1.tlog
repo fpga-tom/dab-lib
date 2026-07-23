@@ -1,0 +1,10 @@
+^C:\USERS\TOMAS\SOURCE\REPOS\FPGA-TOM\DAB-LIB\BUILD-AUDIO-BACKENDS\CMAKEFILES\D8E90F50072CD7C5FBC657F097DA9267\GENERATE.STAMP.RULE
+setlocal
+"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -SC:/Users/tomas/source/repos/fpga-tom/dab-lib -BC:/Users/tomas/source/repos/fpga-tom/dab-lib/build-audio-backends --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file C:/Users/tomas/source/repos/fpga-tom/dab-lib/build-audio-backends/dab_lib.sln
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

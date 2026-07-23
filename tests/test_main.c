@@ -59,6 +59,8 @@ void test_simd_convert_and_dot(void);
 void test_simd_complex_convert_vector_and_tail(void);
 void test_audio_eq_zero_input_stays_zero(void);
 void test_audio_spectrum_detects_tone_energy(void);
+void test_audio_output_backend_metadata(void);
+void test_audio_output_creation_is_backend_independent(void);
 void test_sync_acquires_and_tracks(void);
 void test_sync_falls_back_to_acquire_after_bad_tracking(void);
 void test_prs_candidate_from_null_uses_mode_i_boundaries(void);
@@ -141,6 +143,8 @@ int main(void) {
     test_simd_complex_convert_vector_and_tail();
     test_audio_eq_zero_input_stays_zero();
     test_audio_spectrum_detects_tone_energy();
+    test_audio_output_backend_metadata();
+    test_audio_output_creation_is_backend_independent();
     test_sync_acquires_and_tracks();
     test_sync_falls_back_to_acquire_after_bad_tracking();
     test_prs_candidate_from_null_uses_mode_i_boundaries();

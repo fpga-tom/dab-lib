@@ -58,6 +58,7 @@ constexpr int kScanTimerId = wxID_HIGHEST + 2;
 constexpr int kPlaybackStatusTimerId = wxID_HIGHEST + 3;
 constexpr int kSdrSettingsMenuId = wxID_HIGHEST + 4;
 constexpr int kSpectrumSettingsMenuId = wxID_HIGHEST + 5;
+constexpr int kAudioSettingsMenuId = wxID_HIGHEST + 6;
 
 enum class SpectrumDisplayMode {
     RtaBars = 0,
@@ -855,6 +856,75 @@ private:
     wxSpinCtrl *gainSpin_ = nullptr;
 };
 
+class AudioSettingsDialog : public wxDialog {
+public:
+    AudioSettingsDialog(wxWindow *parent, const dab_gui_audio_settings_t &settings)
+        : wxDialog(parent, wxID_ANY, "Audio Settings", wxDefaultPosition, wxDefaultSize,
+                   wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER) {
+        auto *outer = new wxBoxSizer(wxVERTICAL);
+        wxString backendChoices[] = {
+            "Automatic (recommended)",
+            "Windows Audio (WASAPI)",
+            "PortAudio"
+        };
+
+        backendChoice_ = new wxRadioBox(this,
+                                        wxID_ANY,
+                                        "Audio backend",
+                                        wxDefaultPosition,
+                                        wxDefaultSize,
+                                        3,
+                                        backendChoices,
+                                        1,
+                                        wxRA_SPECIFY_COLS);
+        if (settings.backend == DAB_AUDIO_OUTPUT_WASAPI) {
+            backendChoice_->SetSelection(1);
+        } else if (settings.backend == DAB_AUDIO_OUTPUT_PORTAUDIO) {
+            backendChoice_->SetSelection(2);
+        } else {
+            backendChoice_->SetSelection(0);
+        }
+        backendChoice_->Enable(1, dab_audio_output_backend_available(DAB_AUDIO_OUTPUT_WASAPI) != 0);
+        backendChoice_->Enable(2, dab_audio_output_backend_available(DAB_AUDIO_OUTPUT_PORTAUDIO) != 0);
+
+        auto *description = new wxStaticText(
+            this,
+            wxID_ANY,
+            "Automatic prefers native Windows Audio and falls back to PortAudio.");
+        description->SetForegroundColour(wxColour(95, 104, 116));
+        description->Wrap(390);
+
+        auto *buttons = new wxStdDialogButtonSizer();
+        buttons->AddButton(new wxButton(this, wxID_OK));
+        buttons->AddButton(new wxButton(this, wxID_CANCEL));
+        buttons->Realize();
+
+        outer->Add(backendChoice_, 0, wxEXPAND | wxALL, 14);
+        outer->Add(description, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 14);
+        outer->Add(buttons, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 14);
+
+        SetSizerAndFit(outer);
+        SetMinSize(wxSize(430, -1));
+        CentreOnParent();
+    }
+
+    dab_gui_audio_settings_t Settings() const {
+        dab_gui_audio_settings_t settings;
+
+        if (backendChoice_->GetSelection() == 1) {
+            settings.backend = DAB_AUDIO_OUTPUT_WASAPI;
+        } else if (backendChoice_->GetSelection() == 2) {
+            settings.backend = DAB_AUDIO_OUTPUT_PORTAUDIO;
+        } else {
+            settings.backend = DAB_AUDIO_OUTPUT_AUTO;
+        }
+        return settings;
+    }
+
+private:
+    wxRadioBox *backendChoice_ = nullptr;
+};
+
 class SpectrumSettingsDialog : public wxDialog {
 public:
     SpectrumSettingsDialog(wxWindow *parent, SpectrumDisplayMode mode)
@@ -1135,17 +1205,22 @@ MainFrame::MainFrame()
               wxDefaultPosition,
               wxSize(1100, 760)) {
     dab_gui_sdr_default_settings(&sdrSettings_);
+    dab_gui_audio_default_settings(&audioSettings_);
     LoadSdrSettings();
+    LoadAudioSettings();
     LoadSpectrumSettings();
     ApplySdrSettings();
+    ApplyAudioSettings();
 
     auto *menuBar = new wxMenuBar();
     auto *settingsMenu = new wxMenu();
     settingsMenu->Append(kSdrSettingsMenuId, "SDR Settings...");
+    settingsMenu->Append(kAudioSettingsMenuId, "Audio Settings...");
     settingsMenu->Append(kSpectrumSettingsMenuId, "Spectrum Settings...");
     menuBar->Append(settingsMenu, "Settings");
     SetMenuBar(menuBar);
     Bind(wxEVT_MENU, &MainFrame::OnSdrSettings, this, kSdrSettingsMenuId);
+    Bind(wxEVT_MENU, &MainFrame::OnAudioSettings, this, kAudioSettingsMenuId);
     Bind(wxEVT_MENU, &MainFrame::OnSpectrumSettings, this, kSpectrumSettingsMenuId);
 
     SetMinClientSize(wxSize(900, 620));
@@ -1209,6 +1284,26 @@ void MainFrame::SaveSdrSettings() {
     config.Flush();
 }
 
+void MainFrame::LoadAudioSettings() {
+    wxConfig config("dab-lib");
+    wxString backend;
+
+    config.Read("/audio/backend", &backend, "auto");
+    audioSettings_.backend = dab_audio_output_backend_from_string(backend.utf8_string().c_str());
+    if (audioSettings_.backend != DAB_AUDIO_OUTPUT_AUTO &&
+        dab_audio_output_backend_available(audioSettings_.backend) == 0) {
+        audioSettings_.backend = DAB_AUDIO_OUTPUT_AUTO;
+    }
+}
+
+void MainFrame::SaveAudioSettings() {
+    wxConfig config("dab-lib");
+
+    config.Write("/audio/backend",
+                 wxString::FromUTF8(dab_audio_output_backend_key(audioSettings_.backend)));
+    config.Flush();
+}
+
 void MainFrame::LoadSpectrumSettings() {
     wxConfig config("dab-lib");
     wxString displayMode;
@@ -1243,12 +1338,20 @@ void MainFrame::ApplySdrSettings() {
     dab_gui_sdr_set_settings(&sdrSettings_);
 }
 
+void MainFrame::ApplyAudioSettings() {
+    dab_gui_audio_set_settings(&audioSettings_);
+}
+
 wxString MainFrame::SdrSettingsSummary() const {
     const wxString backend = sdrSettings_.backend == DAB_GUI_SDR_BACKEND_RTLSDR ? "RTL-SDR" : "SDRplay";
     if (sdrSettings_.agc_enabled != 0) {
         return wxString::Format("%s, AGC on", backend);
     }
     return wxString::Format("%s, AGC off, gain %d dB", backend, sdrSettings_.gain_db);
+}
+
+wxString MainFrame::AudioSettingsSummary() const {
+    return wxString::FromUTF8(dab_audio_output_backend_name(audioSettings_.backend));
 }
 
 wxWindow *MainFrame::CreateBottomPanel(wxWindow *parent) {
@@ -1423,6 +1526,29 @@ void MainFrame::OnSdrSettings(wxCommandEvent &) {
         }
     } else if (controlStatusLabel_ != nullptr) {
         controlStatusLabel_->SetLabel(wxString::Format("SDR settings: %s", SdrSettingsSummary()));
+    }
+    UpdatePlaybackControls();
+}
+
+void MainFrame::OnAudioSettings(wxCommandEvent &) {
+    AudioSettingsDialog dialog(this, audioSettings_);
+
+    if (dialog.ShowModal() != wxID_OK) {
+        return;
+    }
+
+    const bool wasPlaying = dab_gui_playback_is_running() != 0;
+    audioSettings_ = dialog.Settings();
+    ApplyAudioSettings();
+    SaveAudioSettings();
+
+    if (wasPlaying) {
+        StopPlayback();
+        if (controlStatusLabel_ != nullptr) {
+            controlStatusLabel_->SetLabel("Audio settings saved. Press Start to resume playback.");
+        }
+    } else if (controlStatusLabel_ != nullptr) {
+        controlStatusLabel_->SetLabel(wxString::Format("Audio backend: %s", AudioSettingsSummary()));
     }
     UpdatePlaybackControls();
 }

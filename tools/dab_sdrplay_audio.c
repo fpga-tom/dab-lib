@@ -996,6 +996,7 @@ int main(int argc, char **argv) {
     int rc = 1;
 #if defined(DAB_HAVE_AUDIO_PLAYBACK)
     dab_audio_playback_t audio = {0};
+    audio.output_backend = dab_audio_output_backend_from_string(getenv("DAB_AUDIO_BACKEND"));
     audio.debug_enabled = (uint8_t)(audio_debug_enabled != 0);
 #else
     void *audio = 0;
@@ -1119,7 +1120,7 @@ int main(int argc, char **argv) {
 
 #if !defined(DAB_HAVE_AUDIO_PLAYBACK) && !defined(DAB_RECEIVE_NO_MAIN)
     fprintf(stderr,
-            "dab_sdrplay_audio requires PortAudio and either FDK-AAC or FAAD2 at build time\n");
+            "dab_sdrplay_audio requires an audio output backend and either FDK-AAC or FAAD2 at build time\n");
     return 2;
 #endif
 
