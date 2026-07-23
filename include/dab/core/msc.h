@@ -99,6 +99,8 @@ typedef struct {
     dab_msc_decoder_config_t config;
     uint32_t reset_count;
     uint8_t last_reconfig_reason;
+    uint64_t ber_error_bits;
+    uint64_t ber_compared_bits;
     dab_msc_deinterleaver_t *deinterleaver;
     dab_msc_decoder_workspace_t *workspace;
     dab_msc_dabplus_stream_runtime_t *dabplus;
@@ -242,9 +244,14 @@ typedef struct {
     uint32_t decode_failures;
     uint32_t rs_corrected_last_superframe;
     uint32_t rs_corrected_total;
+    uint32_t au_crc_errors_last_superframe;
+    uint32_t au_crc_errors_total;
+    uint32_t au_crc_checks_total;
     uint8_t last_decode_ok;
     uint32_t runtime_reset_count;
     uint8_t last_reconfig_reason;
+    uint64_t ber_error_bits;
+    uint64_t ber_compared_bits;
 } dab_msc_dabplus_debug_t;
 
 typedef struct {
@@ -267,6 +274,8 @@ void dab_msc_reset(dab_msc_state_t *state);
 void dab_msc_set_service_filter(dab_msc_state_t *state, uint32_t sid);
 void dab_msc_clear_service_filter(dab_msc_state_t *state);
 int dab_msc_build_layout(dab_msc_layout_t *layout, const dab_fic_database_t *db);
+int dab_msc_resolve_subchannel(const dab_fic_subchannel_t *in,
+                               dab_msc_subchannel_t *out);
 int dab_msc_build_frame_view(dab_msc_frame_view_t *frame_view,
                              const dab_msc_layout_t *layout,
                              uint32_t msc_softbit_count);

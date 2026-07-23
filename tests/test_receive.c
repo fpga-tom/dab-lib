@@ -80,6 +80,8 @@ void test_receive_snapshot_maps_receiver_measurements_and_counters(void) {
     fic.fic_blocks_decoded_last_frame = 3u;
     fic.valid_fibs_last_frame = 9u;
     fic.total_valid_fibs = 123u;
+    fic.repo.total_figs = 456u;
+    fic.repo.total_fig_parse_errors = 3u;
     msc.frames_seen = 20u;
 
     msc_audio.valid = 1u;
@@ -90,6 +92,11 @@ void test_receive_snapshot_maps_receiver_measurements_and_counters(void) {
     msc_audio.decode_failures = 1u;
     msc_audio.rs_corrected_last_superframe = 2u;
     msc_audio.rs_corrected_total = 17u;
+    msc_audio.au_crc_errors_last_superframe = 1u;
+    msc_audio.au_crc_errors_total = 4u;
+    msc_audio.au_crc_checks_total = 93u;
+    msc_audio.ber_error_bits = 21u;
+    msc_audio.ber_compared_bits = 100000u;
     msc_audio.last_decode_ok = 1u;
     msc_audio.runtime_reset_count = 3u;
     msc_audio.last_reconfig_reason = 0x42u;
@@ -144,7 +151,13 @@ void test_receive_snapshot_maps_receiver_measurements_and_counters(void) {
     TEST_ASSERT(snapshot.fic_blocks_decoded_last_frame == 3u);
     TEST_ASSERT(snapshot.fic_valid_fibs_last_frame == 9u);
     TEST_ASSERT(snapshot.fic_total_valid_fibs == 123u);
+    TEST_ASSERT(snapshot.fic_total_figs == 456u);
+    TEST_ASSERT(snapshot.fic_total_fig_parse_errors == 3u);
     TEST_ASSERT(snapshot.msc_frames_seen == 20u);
+    TEST_ASSERT(snapshot.msc_ber_valid == 1);
+    TEST_ASSERT(fabsf(snapshot.msc_ber - 0.00021f) < 0.0000001f);
+    TEST_ASSERT(snapshot.msc_ber_error_bits == 21u);
+    TEST_ASSERT(snapshot.msc_ber_compared_bits == 100000u);
     TEST_ASSERT(snapshot.msc_audio_valid == 1);
     TEST_ASSERT(snapshot.msc_synchronized == 1);
     TEST_ASSERT(snapshot.msc_superframe_valid == 1);
@@ -153,6 +166,9 @@ void test_receive_snapshot_maps_receiver_measurements_and_counters(void) {
     TEST_ASSERT(snapshot.msc_decode_failures == 1u);
     TEST_ASSERT(snapshot.msc_rs_corrected_last_superframe == 2u);
     TEST_ASSERT(snapshot.msc_rs_corrected_total == 17u);
+    TEST_ASSERT(snapshot.msc_au_crc_errors_last_superframe == 1u);
+    TEST_ASSERT(snapshot.msc_au_crc_errors_total == 4u);
+    TEST_ASSERT(snapshot.msc_au_crc_checks_total == 93u);
     TEST_ASSERT(snapshot.msc_last_decode_ok == 1);
     TEST_ASSERT(snapshot.msc_runtime_reset_count == 3u);
     TEST_ASSERT(snapshot.msc_last_reconfig_reason == 0x42u);
@@ -214,7 +230,7 @@ void test_receive_catalog_copies_fic_ensemble_services_and_components(void) {
     database.subchannels[4].valid = 1u;
     database.subchannels[4].subchid = 4u;
     database.subchannels[4].start_cu = 120u;
-    database.subchannels[4].size_cu = 84u;
+    database.subchannels[4].size_cu = 90u;
     database.subchannels[4].protection_kind = DAB_FIC_PROTECTION_EEP;
     database.subchannels[4].protection_option = 1u;
     database.subchannels[4].protection_level = 3u;
@@ -275,7 +291,8 @@ void test_receive_catalog_copies_fic_ensemble_services_and_components(void) {
     TEST_ASSERT(catalog.services[0].components[0].subchannel_valid == 1u);
     TEST_ASSERT(catalog.services[0].components[0].subchannel_id == 4u);
     TEST_ASSERT(catalog.services[0].components[0].subchannel_start_cu == 120u);
-    TEST_ASSERT(catalog.services[0].components[0].subchannel_size_cu == 84u);
+    TEST_ASSERT(catalog.services[0].components[0].subchannel_size_cu == 90u);
+    TEST_ASSERT(catalog.services[0].components[0].subchannel_bitrate_kbps == 192u);
     TEST_ASSERT(catalog.services[0].components[0].protection_kind == DAB_FIC_PROTECTION_EEP);
     TEST_ASSERT(catalog.services[0].components[0].protection_option == 1u);
     TEST_ASSERT(catalog.services[0].components[0].protection_level == 3u);

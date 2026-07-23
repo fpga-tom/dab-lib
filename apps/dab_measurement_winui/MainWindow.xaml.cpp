@@ -371,6 +371,58 @@ namespace winrt::DabMeasurementWinUI::implementation
         ShowWorkspace(WorkspaceKind::dab_measurements);
     }
 
+    void MainWindow::DabOverviewKpi_Click(IInspectable const& sender, RoutedEventArgs const&)
+    {
+        auto const button = sender.try_as<Button>();
+        if (!button || !button.Tag())
+        {
+            return;
+        }
+
+        hstring const metric = unbox_value<hstring>(button.Tag());
+        if (metric == L"fic:crc")
+        {
+            DabTabView().SelectedItem(DabFicTab());
+            DabFicFocusText().Text(L"Selected metric: FIC CRC");
+        }
+        else if (metric == L"fic:fig")
+        {
+            DabTabView().SelectedItem(DabFicTab());
+            DabFicFocusText().Text(L"Selected metric: FIG parsing");
+        }
+        else if (metric == L"fic:reconfiguration")
+        {
+            DabTabView().SelectedItem(DabFicTab());
+            DabFicFocusText().Text(L"Selected metric: FIC database reconfiguration");
+        }
+        else if (metric == L"msc:ber")
+        {
+            DabTabView().SelectedItem(DabMscTab());
+            DabMscFocusText().Text(L"Selected metric: MSC post-Viterbi BER");
+        }
+        else if (metric == L"msc:service")
+        {
+            DabTabView().SelectedItem(DabMscTab());
+            DabMscFocusText().Text(L"Selected metric: selected service and protection");
+        }
+        else
+        {
+            DabTabView().SelectedItem(DabPlusTab());
+            if (metric == L"dab:rs")
+            {
+                DabPlusFocusText().Text(L"Selected metric: Reed–Solomon corrections");
+            }
+            else if (metric == L"dab:availability")
+            {
+                DabPlusFocusText().Text(L"Selected metric: audio superframe availability");
+            }
+            else
+            {
+                DabPlusFocusText().Text(L"Selected metric: audio-unit CRC");
+            }
+        }
+    }
+
     void MainWindow::RootLayout_SizeChanged(IInspectable const&, SizeChangedEventArgs const& args)
     {
         ApplyWorkspaceWidth(static_cast<double>(args.NewSize().Width));
@@ -1237,6 +1289,7 @@ namespace winrt::DabMeasurementWinUI::implementation
         if (clear_catalog)
         {
             ClearCatalogView();
+            ResetDabOverviewHistory();
             m_rf_history_write = 0u;
             m_rf_history_count = 0u;
             m_latest_mer_valid = false;
@@ -1381,6 +1434,20 @@ namespace winrt::DabMeasurementWinUI::implementation
             m_metrics_stale = true;
             DabModeBadgeText().Text(L"STALE");
             DabSyncBadgeText().Text(L"RECOVERING");
+            {
+                Brush const warning = Application::Current().Resources().Lookup(
+                    box_value(hstring{ L"WarningBrush" })).as<Brush>();
+                DabPipelineRfIndicator().Fill(warning);
+                DabPipelineFicIndicator().Fill(warning);
+                DabPipelineMscIndicator().Fill(warning);
+                DabPipelineDabIndicator().Fill(warning);
+                DabPipelineAudioIndicator().Fill(warning);
+                DabPipelineRfStateText().Text(L"STALE");
+                DabPipelineFicStateText().Text(L"STALE");
+                DabPipelineMscStateText().Text(L"STALE");
+                DabPipelineDabStateText().Text(L"STALE");
+                DabPipelineAudioStateText().Text(L"RESTARTING");
+            }
             DabOverviewStatusValueText().Text(L"STALE");
             DabOverviewStatusDetailText().Text(status_text(status.message));
             if (m_rf_null_controls_ready)
@@ -1411,6 +1478,7 @@ namespace winrt::DabMeasurementWinUI::implementation
         case ReceiverState::stopping:
             DabModeBadgeText().Text(L"STOPPING");
             DabSyncBadgeText().Text(L"STOPPING");
+            DabPipelineAudioStateText().Text(L"STOPPING");
             DabOverviewStatusValueText().Text(L"STOPPING");
             DabOverviewStatusDetailText().Text(status_text(status.message));
             if (m_rf_null_controls_ready)
@@ -1429,6 +1497,20 @@ namespace winrt::DabMeasurementWinUI::implementation
             m_metrics_stale = false;
             DabModeBadgeText().Text(L"IDLE");
             DabSyncBadgeText().Text(L"NOT SYNCED");
+            {
+                Brush const inactive = Application::Current().Resources().Lookup(
+                    box_value(hstring{ L"MutedTextBrush" })).as<Brush>();
+                DabPipelineRfIndicator().Fill(inactive);
+                DabPipelineFicIndicator().Fill(inactive);
+                DabPipelineMscIndicator().Fill(inactive);
+                DabPipelineDabIndicator().Fill(inactive);
+                DabPipelineAudioIndicator().Fill(inactive);
+                DabPipelineRfStateText().Text(L"IDLE");
+                DabPipelineFicStateText().Text(L"RETAINED");
+                DabPipelineMscStateText().Text(L"RETAINED");
+                DabPipelineDabStateText().Text(L"RETAINED");
+                DabPipelineAudioStateText().Text(L"STOPPED");
+            }
             DabOverviewStatusValueText().Text(L"IDLE");
             DabOverviewStatusDetailText().Text(L"Receiver stopped; last measurements retained");
             if (m_rf_null_controls_ready)
@@ -1457,6 +1539,20 @@ namespace winrt::DabMeasurementWinUI::implementation
             m_metrics_stale = false;
             DabModeBadgeText().Text(L"ERROR");
             DabSyncBadgeText().Text(L"NOT SYNCED");
+            {
+                Brush const warning = Application::Current().Resources().Lookup(
+                    box_value(hstring{ L"WarningBrush" })).as<Brush>();
+                DabPipelineRfIndicator().Fill(warning);
+                DabPipelineFicIndicator().Fill(warning);
+                DabPipelineMscIndicator().Fill(warning);
+                DabPipelineDabIndicator().Fill(warning);
+                DabPipelineAudioIndicator().Fill(warning);
+                DabPipelineRfStateText().Text(L"ERROR");
+                DabPipelineFicStateText().Text(L"STALE");
+                DabPipelineMscStateText().Text(L"STALE");
+                DabPipelineDabStateText().Text(L"STALE");
+                DabPipelineAudioStateText().Text(L"STOPPED");
+            }
             DabOverviewStatusValueText().Text(L"ERROR");
             DabOverviewStatusDetailText().Text(status_text(status.message));
             if (m_rf_null_controls_ready)
@@ -1724,9 +1820,9 @@ namespace winrt::DabMeasurementWinUI::implementation
                     else
                     {
                         swprintf_s(protection_text,
-                                   L"EEP · option %u · level %u · %u CU",
-                                   component->protection_option,
-                                   component->protection_level,
+                                   L"EEP %u-%s · %u CU",
+                                   component->protection_level + 1u,
+                                   component->protection_option == 0u ? L"A" : L"B",
                                    component->subchannel_size_cu);
                     }
                     protection = protection_text;
@@ -1759,6 +1855,19 @@ namespace winrt::DabMeasurementWinUI::implementation
         DabMscComponentText().Text(component_name);
         DabMscSubchannelText().Text(subchannel);
         DabMscProtectionText().Text(protection);
+        if (component != nullptr && component->subchannel_bitrate_kbps != 0u)
+        {
+            DabOverviewServiceValueText().Text(
+                to_hstring(component->subchannel_bitrate_kbps) + L" kbit/s");
+            DabOverviewServiceDetailText().Text(protection + L" · " + service_name);
+        }
+        else
+        {
+            DabOverviewServiceValueText().Text(L"—");
+            DabOverviewServiceDetailText().Text(service == nullptr
+                ? hstring{ L"No service selected" }
+                : hstring{ L"Bitrate not resolved for this component" });
+        }
 
         DabFicEnsembleText().Text(ensemble);
         if (m_have_catalog)
@@ -1797,9 +1906,21 @@ namespace winrt::DabMeasurementWinUI::implementation
                          0.0,
                          1.0)
             : 0.0;
+        uint64_t const total_fibs =
+            static_cast<uint64_t>(snapshot.fic_frames_seen) * fibs_per_frame;
+        uint64_t const fic_crc_errors = total_fibs >= snapshot.fic_total_valid_fibs
+            ? total_fibs - snapshot.fic_total_valid_fibs
+            : 0u;
         hstring const fic_quality_text = have_fic
             ? format_float(static_cast<float>(fic_quality * 100.0), L"%")
             : hstring{ L"—" };
+        DabOverviewFicCrcValueText().Text(have_fic
+            ? format_float(static_cast<float>(fic_quality * 100.0), L"% valid", 2)
+            : hstring{ L"—" });
+        DabOverviewFicCrcDetailText().Text(have_fic
+            ? to_hstring(fic_crc_errors) +
+                (fic_crc_errors == 1u ? L" CRC error" : L" CRC errors")
+            : hstring{ L"Awaiting decoded FIBs" });
         DabOverviewFicValueText().Text(fic_quality_text);
         DabOverviewFicDetailText().Text(have_fic
             ? to_hstring(snapshot.fic_valid_fibs_last_frame) + L" / 12 valid FIBs in latest frame"
@@ -1823,8 +1944,21 @@ namespace winrt::DabMeasurementWinUI::implementation
         DabMscAudioText().Text(audio_state);
         DabMscGenerationText().Text(to_hstring(snapshot.msc_superframe_generation));
 
+        hstring const ber_value = snapshot.msc_ber_valid != 0
+            ? format_float(snapshot.msc_ber, L"", 6)
+            : hstring{ L"—" };
+        hstring const ber_detail = snapshot.msc_ber_valid != 0
+            ? (snapshot.msc_ber < 1.0e-3f ? hstring{ L"Stable · " } : hstring{ L"Degraded · " }) +
+                to_hstring(snapshot.msc_ber_error_bits) + L" errors / " +
+                to_hstring(snapshot.msc_ber_compared_bits) + L" compared bits"
+            : hstring{ L"Awaiting decoded and re-encoded MSC bits" };
+        DabOverviewMscBerValueText().Text(ber_value);
+        DabOverviewMscBerDetailText().Text(ber_detail);
+        DabMscBerPageValueText().Text(ber_value);
+        DabMscBerPageDetailText().Text(ber_detail);
+
         bool const have_attempt = snapshot.msc_decode_attempts != 0u;
-        uint32_t const successful_decodes =
+        uint64_t const successful_decodes =
             snapshot.msc_decode_attempts >= snapshot.msc_decode_failures
                 ? snapshot.msc_decode_attempts - snapshot.msc_decode_failures
                 : 0u;
@@ -1844,6 +1978,110 @@ namespace winrt::DabMeasurementWinUI::implementation
                 ? hstring{ L"Latest decode successful" }
                 : hstring{ L"Latest decode failed" });
 
+        if (snapshot.msc_superframe_generation != 0u)
+        {
+            double const rs_average =
+                static_cast<double>(snapshot.msc_rs_corrected_total) /
+                static_cast<double>(snapshot.msc_superframe_generation);
+            DabOverviewRsValueText().Text(
+                format_float(static_cast<float>(rs_average), L" bytes/frame", 1));
+            m_dab_rs_peak = (std::max)(m_dab_rs_peak,
+                                       snapshot.msc_rs_corrected_last_superframe);
+            DabOverviewRsDetailText().Text(
+                L"Peak: " + to_hstring(m_dab_rs_peak) +
+                L" · latest: " + to_hstring(snapshot.msc_rs_corrected_last_superframe));
+        }
+        else
+        {
+            DabOverviewRsValueText().Text(L"—");
+            DabOverviewRsDetailText().Text(L"No valid superframes");
+        }
+
+        uint64_t const unavailable_superframes = snapshot.msc_decode_failures;
+        DabOverviewAudioAvailabilityValueText().Text(have_attempt
+            ? format_float(100.0f * static_cast<float>(successful_decodes) /
+                           static_cast<float>(snapshot.msc_decode_attempts),
+                           L"%",
+                           2)
+            : hstring{ L"—" });
+        DabOverviewAudioAvailabilityDetailText().Text(have_attempt
+            ? to_hstring(unavailable_superframes * 120u) + L" ms unavailable"
+            : hstring{ L"Awaiting DAB+ superframes" });
+
+        if (m_dab_previous_fig_timestamp_ns != 0u &&
+            snapshot.timestamp_ns > m_dab_previous_fig_timestamp_ns &&
+            snapshot.fic_total_figs >= m_dab_previous_fig_count)
+        {
+            double const elapsed_seconds =
+                static_cast<double>(snapshot.timestamp_ns - m_dab_previous_fig_timestamp_ns) /
+                1000000000.0;
+            float const instantaneous_rate = static_cast<float>(
+                static_cast<double>(snapshot.fic_total_figs - m_dab_previous_fig_count) /
+                elapsed_seconds);
+            m_dab_fig_rate = m_dab_fig_rate == 0.0f
+                ? instantaneous_rate
+                : 0.75f * m_dab_fig_rate + 0.25f * instantaneous_rate;
+        }
+        m_dab_previous_fig_count = snapshot.fic_total_figs;
+        m_dab_previous_fig_timestamp_ns = snapshot.timestamp_ns;
+        DabOverviewFigValueText().Text(
+            to_hstring(snapshot.fic_total_fig_parse_errors) +
+            (snapshot.fic_total_fig_parse_errors == 1u ? L" error" : L" errors"));
+        DabOverviewFigDetailText().Text(snapshot.fic_total_figs != 0u
+            ? format_float(m_dab_fig_rate, L" FIG/s", 1) + L" · " +
+                to_hstring(snapshot.fic_total_figs) + L" parsed"
+            : hstring{ L"Awaiting FIC" });
+
+        if (snapshot.msc_au_crc_errors_total > m_dab_last_audio_crc_errors)
+        {
+            m_dab_last_audio_crc_error_tick = m_tick;
+        }
+        m_dab_last_audio_crc_errors = snapshot.msc_au_crc_errors_total;
+        DabOverviewAudioCrcValueText().Text(snapshot.msc_au_crc_checks_total != 0u
+            ? to_hstring(snapshot.msc_au_crc_errors_total) + L" errors"
+            : hstring{ L"—" });
+        if (snapshot.msc_au_crc_checks_total == 0u)
+        {
+            DabOverviewAudioCrcDetailText().Text(L"Awaiting audio units");
+        }
+        else if (m_dab_last_audio_crc_error_tick == 0u)
+        {
+            DabOverviewAudioCrcDetailText().Text(
+                to_hstring(snapshot.msc_au_crc_checks_total) + L" units checked · no errors");
+        }
+        else
+        {
+            uint64_t const elapsed_seconds =
+                (m_tick - m_dab_last_audio_crc_error_tick) / 4u;
+            DabOverviewAudioCrcDetailText().Text(
+                L"Last: " + format_duration(elapsed_seconds * 1000000000ull) + L" ago");
+        }
+
+        if (m_have_catalog)
+        {
+            uint64_t const stable_seconds =
+                m_tick >= m_dab_catalog_changed_tick
+                    ? (m_tick - m_dab_catalog_changed_tick) / 4u
+                    : 0u;
+            DabOverviewReconfigValueText().Text(L"NONE PENDING");
+            hstring detail =
+                L"Database stable " + format_duration(stable_seconds * 1000000000ull);
+            if (snapshot.msc_last_reconfig_reason != 0u)
+            {
+                wchar_t reason[32]{};
+                swprintf_s(reason,
+                           L" · last applied 0x%02X",
+                           snapshot.msc_last_reconfig_reason);
+                detail = detail + reason;
+            }
+            DabOverviewReconfigDetailText().Text(detail);
+        }
+        else
+        {
+            DabOverviewReconfigValueText().Text(L"WAITING");
+            DabOverviewReconfigDetailText().Text(L"Awaiting FIC database");
+        }
+
         DabOverviewDabValueText().Text(dab_state);
         DabOverviewDabDetailText().Text(last_decode);
         DabOverviewGenerationText().Text(to_hstring(snapshot.msc_superframe_generation));
@@ -1860,10 +2098,237 @@ namespace winrt::DabMeasurementWinUI::implementation
         DabPlusAttemptsText().Text(to_hstring(snapshot.msc_decode_attempts));
         DabPlusFailuresText().Text(to_hstring(snapshot.msc_decode_failures));
         DabPlusRsTotalText().Text(to_hstring(snapshot.msc_rs_corrected_total));
+        DabPlusAudioCrcText().Text(snapshot.msc_au_crc_checks_total != 0u
+            ? to_hstring(snapshot.msc_au_crc_errors_total) + L" errors / " +
+                to_hstring(snapshot.msc_au_crc_checks_total) + L" units"
+            : hstring{ L"Awaiting audio units" });
+        DabPlusAvailabilityText().Text(have_attempt
+            ? success_rate + L" · " + to_hstring(unavailable_superframes * 120u) +
+                L" ms unavailable"
+            : hstring{ L"Awaiting superframes" });
         DabPlusLastDecodeDetailText().Text(last_decode);
         wchar_t reconfiguration[32]{};
         swprintf_s(reconfiguration, L"Reason mask 0x%02X", snapshot.msc_last_reconfig_reason);
         DabPlusReconfigText().Text(reconfiguration);
+
+        UpdateDabPipeline(snapshot);
+        AppendDabOverviewHistory(snapshot);
+    }
+
+    void MainWindow::UpdateDabPipeline(dab_receive_snapshot_t const& snapshot)
+    {
+        Brush const active_brush = Application::Current().Resources().Lookup(
+            box_value(hstring{ L"MeasurementAccentBrush" })).as<Brush>();
+        Brush const waiting_brush = Application::Current().Resources().Lookup(
+            box_value(hstring{ L"WarningBrush" })).as<Brush>();
+        Brush const inactive_brush = Application::Current().Resources().Lookup(
+            box_value(hstring{ L"MutedTextBrush" })).as<Brush>();
+
+        bool const rf_valid = snapshot.locked != 0;
+        bool const fic_valid = rf_valid && snapshot.fic_valid_fibs_last_frame != 0u;
+        bool const msc_valid = fic_valid && snapshot.msc_synchronized != 0;
+        bool const dab_valid = msc_valid &&
+                               snapshot.msc_superframe_valid != 0 &&
+                               snapshot.msc_last_decode_ok != 0;
+        bool const audio_playing = dab_valid && m_receiver.AudioOutputActive();
+
+        auto set_stage = [&](winrt::Microsoft::UI::Xaml::Shapes::Ellipse const& indicator,
+                             TextBlock const& state,
+                             bool valid,
+                             bool upstream_valid,
+                             hstring const& valid_text,
+                             hstring const& waiting_text)
+        {
+            Brush const brush = valid
+                ? active_brush
+                : (upstream_valid ? waiting_brush : inactive_brush);
+            indicator.Fill(brush);
+            state.Foreground(brush);
+            state.Text(valid ? valid_text : waiting_text);
+        };
+
+        set_stage(DabPipelineRfIndicator(),
+                  DabPipelineRfStateText(),
+                  rf_valid,
+                  true,
+                  L"LOCKED",
+                  L"ACQUIRING");
+        set_stage(DabPipelineFicIndicator(),
+                  DabPipelineFicStateText(),
+                  fic_valid,
+                  rf_valid,
+                  L"VALID",
+                  L"WAITING");
+        set_stage(DabPipelineMscIndicator(),
+                  DabPipelineMscStateText(),
+                  msc_valid,
+                  fic_valid,
+                  L"VALID",
+                  L"WAITING");
+        set_stage(DabPipelineDabIndicator(),
+                  DabPipelineDabStateText(),
+                  dab_valid,
+                  msc_valid,
+                  L"VALID",
+                  L"WAITING");
+        set_stage(DabPipelineAudioIndicator(),
+                  DabPipelineAudioStateText(),
+                  audio_playing,
+                  dab_valid,
+                  L"PLAYING",
+                  dab_valid ? hstring{ L"BUFFERING" } : hstring{ L"STOPPED" });
+    }
+
+    void MainWindow::AppendDabOverviewHistory(dab_receive_snapshot_t const& snapshot)
+    {
+        constexpr float unavailable = std::numeric_limits<float>::quiet_NaN();
+        float fic_crc_percent = unavailable;
+        if (snapshot.fic_frames_seen != 0u)
+        {
+            constexpr float fibs_per_frame = 12.0f;
+            fic_crc_percent = std::clamp(
+                100.0f * static_cast<float>(snapshot.fic_total_valid_fibs) /
+                    (static_cast<float>(snapshot.fic_frames_seen) * fibs_per_frame),
+                0.0f,
+                100.0f);
+        }
+
+        size_t const slot = m_dab_overview_history_write;
+        m_dab_fic_crc_history[slot] = fic_crc_percent;
+        m_dab_msc_ber_history[slot] = snapshot.msc_ber_valid != 0
+            ? snapshot.msc_ber
+            : unavailable;
+        m_dab_rs_history[slot] = snapshot.msc_superframe_generation != 0u
+            ? static_cast<float>(snapshot.msc_rs_corrected_last_superframe)
+            : unavailable;
+        m_dab_audio_history[slot] = snapshot.msc_last_decode_ok != 0 ? 1u : 0u;
+        m_dab_failure_history[slot] = snapshot.msc_decode_failures;
+        m_dab_overview_history_write =
+            (slot + 1u) % dab_overview_history_capacity;
+        m_dab_overview_history_count =
+            (std::min)(m_dab_overview_history_count + 1u,
+                       dab_overview_history_capacity);
+
+        UpdateDabOverviewHistoryVisuals();
+    }
+
+    void MainWindow::UpdateDabOverviewHistoryVisuals()
+    {
+        constexpr float left = 70.0f;
+        constexpr float width = 825.0f;
+        PointCollection fic_points;
+        PointCollection ber_points;
+        PointCollection rs_points;
+        PointCollection audio_points;
+        if (m_dab_overview_history_count == 0u)
+        {
+            DabOverviewFicTimelineTrace().Points(fic_points);
+            DabOverviewMscTimelineTrace().Points(ber_points);
+            DabOverviewRsTimelineTrace().Points(rs_points);
+            DabOverviewAudioTimelineTrace().Points(audio_points);
+            return;
+        }
+
+        size_t const first =
+            (m_dab_overview_history_write + dab_overview_history_capacity -
+             m_dab_overview_history_count) %
+            dab_overview_history_capacity;
+        for (size_t point = 0u; point < m_dab_overview_history_count; ++point)
+        {
+            size_t const index = (first + point) % dab_overview_history_capacity;
+            float const x = m_dab_overview_history_count > 1u
+                ? left + width * static_cast<float>(point) /
+                    static_cast<float>(m_dab_overview_history_count - 1u)
+                : left + width;
+
+            float const fic = m_dab_fic_crc_history[index];
+            if (std::isfinite(fic))
+            {
+                float const y = 28.0f -
+                    std::clamp((fic - 80.0f) / 20.0f, 0.0f, 1.0f) * 17.0f;
+                fic_points.Append(Point{ x, y });
+            }
+
+            float const ber = m_dab_msc_ber_history[index];
+            if (std::isfinite(ber))
+            {
+                float const log_ber = std::log10(
+                    std::clamp(ber, 1.0e-7f, 1.0e-1f));
+                float const normalized = std::clamp(
+                    (-1.0f - log_ber) / 6.0f,
+                    0.0f,
+                    1.0f);
+                ber_points.Append(Point{ x, 61.0f - normalized * 17.0f });
+            }
+
+            float const rs = m_dab_rs_history[index];
+            if (std::isfinite(rs))
+            {
+                rs_points.Append(Point{
+                    x,
+                    94.0f - std::clamp(rs / 20.0f, 0.0f, 1.0f) * 17.0f
+                });
+            }
+
+            bool const audio_available = m_dab_audio_history[index] != 0u;
+            audio_points.Append(Point{ x, audio_available ? 112.0f : 127.0f });
+        }
+
+        DabOverviewFicTimelineTrace().Points(fic_points);
+        DabOverviewMscTimelineTrace().Points(ber_points);
+        DabOverviewRsTimelineTrace().Points(rs_points);
+        DabOverviewAudioTimelineTrace().Points(audio_points);
+        size_t const last =
+            (m_dab_overview_history_write + dab_overview_history_capacity - 1u) %
+            dab_overview_history_capacity;
+        uint32_t const first_failures = m_dab_failure_history[first];
+        uint32_t const last_failures = m_dab_failure_history[last];
+        uint32_t const recent_failures = last_failures >= first_failures
+            ? last_failures - first_failures
+            : 0u;
+        DabOverviewMuteMarkerText().Text(recent_failures == 0u
+            ? hstring{ L"No superframe interruptions" }
+            : to_hstring(static_cast<uint64_t>(recent_failures) * 120u) +
+                L" ms unavailable");
+    }
+
+    void MainWindow::ResetDabOverviewHistory()
+    {
+        float const unavailable = std::numeric_limits<float>::quiet_NaN();
+        m_dab_fic_crc_history.fill(unavailable);
+        m_dab_msc_ber_history.fill(unavailable);
+        m_dab_rs_history.fill(unavailable);
+        m_dab_audio_history = {};
+        m_dab_failure_history = {};
+        m_dab_overview_history_write = 0u;
+        m_dab_overview_history_count = 0u;
+        m_dab_rs_peak = 0u;
+        m_dab_previous_fig_count = 0u;
+        m_dab_previous_fig_timestamp_ns = 0u;
+        m_dab_fig_rate = 0.0f;
+        m_dab_catalog_changed_tick = m_tick;
+        m_dab_last_audio_crc_errors = 0u;
+        m_dab_last_audio_crc_error_tick = 0u;
+        DabOverviewMuteMarkerText().Text(L"No superframe interruptions");
+        UpdateDabOverviewHistoryVisuals();
+
+        Brush const inactive_brush = Application::Current().Resources().Lookup(
+            box_value(hstring{ L"MutedTextBrush" })).as<Brush>();
+        DabPipelineRfIndicator().Fill(inactive_brush);
+        DabPipelineFicIndicator().Fill(inactive_brush);
+        DabPipelineMscIndicator().Fill(inactive_brush);
+        DabPipelineDabIndicator().Fill(inactive_brush);
+        DabPipelineAudioIndicator().Fill(inactive_brush);
+        DabPipelineRfStateText().Foreground(inactive_brush);
+        DabPipelineFicStateText().Foreground(inactive_brush);
+        DabPipelineMscStateText().Foreground(inactive_brush);
+        DabPipelineDabStateText().Foreground(inactive_brush);
+        DabPipelineAudioStateText().Foreground(inactive_brush);
+        DabPipelineRfStateText().Text(L"IDLE");
+        DabPipelineFicStateText().Text(L"WAITING");
+        DabPipelineMscStateText().Text(L"WAITING");
+        DabPipelineDabStateText().Text(L"WAITING");
+        DabPipelineAudioStateText().Text(L"STOPPED");
     }
 
     void MainWindow::UpdateCpuUsage()
@@ -3172,6 +3637,8 @@ namespace winrt::DabMeasurementWinUI::implementation
 
     void MainWindow::ApplyCatalog(dab_receive_catalog_t const& catalog)
     {
+        bool const catalog_changed =
+            !m_have_catalog || catalog.sequence != m_latest_catalog.sequence;
         uint32_t selected_service_id = 0u;
         bool preserve_selection = false;
         int32_t const old_selected_index = ServicesListView().SelectedIndex();
@@ -3185,6 +3652,10 @@ namespace winrt::DabMeasurementWinUI::implementation
 
         m_latest_catalog = catalog;
         m_have_catalog = true;
+        if (catalog_changed)
+        {
+            m_dab_catalog_changed_tick = m_tick;
+        }
 
         hstring const ensemble_label = fic_label_text(catalog.ensemble_label);
         if (ensemble_label.empty())
@@ -3374,6 +3845,7 @@ namespace winrt::DabMeasurementWinUI::implementation
     {
         m_have_catalog = false;
         m_latest_catalog = {};
+        m_dab_catalog_changed_tick = m_tick;
         EnsembleNameText().Text(L"Awaiting FIC ensemble");
         EnsembleDetailText().Text(L"Decoding ensemble metadata from the signal");
 

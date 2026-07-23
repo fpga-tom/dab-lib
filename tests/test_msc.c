@@ -705,6 +705,7 @@ void test_msc_ingest_component_payload_builds_dabplus_superframe(void) {
     dab_msc_layout_t layout = {0};
     dab_msc_component_payload_t payload;
     dab_msc_dabplus_superframe_t superframe;
+    dab_msc_dabplus_debug_t debug;
     uint8_t data1[24u * DAB_MSC_DABPLUS_COLUMNS_PER_RS_PAYLOAD];
     uint8_t cifs[DAB_MSC_DABPLUS_COLUMNS_PER_SUPERFRAME][DAB_MSC_MAX_LOGICAL_FRAME_BYTES_PER_CIF] = {{0}};
     uint16_t firecode;
@@ -781,6 +782,11 @@ void test_msc_ingest_component_payload_builds_dabplus_superframe(void) {
     TEST_ASSERT(superframe.superframe_data != 0);
     TEST_ASSERT(superframe.superframe_data[0] != 0u);
     TEST_ASSERT(superframe.superframe_data[1] != 0u);
+    TEST_ASSERT(dab_msc_get_primary_dabplus_debug(&state, 0x5555u, &debug) == 0);
+    TEST_ASSERT(debug.valid == 1u);
+    TEST_ASSERT(debug.au_crc_checks_total == 3u);
+    TEST_ASSERT(debug.au_crc_errors_last_superframe == 3u);
+    TEST_ASSERT(debug.au_crc_errors_total == 3u);
 }
 
 void test_msc_build_layout_and_payload_preserve_packet_metadata(void) {

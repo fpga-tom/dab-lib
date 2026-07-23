@@ -124,8 +124,14 @@ typedef struct {
     uint32_t fic_blocks_decoded_last_frame;
     uint32_t fic_valid_fibs_last_frame;
     uint32_t fic_total_valid_fibs;
+    uint64_t fic_total_figs;
+    uint64_t fic_total_fig_parse_errors;
 
     uint32_t msc_frames_seen;
+    int msc_ber_valid;
+    float msc_ber;
+    uint64_t msc_ber_error_bits;
+    uint64_t msc_ber_compared_bits;
     int msc_audio_valid;
     int msc_synchronized;
     int msc_superframe_valid;
@@ -134,6 +140,9 @@ typedef struct {
     uint32_t msc_decode_failures;
     uint32_t msc_rs_corrected_last_superframe;
     uint32_t msc_rs_corrected_total;
+    uint32_t msc_au_crc_errors_last_superframe;
+    uint32_t msc_au_crc_errors_total;
+    uint32_t msc_au_crc_checks_total;
     int msc_last_decode_ok;
     uint32_t msc_runtime_reset_count;
     uint8_t msc_last_reconfig_reason;
@@ -250,6 +259,7 @@ typedef struct {
     uint8_t subchannel_valid;
     uint16_t subchannel_start_cu;
     uint16_t subchannel_size_cu;
+    uint16_t subchannel_bitrate_kbps;
     uint8_t protection_kind;
     uint8_t protection_table_switch;
     uint8_t protection_index;

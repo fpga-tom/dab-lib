@@ -3,6 +3,7 @@
 #include <math.h>
 #include <string.h>
 
+#include "dab/core/msc.h"
 #include "receive_audio_internal.h"
 #include "receive_catalog_internal.h"
 #include "receive_measurement_internal.h"
@@ -184,6 +185,7 @@ void dab_receive_catalog_build(dab_receive_catalog_t *catalog,
                 const dab_fic_subchannel_t *subchannel =
                     &database->subchannels[source_component->subchid];
                 if (subchannel->valid != 0u) {
+                    dab_msc_subchannel_t resolved_subchannel;
                     component->subchannel_valid = 1u;
                     component->subchannel_start_cu = subchannel->start_cu;
                     component->subchannel_size_cu = subchannel->size_cu;
@@ -192,6 +194,10 @@ void dab_receive_catalog_build(dab_receive_catalog_t *catalog,
                     component->protection_index = subchannel->protection_index;
                     component->protection_option = subchannel->protection_option;
                     component->protection_level = subchannel->protection_level;
+                    if (dab_msc_resolve_subchannel(subchannel, &resolved_subchannel) == 0) {
+                        component->subchannel_bitrate_kbps =
+                            resolved_subchannel.bitrate_kbps;
+                    }
                 }
             }
         }
@@ -326,6 +332,8 @@ void dab_receive_snapshot_build(dab_receive_snapshot_t *snapshot,
         snapshot->fic_blocks_decoded_last_frame = fic->fic_blocks_decoded_last_frame;
         snapshot->fic_valid_fibs_last_frame = fic->valid_fibs_last_frame;
         snapshot->fic_total_valid_fibs = fic->total_valid_fibs;
+        snapshot->fic_total_figs = fic->repo.total_figs;
+        snapshot->fic_total_fig_parse_errors = fic->repo.total_fig_parse_errors;
     }
 
     if (msc != 0) {
@@ -339,8 +347,19 @@ void dab_receive_snapshot_build(dab_receive_snapshot_t *snapshot,
         snapshot->msc_superframe_generation = msc_audio->generation;
         snapshot->msc_decode_attempts = msc_audio->decode_attempts;
         snapshot->msc_decode_failures = msc_audio->decode_failures;
+        snapshot->msc_ber_valid = msc_audio->ber_compared_bits != 0u;
+        snapshot->msc_ber_error_bits = msc_audio->ber_error_bits;
+        snapshot->msc_ber_compared_bits = msc_audio->ber_compared_bits;
+        snapshot->msc_ber = msc_audio->ber_compared_bits != 0u
+            ? (float)((double)msc_audio->ber_error_bits /
+                      (double)msc_audio->ber_compared_bits)
+            : 0.0f;
         snapshot->msc_rs_corrected_last_superframe = msc_audio->rs_corrected_last_superframe;
         snapshot->msc_rs_corrected_total = msc_audio->rs_corrected_total;
+        snapshot->msc_au_crc_errors_last_superframe =
+            msc_audio->au_crc_errors_last_superframe;
+        snapshot->msc_au_crc_errors_total = msc_audio->au_crc_errors_total;
+        snapshot->msc_au_crc_checks_total = msc_audio->au_crc_checks_total;
         snapshot->msc_last_decode_ok = msc_audio->last_decode_ok != 0u;
         snapshot->msc_runtime_reset_count = msc_audio->runtime_reset_count;
         snapshot->msc_last_reconfig_reason = msc_audio->last_reconfig_reason;

@@ -729,9 +729,14 @@ int dab_fic_parse_fib_payload(dab_fic_repo_t *repo, const uint8_t *fib_payload, 
         const int next = dab_fic_cursor_next_fig(&cursor, &fig);
 
         if (next <= 0) {
+            if (next < 0) {
+                repo->total_fig_parse_errors++;
+            }
             return next < 0 ? -1 : 0;
         }
+        repo->total_figs++;
         if (dab_fic_fig_view_from_raw(&fig, &view) != 0) {
+            repo->total_fig_parse_errors++;
             continue;
         }
 

@@ -2289,14 +2289,195 @@
                 </Grid>
             </Border>
 
-            <TabView Grid.Row="1" IsAddTabButtonVisible="False" TabWidthMode="SizeToContent">
-                <TabViewItem Header="Overview" IsClosable="False">
+            <TabView x:Name="DabTabView"
+                     Grid.Row="1"
+                     IsAddTabButtonVisible="False"
+                     TabWidthMode="SizeToContent">
+                <TabViewItem x:Name="DabOverviewTab" Header="Overview" IsClosable="False">
                     <ScrollViewer VerticalScrollBarVisibility="Auto"
                                   HorizontalScrollMode="Disabled"
                                   HorizontalScrollBarVisibility="Disabled"
                                   Padding="12">
                         <StackPanel x:Name="DabOverviewContent" Spacing="12">
-                            <Grid ColumnSpacing="10">
+                            <Border Style="{StaticResource PanelCardStyle}" Padding="16,13">
+                                <StackPanel Spacing="12">
+                                    <TextBlock Text="DECODE PIPELINE" Style="{StaticResource SectionTitleStyle}" />
+                                    <Grid ColumnSpacing="5">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" HorizontalAlignment="Center" Spacing="6">
+                                            <TextBlock Text="RF LOCKED" FontWeight="SemiBold" />
+                                            <Ellipse x:Name="DabPipelineRfIndicator" Width="12" Height="12" Fill="{StaticResource MutedTextBrush}" HorizontalAlignment="Center" />
+                                            <TextBlock x:Name="DabPipelineRfStateText" Text="IDLE" FontSize="10" Foreground="{StaticResource MutedTextBrush}" HorizontalAlignment="Center" />
+                                        </StackPanel>
+                                        <FontIcon Grid.Column="1" Glyph="&#xE72A;" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" />
+                                        <StackPanel Grid.Column="2" HorizontalAlignment="Center" Spacing="6">
+                                            <TextBlock Text="FIC VALID" FontWeight="SemiBold" />
+                                            <Ellipse x:Name="DabPipelineFicIndicator" Width="12" Height="12" Fill="{StaticResource MutedTextBrush}" HorizontalAlignment="Center" />
+                                            <TextBlock x:Name="DabPipelineFicStateText" Text="WAITING" FontSize="10" Foreground="{StaticResource MutedTextBrush}" HorizontalAlignment="Center" />
+                                        </StackPanel>
+                                        <FontIcon Grid.Column="3" Glyph="&#xE72A;" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" />
+                                        <StackPanel Grid.Column="4" HorizontalAlignment="Center" Spacing="6">
+                                            <TextBlock Text="MSC VALID" FontWeight="SemiBold" />
+                                            <Ellipse x:Name="DabPipelineMscIndicator" Width="12" Height="12" Fill="{StaticResource MutedTextBrush}" HorizontalAlignment="Center" />
+                                            <TextBlock x:Name="DabPipelineMscStateText" Text="WAITING" FontSize="10" Foreground="{StaticResource MutedTextBrush}" HorizontalAlignment="Center" />
+                                        </StackPanel>
+                                        <FontIcon Grid.Column="5" Glyph="&#xE72A;" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" />
+                                        <StackPanel Grid.Column="6" HorizontalAlignment="Center" Spacing="6">
+                                            <TextBlock Text="DAB+ VALID" FontWeight="SemiBold" />
+                                            <Ellipse x:Name="DabPipelineDabIndicator" Width="12" Height="12" Fill="{StaticResource MutedTextBrush}" HorizontalAlignment="Center" />
+                                            <TextBlock x:Name="DabPipelineDabStateText" Text="WAITING" FontSize="10" Foreground="{StaticResource MutedTextBrush}" HorizontalAlignment="Center" />
+                                        </StackPanel>
+                                        <FontIcon Grid.Column="7" Glyph="&#xE72A;" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" />
+                                        <StackPanel Grid.Column="8" HorizontalAlignment="Center" Spacing="6">
+                                            <TextBlock Text="AUDIO PLAYING" FontWeight="SemiBold" />
+                                            <Ellipse x:Name="DabPipelineAudioIndicator" Width="12" Height="12" Fill="{StaticResource MutedTextBrush}" HorizontalAlignment="Center" />
+                                            <TextBlock x:Name="DabPipelineAudioStateText" Text="STOPPED" FontSize="10" Foreground="{StaticResource MutedTextBrush}" HorizontalAlignment="Center" />
+                                        </StackPanel>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <Grid ColumnSpacing="10" RowSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="142" />
+                                    <RowDefinition Height="126" />
+                                </Grid.RowDefinitions>
+
+                                <Button Grid.Row="0" Grid.Column="0" Tag="fic:crc" Click="DabOverviewKpi_Click"
+                                        Padding="0" Background="Transparent" BorderThickness="0" HorizontalContentAlignment="Stretch">
+                                    <Border Style="{StaticResource RfMetricCardStyle}">
+                                        <StackPanel Spacing="5">
+                                            <TextBlock Text="FIC CRC" Style="{StaticResource RfMetricLabelStyle}" />
+                                            <TextBlock x:Name="DabOverviewFicCrcValueText" Text="—" Style="{StaticResource RfMetricValueStyle}" />
+                                            <TextBlock x:Name="DabOverviewFicCrcDetailText" Text="Awaiting decoded FIBs" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                            <TextBlock Text="Open FIC  →" Foreground="{StaticResource SpectrumBrush}" FontSize="11" />
+                                        </StackPanel>
+                                    </Border>
+                                </Button>
+                                <Button Grid.Row="0" Grid.Column="1" Tag="msc:ber" Click="DabOverviewKpi_Click"
+                                        Padding="0" Background="Transparent" BorderThickness="0" HorizontalContentAlignment="Stretch">
+                                    <Border Style="{StaticResource RfMetricCardStyle}">
+                                        <StackPanel Spacing="5">
+                                            <TextBlock Text="MSC BER" Style="{StaticResource RfMetricLabelStyle}" />
+                                            <TextBlock x:Name="DabOverviewMscBerValueText" Text="—" Style="{StaticResource RfMetricValueStyle}" />
+                                            <TextBlock x:Name="DabOverviewMscBerDetailText" Text="Awaiting decoded MSC bits" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                            <TextBlock Text="Open MSC  →" Foreground="{StaticResource SpectrumBrush}" FontSize="11" />
+                                        </StackPanel>
+                                    </Border>
+                                </Button>
+                                <Button Grid.Row="0" Grid.Column="2" Tag="dab:rs" Click="DabOverviewKpi_Click"
+                                        Padding="0" Background="Transparent" BorderThickness="0" HorizontalContentAlignment="Stretch">
+                                    <Border Style="{StaticResource RfMetricCardStyle}">
+                                        <StackPanel Spacing="5">
+                                            <TextBlock Text="RS CORRECTIONS" Style="{StaticResource RfMetricLabelStyle}" />
+                                            <TextBlock x:Name="DabOverviewRsValueText" Text="—" Style="{StaticResource RfMetricValueStyle}" />
+                                            <TextBlock x:Name="DabOverviewRsDetailText" Text="No valid superframes" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                            <TextBlock Text="Open DAB+  →" Foreground="{StaticResource SpectrumBrush}" FontSize="11" />
+                                        </StackPanel>
+                                    </Border>
+                                </Button>
+                                <Button Grid.Row="0" Grid.Column="3" Tag="dab:availability" Click="DabOverviewKpi_Click"
+                                        Padding="0" Background="Transparent" BorderThickness="0" HorizontalContentAlignment="Stretch">
+                                    <Border Style="{StaticResource RfMetricCardStyle}">
+                                        <StackPanel Spacing="5">
+                                            <TextBlock Text="AUDIO AVAILABILITY" Style="{StaticResource RfMetricLabelStyle}" />
+                                            <TextBlock x:Name="DabOverviewAudioAvailabilityValueText" Text="—" Style="{StaticResource RfMetricValueStyle}" />
+                                            <TextBlock x:Name="DabOverviewAudioAvailabilityDetailText" Text="Awaiting DAB+ superframes" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                            <TextBlock Text="Open DAB+  →" Foreground="{StaticResource SpectrumBrush}" FontSize="11" />
+                                        </StackPanel>
+                                    </Border>
+                                </Button>
+
+                                <Button Grid.Row="1" Grid.Column="0" Tag="fic:fig" Click="DabOverviewKpi_Click"
+                                        Padding="0" Background="Transparent" BorderThickness="0" HorizontalContentAlignment="Stretch">
+                                    <Border Style="{StaticResource RfMetricCardStyle}">
+                                        <StackPanel Spacing="5">
+                                            <TextBlock Text="FIG PARSING" Style="{StaticResource RfMetricLabelStyle}" />
+                                            <TextBlock x:Name="DabOverviewFigValueText" Text="—" FontSize="22" FontWeight="SemiBold" FontFamily="Consolas" />
+                                            <TextBlock x:Name="DabOverviewFigDetailText" Text="Awaiting FIC" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                        </StackPanel>
+                                    </Border>
+                                </Button>
+                                <Button Grid.Row="1" Grid.Column="1" Tag="msc:service" Click="DabOverviewKpi_Click"
+                                        Padding="0" Background="Transparent" BorderThickness="0" HorizontalContentAlignment="Stretch">
+                                    <Border Style="{StaticResource RfMetricCardStyle}">
+                                        <StackPanel Spacing="5">
+                                            <TextBlock Text="SELECTED SERVICE" Style="{StaticResource RfMetricLabelStyle}" />
+                                            <TextBlock x:Name="DabOverviewServiceValueText" Text="—" FontSize="22" FontWeight="SemiBold" FontFamily="Consolas" />
+                                            <TextBlock x:Name="DabOverviewServiceDetailText" Text="No service selected" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                        </StackPanel>
+                                    </Border>
+                                </Button>
+                                <Button Grid.Row="1" Grid.Column="2" Tag="dab:crc" Click="DabOverviewKpi_Click"
+                                        Padding="0" Background="Transparent" BorderThickness="0" HorizontalContentAlignment="Stretch">
+                                    <Border Style="{StaticResource RfMetricCardStyle}">
+                                        <StackPanel Spacing="5">
+                                            <TextBlock Text="AUDIO CRC" Style="{StaticResource RfMetricLabelStyle}" />
+                                            <TextBlock x:Name="DabOverviewAudioCrcValueText" Text="—" FontSize="22" FontWeight="SemiBold" FontFamily="Consolas" />
+                                            <TextBlock x:Name="DabOverviewAudioCrcDetailText" Text="Awaiting audio units" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                        </StackPanel>
+                                    </Border>
+                                </Button>
+                                <Button Grid.Row="1" Grid.Column="3" Tag="fic:reconfiguration" Click="DabOverviewKpi_Click"
+                                        Padding="0" Background="Transparent" BorderThickness="0" HorizontalContentAlignment="Stretch">
+                                    <Border Style="{StaticResource RfMetricCardStyle}">
+                                        <StackPanel Spacing="5">
+                                            <TextBlock Text="RECONFIGURATION" Style="{StaticResource RfMetricLabelStyle}" />
+                                            <TextBlock x:Name="DabOverviewReconfigValueText" Text="NONE PENDING" FontSize="20" FontWeight="SemiBold" FontFamily="Consolas" />
+                                            <TextBlock x:Name="DabOverviewReconfigDetailText" Text="Awaiting database" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                        </StackPanel>
+                                    </Border>
+                                </Button>
+                            </Grid>
+
+                            <Border Style="{StaticResource PanelCardStyle}" Padding="16,12">
+                                <StackPanel Spacing="8">
+                                    <Grid>
+                                        <TextBlock Text="QUALITY TIMELINE — LAST 60 SECONDS" Style="{StaticResource SectionTitleStyle}" />
+                                        <TextBlock x:Name="DabOverviewMuteMarkerText"
+                                                   Text="No audio interruptions"
+                                                   HorizontalAlignment="Right"
+                                                   Foreground="{StaticResource MutedTextBrush}"
+                                                   FontSize="11" />
+                                    </Grid>
+                                    <Viewbox Stretch="Fill" Height="168">
+                                        <Canvas Width="900" Height="150">
+                                            <TextBlock Text="FIC CRC" Canvas.Left="0" Canvas.Top="10" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                            <TextBlock Text="MSC BER" Canvas.Left="0" Canvas.Top="43" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                            <TextBlock Text="RS bytes" Canvas.Left="0" Canvas.Top="76" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                            <TextBlock Text="Audio" Canvas.Left="0" Canvas.Top="109" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                            <Line X1="70" Y1="28" X2="895" Y2="28" Stroke="#253D556E" />
+                                            <Line X1="70" Y1="61" X2="895" Y2="61" Stroke="#253D556E" />
+                                            <Line X1="70" Y1="94" X2="895" Y2="94" Stroke="#253D556E" />
+                                            <Line X1="70" Y1="127" X2="895" Y2="127" Stroke="#253D556E" />
+                                            <Polyline x:Name="DabOverviewFicTimelineTrace" Stroke="{StaticResource MeasurementAccentBrush}" StrokeThickness="2" />
+                                            <Polyline x:Name="DabOverviewMscTimelineTrace" Stroke="{StaticResource SpectrumBrush}" StrokeThickness="2" />
+                                            <Polyline x:Name="DabOverviewRsTimelineTrace" Stroke="{StaticResource WarningBrush}" StrokeThickness="2" />
+                                            <Polyline x:Name="DabOverviewAudioTimelineTrace" Stroke="#FF78E08F" StrokeThickness="5" />
+                                        </Canvas>
+                                    </Viewbox>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Retained hidden bindings preserve compatibility with the earlier
+                                 overview while the pipeline dashboard becomes the visible page. -->
+                            <Grid ColumnSpacing="10" Visibility="Collapsed">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="*" />
@@ -2349,7 +2530,7 @@
                                 </Border>
                             </Grid>
 
-                            <Grid ColumnSpacing="10">
+                            <Grid ColumnSpacing="10" Visibility="Collapsed">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="*" />
@@ -2409,9 +2590,13 @@
                     </ScrollViewer>
                 </TabViewItem>
 
-                <TabViewItem Header="FIC" IsClosable="False">
+                <TabViewItem x:Name="DabFicTab" Header="FIC" IsClosable="False">
                     <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="12">
                         <StackPanel Spacing="12">
+                            <TextBlock x:Name="DabFicFocusText"
+                                       Text="Selected metric: FIC CRC"
+                                       Foreground="{StaticResource SpectrumBrush}"
+                                       FontWeight="SemiBold" />
                             <Grid ColumnSpacing="10">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
@@ -2480,9 +2665,31 @@
                     </ScrollViewer>
                 </TabViewItem>
 
-                <TabViewItem Header="MSC" IsClosable="False">
+                <TabViewItem x:Name="DabMscTab" Header="MSC" IsClosable="False">
                     <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="12">
                         <StackPanel Spacing="12">
+                            <TextBlock x:Name="DabMscFocusText"
+                                       Text="Selected metric: MSC BER"
+                                       Foreground="{StaticResource SpectrumBrush}"
+                                       FontWeight="SemiBold" />
+                            <Border Style="{StaticResource PanelCardStyle}" Padding="14">
+                                <Grid ColumnSpacing="16">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="POST-VITERBI BER" Style="{StaticResource RfMetricLabelStyle}" />
+                                        <TextBlock x:Name="DabMscBerPageValueText" Text="—" Style="{StaticResource RfMetricValueStyle}" />
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="1"
+                                               x:Name="DabMscBerPageDetailText"
+                                               Text="Awaiting decoded and re-encoded MSC bits"
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               VerticalAlignment="Center"
+                                               TextWrapping="Wrap" />
+                                </Grid>
+                            </Border>
                             <Grid ColumnSpacing="10">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
@@ -2551,9 +2758,13 @@
                     </ScrollViewer>
                 </TabViewItem>
 
-                <TabViewItem Header="DAB+" IsClosable="False">
+                <TabViewItem x:Name="DabPlusTab" Header="DAB+" IsClosable="False">
                     <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="12">
                         <StackPanel Spacing="12">
+                            <TextBlock x:Name="DabPlusFocusText"
+                                       Text="Selected metric: DAB+ decoder"
+                                       Foreground="{StaticResource SpectrumBrush}"
+                                       FontWeight="SemiBold" />
                             <Grid ColumnSpacing="10">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
@@ -2605,6 +2816,8 @@
                                             <RowDefinition Height="Auto" />
                                             <RowDefinition Height="Auto" />
                                             <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
                                         </Grid.RowDefinitions>
                                         <TextBlock Text="Superframe generation" Foreground="{StaticResource MutedTextBrush}" />
                                         <TextBlock Grid.Column="1" x:Name="DabPlusGenerationText" Text="0" FontFamily="Consolas" />
@@ -2618,6 +2831,10 @@
                                         <TextBlock Grid.Row="4" Grid.Column="1" x:Name="DabPlusLastDecodeDetailText" Text="—" />
                                         <TextBlock Grid.Row="5" Text="Last reconfiguration" Foreground="{StaticResource MutedTextBrush}" />
                                         <TextBlock Grid.Row="5" Grid.Column="1" x:Name="DabPlusReconfigText" Text="—" FontFamily="Consolas" />
+                                        <TextBlock Grid.Row="6" Text="Audio-unit CRC" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="6" Grid.Column="1" x:Name="DabPlusAudioCrcText" Text="—" FontFamily="Consolas" />
+                                        <TextBlock Grid.Row="7" Text="Audio availability" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="7" Grid.Column="1" x:Name="DabPlusAvailabilityText" Text="—" FontFamily="Consolas" />
                                     </Grid>
                                 </StackPanel>
                             </Border>

@@ -68,6 +68,7 @@ namespace dab::measurement
 
         [[nodiscard]] ReceiverState State() const noexcept;
         [[nodiscard]] bool IsActive() const noexcept;
+        [[nodiscard]] bool AudioOutputActive() const noexcept;
         bool TryReadStatus(uint64_t after_version,
                            ReceiverStatus& status,
                            uint64_t& version) const;
@@ -136,6 +137,7 @@ namespace dab::measurement
         std::condition_variable m_audio_queue_cv;
         std::deque<AudioCommand> m_audio_commands;
         bool m_audio_stop_requested{ false };
+        std::atomic<bool> m_audio_output_active{ false };
         uint32_t m_recovery_attempt_count{ 0u };
         uint64_t m_snapshot_sequence_offset{ 0u };
         uint64_t m_measurement_sequence_offset{ 0u };
@@ -143,6 +145,19 @@ namespace dab::measurement
         uint64_t m_dropped_blocks_offset{ 0u };
         uint64_t m_processing_late_offset{ 0u };
         uint64_t m_hardware_overruns_offset{ 0u };
+        uint64_t m_fic_frames_offset{ 0u };
+        uint64_t m_fic_valid_fibs_offset{ 0u };
+        uint64_t m_fic_figs_offset{ 0u };
+        uint64_t m_fic_fig_errors_offset{ 0u };
+        uint64_t m_msc_frames_offset{ 0u };
+        uint64_t m_msc_generation_offset{ 0u };
+        uint64_t m_msc_decode_attempts_offset{ 0u };
+        uint64_t m_msc_decode_failures_offset{ 0u };
+        uint64_t m_msc_rs_corrected_offset{ 0u };
+        uint64_t m_msc_au_crc_errors_offset{ 0u };
+        uint64_t m_msc_au_crc_checks_offset{ 0u };
+        uint64_t m_msc_ber_error_bits_offset{ 0u };
+        uint64_t m_msc_ber_compared_bits_offset{ 0u };
         dab_receive_snapshot_t m_last_session_snapshot{};
         uint64_t m_last_session_measurement_sequence{ 0u };
         bool m_last_session_snapshot_valid{ false };

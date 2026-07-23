@@ -127,6 +127,8 @@ typedef struct {
 typedef struct {
     dab_fic_database_t current;
     dab_fic_database_t next;
+    uint64_t total_figs;
+    uint64_t total_fig_parse_errors;
 } dab_fic_repo_t;
 
 typedef struct {

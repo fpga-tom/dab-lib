@@ -47,6 +47,19 @@ namespace dab::measurement
         m_dropped_blocks_offset = 0u;
         m_processing_late_offset = 0u;
         m_hardware_overruns_offset = 0u;
+        m_fic_frames_offset = 0u;
+        m_fic_valid_fibs_offset = 0u;
+        m_fic_figs_offset = 0u;
+        m_fic_fig_errors_offset = 0u;
+        m_msc_frames_offset = 0u;
+        m_msc_generation_offset = 0u;
+        m_msc_decode_attempts_offset = 0u;
+        m_msc_decode_failures_offset = 0u;
+        m_msc_rs_corrected_offset = 0u;
+        m_msc_au_crc_errors_offset = 0u;
+        m_msc_au_crc_checks_offset = 0u;
+        m_msc_ber_error_bits_offset = 0u;
+        m_msc_ber_compared_bits_offset = 0u;
         m_last_session_snapshot = {};
         m_last_session_measurement_sequence = 0u;
         m_last_session_snapshot_valid = false;
@@ -116,6 +129,11 @@ namespace dab::measurement
                state == ReceiverState::stopping;
     }
 
+    bool ReceiverWorker::AudioOutputActive() const noexcept
+    {
+        return m_audio_output_active.load(std::memory_order_acquire);
+    }
+
     bool ReceiverWorker::TryReadStatus(uint64_t after_version,
                                        ReceiverStatus& status,
                                        uint64_t& version) const
@@ -174,6 +192,33 @@ namespace dab::measurement
             worker->m_dropped_blocks_offset + snapshot->dropped_blocks);
         adjusted.processing_late_count = saturate_u32(
             worker->m_processing_late_offset + snapshot->processing_late_count);
+        adjusted.fic_frames_seen = saturate_u32(
+            worker->m_fic_frames_offset + snapshot->fic_frames_seen);
+        adjusted.fic_total_valid_fibs = saturate_u32(
+            worker->m_fic_valid_fibs_offset + snapshot->fic_total_valid_fibs);
+        adjusted.fic_total_figs += worker->m_fic_figs_offset;
+        adjusted.fic_total_fig_parse_errors += worker->m_fic_fig_errors_offset;
+        adjusted.msc_frames_seen = saturate_u32(
+            worker->m_msc_frames_offset + snapshot->msc_frames_seen);
+        adjusted.msc_superframe_generation += worker->m_msc_generation_offset;
+        adjusted.msc_decode_attempts = saturate_u32(
+            worker->m_msc_decode_attempts_offset + snapshot->msc_decode_attempts);
+        adjusted.msc_decode_failures = saturate_u32(
+            worker->m_msc_decode_failures_offset + snapshot->msc_decode_failures);
+        adjusted.msc_rs_corrected_total = saturate_u32(
+            worker->m_msc_rs_corrected_offset + snapshot->msc_rs_corrected_total);
+        adjusted.msc_au_crc_errors_total = saturate_u32(
+            worker->m_msc_au_crc_errors_offset + snapshot->msc_au_crc_errors_total);
+        adjusted.msc_au_crc_checks_total = saturate_u32(
+            worker->m_msc_au_crc_checks_offset + snapshot->msc_au_crc_checks_total);
+        adjusted.msc_ber_error_bits += worker->m_msc_ber_error_bits_offset;
+        adjusted.msc_ber_compared_bits += worker->m_msc_ber_compared_bits_offset;
+        adjusted.msc_ber_valid = adjusted.msc_ber_compared_bits != 0u;
+        adjusted.msc_ber = adjusted.msc_ber_valid
+            ? static_cast<float>(
+                static_cast<double>(adjusted.msc_ber_error_bits) /
+                static_cast<double>(adjusted.msc_ber_compared_bits))
+            : 0.0f;
         if (snapshot->hardware_overruns_valid != 0)
         {
             adjusted.hardware_overruns = saturate_u32(
@@ -375,6 +420,7 @@ namespace dab::measurement
 
     void ReceiverWorker::ResetPlaybackState() noexcept
     {
+        m_audio_output_active.store(false, std::memory_order_release);
         m_audio_format_status_valid = false;
         m_audio_format_service_id = 0u;
         m_audio_format_frequency_hz = 0u;
@@ -515,6 +561,7 @@ namespace dab::measurement
 
         auto schedule_retry = [&](char const* reason)
         {
+            m_audio_output_active.store(false, std::memory_order_release);
             dab_audio_playback_close(&m_audio_playback);
             decoder_configured = false;
             recovering = true;
@@ -558,6 +605,7 @@ namespace dab::measurement
 
                 if (command && command->kind == AudioCommandKind::reset)
                 {
+                    m_audio_output_active.store(false, std::memory_order_release);
                     dab_audio_playback_close(&m_audio_playback);
                     active_format.reset();
                     decoder_configured = false;
@@ -568,6 +616,7 @@ namespace dab::measurement
                 }
                 if (command && command->kind == AudioCommandKind::format)
                 {
+                    m_audio_output_active.store(false, std::memory_order_release);
                     dab_audio_playback_close(&m_audio_playback);
                     active_format = std::move(*command);
                     decoder_configured = false;
@@ -611,12 +660,15 @@ namespace dab::measurement
                         continue;
                     }
                     if (playback_result == 0 &&
-                        dab_audio_playback_output_active(&m_audio_playback) > 0 &&
-                        recovering)
+                        dab_audio_playback_output_active(&m_audio_playback) > 0)
                     {
-                        recovering = false;
-                        retry_attempt = 0u;
-                        PublishStatus(State(), "Audio output recovered without restarting the receiver");
+                        m_audio_output_active.store(true, std::memory_order_release);
+                        if (recovering)
+                        {
+                            recovering = false;
+                            retry_attempt = 0u;
+                            PublishStatus(State(), "Audio output recovered without restarting the receiver");
+                        }
                     }
                 }
 
@@ -625,6 +677,7 @@ namespace dab::measurement
                     int const active = dab_audio_playback_output_active(&m_audio_playback);
                     if (active <= 0)
                     {
+                        m_audio_output_active.store(false, std::memory_order_release);
                         schedule_retry("Audio output device stopped");
                     }
                 }
@@ -634,6 +687,7 @@ namespace dab::measurement
         {
             PublishStatus(State(), "Audio worker stopped after an internal error", true);
         }
+        m_audio_output_active.store(false, std::memory_order_release);
         dab_audio_playback_close(&m_audio_playback);
     }
 
@@ -645,6 +699,22 @@ namespace dab::measurement
             m_blocks_received_offset += m_last_session_snapshot.blocks_received;
             m_dropped_blocks_offset += m_last_session_snapshot.dropped_blocks;
             m_processing_late_offset += m_last_session_snapshot.processing_late_count;
+            m_fic_frames_offset += m_last_session_snapshot.fic_frames_seen;
+            m_fic_valid_fibs_offset += m_last_session_snapshot.fic_total_valid_fibs;
+            m_fic_figs_offset += m_last_session_snapshot.fic_total_figs;
+            m_fic_fig_errors_offset += m_last_session_snapshot.fic_total_fig_parse_errors;
+            m_msc_frames_offset += m_last_session_snapshot.msc_frames_seen;
+            m_msc_generation_offset += m_last_session_snapshot.msc_superframe_generation;
+            m_msc_decode_attempts_offset += m_last_session_snapshot.msc_decode_attempts;
+            m_msc_decode_failures_offset += m_last_session_snapshot.msc_decode_failures;
+            m_msc_rs_corrected_offset += m_last_session_snapshot.msc_rs_corrected_total;
+            m_msc_au_crc_errors_offset +=
+                m_last_session_snapshot.msc_au_crc_errors_total;
+            m_msc_au_crc_checks_offset +=
+                m_last_session_snapshot.msc_au_crc_checks_total;
+            m_msc_ber_error_bits_offset += m_last_session_snapshot.msc_ber_error_bits;
+            m_msc_ber_compared_bits_offset +=
+                m_last_session_snapshot.msc_ber_compared_bits;
             if (m_last_session_snapshot.hardware_overruns_valid != 0)
             {
                 m_hardware_overruns_offset += m_last_session_snapshot.hardware_overruns;

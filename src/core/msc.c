@@ -39,6 +39,9 @@ struct dab_msc_dabplus_stream_runtime {
     uint32_t decode_failures;
     uint32_t rs_corrected_last_superframe;
     uint32_t rs_corrected_total;
+    uint32_t au_crc_errors_last_superframe;
+    uint32_t au_crc_errors_total;
+    uint32_t au_crc_checks_total;
     uint8_t last_decode_ok;
     uint8_t *columns;
     uint8_t *superframe;
@@ -407,6 +410,9 @@ static void dab_msc_reset_dabplus_stream(dab_msc_dabplus_stream_runtime_t *runti
     runtime->decode_failures = 0u;
     runtime->rs_corrected_last_superframe = 0u;
     runtime->rs_corrected_total = 0u;
+    runtime->au_crc_errors_last_superframe = 0u;
+    runtime->au_crc_errors_total = 0u;
+    runtime->au_crc_checks_total = 0u;
     runtime->last_decode_ok = 0u;
     memset(runtime->au_start, 0, sizeof(runtime->au_start));
     memset(runtime->au_length, 0, sizeof(runtime->au_length));
@@ -512,6 +518,47 @@ static int dab_msc_parse_dabplus_superframe(dab_msc_dabplus_stream_runtime_t *ru
     }
 
     return 0;
+}
+
+static uint16_t dab_msc_dabplus_crc16(const uint8_t *data, uint32_t length) {
+    uint16_t crc = 0xFFFFu;
+
+    for (uint32_t index = 0u; index < length; ++index) {
+        crc ^= (uint16_t)data[index] << 8u;
+        for (uint32_t bit = 0u; bit < 8u; ++bit) {
+            crc = (crc & 0x8000u) != 0u
+                ? (uint16_t)((crc << 1u) ^ 0x1021u)
+                : (uint16_t)(crc << 1u);
+        }
+    }
+    return (uint16_t)(~crc);
+}
+
+static void dab_msc_dabplus_measure_au_crc(dab_msc_dabplus_stream_runtime_t *runtime) {
+    uint32_t errors = 0u;
+
+    if (runtime == 0 || runtime->superframe == 0 || runtime->superframe_valid == 0u) {
+        return;
+    }
+    for (uint32_t index = 0u; index < runtime->au_count; ++index) {
+        const uint32_t start = runtime->au_start[index];
+        const uint32_t length = runtime->au_length[index];
+        const uint32_t crc_offset = start + length;
+        uint16_t received;
+
+        if (crc_offset + 2u > runtime->superframe_bytes) {
+            errors++;
+            continue;
+        }
+        received = (uint16_t)(((uint16_t)runtime->superframe[crc_offset] << 8u) |
+                              runtime->superframe[crc_offset + 1u]);
+        if (dab_msc_dabplus_crc16(runtime->superframe + start, length) != received) {
+            errors++;
+        }
+    }
+    runtime->au_crc_errors_last_superframe = errors;
+    runtime->au_crc_errors_total += errors;
+    runtime->au_crc_checks_total += runtime->au_count;
 }
 
 static int dab_msc_dabplus_decode_superframe(dab_msc_dabplus_stream_runtime_t *runtime) {
@@ -638,6 +685,7 @@ static int dab_msc_dabplus_decode_superframe(dab_msc_dabplus_stream_runtime_t *r
         runtime->superframe_valid = 1u;
     }
     if (runtime->superframe_valid != 0u) {
+        dab_msc_dabplus_measure_au_crc(runtime);
         runtime->generation++;
     }
     free(header);
@@ -803,7 +851,7 @@ static int dab_msc_eep_bitrate(uint8_t option, uint8_t protection_level, uint16_
     return 0;
 }
 
-static int dab_msc_resolve_subchannel(const dab_fic_subchannel_t *in, dab_msc_subchannel_t *out) {
+int dab_msc_resolve_subchannel(const dab_fic_subchannel_t *in, dab_msc_subchannel_t *out) {
     if (in == 0 || out == 0 || in->valid == 0u) {
         return -1;
     }
@@ -1030,6 +1078,62 @@ static int dab_msc_viterbi_decode_preallocated(const int16_t *symbols,
     }
 
     return 0;
+}
+
+static uint8_t dab_msc_mother_code(uint8_t bit, uint8_t *state) {
+    const uint8_t x0 = (uint8_t)((((*state >> 5u) & 1u) ^
+                                  ((*state >> 4u) & 1u) ^
+                                  ((*state >> 2u) & 1u) ^
+                                  ((*state >> 1u) & 1u) ^
+                                  (bit & 1u)) & 1u);
+    const uint8_t x1 = (uint8_t)((((*state >> 5u) & 1u) ^
+                                  ((*state >> 2u) & 1u) ^
+                                  ((*state >> 1u) & 1u) ^
+                                  ((*state >> 0u) & 1u) ^
+                                  (bit & 1u)) & 1u);
+    const uint8_t x2 = (uint8_t)((((*state >> 5u) & 1u) ^
+                                  ((*state >> 3u) & 1u) ^
+                                  ((*state >> 0u) & 1u) ^
+                                  (bit & 1u)) & 1u);
+    const uint8_t code = (uint8_t)(x0 | (x1 << 1u) | (x2 << 2u) | (x0 << 3u));
+
+    *state = (uint8_t)(((*state << 1u) & 0x3Fu) | (bit & 1u));
+    return code;
+}
+
+static void dab_msc_measure_post_viterbi_ber(dab_msc_subchannel_runtime_t *runtime,
+                                             const uint8_t *decoded_bytes) {
+    uint32_t framebits;
+    uint32_t trellis_bits;
+    uint8_t state = 0u;
+    uint64_t errors = 0u;
+    uint64_t compared = 0u;
+
+    if (runtime == 0 || decoded_bytes == 0 || runtime->workspace == 0) {
+        return;
+    }
+    framebits = runtime->config.framebits;
+    trellis_bits = framebits + 6u;
+    for (uint32_t bit_index = 0u; bit_index < trellis_bits; ++bit_index) {
+        const uint8_t bit = bit_index < framebits
+            ? (uint8_t)((decoded_bytes[bit_index >> 3u] >>
+                         (7u - (bit_index & 7u))) & 1u)
+            : 0u;
+        const uint8_t code = dab_msc_mother_code(bit, &state);
+
+        for (uint32_t branch = 0u; branch < 4u; ++branch) {
+            const int16_t softbit = runtime->workspace->unpunctured[(bit_index * 4u) + branch];
+            if (softbit == 0) {
+                continue;
+            }
+            compared++;
+            if ((softbit > 0 ? 1u : 0u) != ((code >> branch) & 1u)) {
+                errors++;
+            }
+        }
+    }
+    runtime->ber_error_bits += errors;
+    runtime->ber_compared_bits += compared;
 }
 
 static int dab_msc_viterbi_decode(const int16_t *symbols,
@@ -1582,6 +1686,7 @@ static int dab_msc_decode_subchannel_cif_runtime(const int8_t *msc_softbits,
                                                   workspace->viterbi);
     }
     if (rc == 0) {
+        dab_msc_measure_post_viterbi_ber(runtime, output_bytes);
         dab_msc_descramble_bytes(output_bytes, config->framebits / 8u);
     }
     return rc == 0 ? 0 : -1;
@@ -1993,6 +2098,10 @@ int dab_msc_get_dabplus_debug(const dab_msc_state_t *state,
 
     debug->valid = 1u;
     debug->subchid = component->subchid;
+    debug->runtime_reset_count = runtime->reset_count;
+    debug->last_reconfig_reason = runtime->last_reconfig_reason;
+    debug->ber_error_bits = runtime->ber_error_bits;
+    debug->ber_compared_bits = runtime->ber_compared_bits;
     dabplus = runtime->dabplus;
     if (dabplus == 0) {
         return 0;
@@ -2007,9 +2116,10 @@ int dab_msc_get_dabplus_debug(const dab_msc_state_t *state,
     debug->decode_failures = dabplus->decode_failures;
     debug->rs_corrected_last_superframe = dabplus->rs_corrected_last_superframe;
     debug->rs_corrected_total = dabplus->rs_corrected_total;
+    debug->au_crc_errors_last_superframe = dabplus->au_crc_errors_last_superframe;
+    debug->au_crc_errors_total = dabplus->au_crc_errors_total;
+    debug->au_crc_checks_total = dabplus->au_crc_checks_total;
     debug->last_decode_ok = dabplus->last_decode_ok;
-    debug->runtime_reset_count = runtime->reset_count;
-    debug->last_reconfig_reason = runtime->last_reconfig_reason;
     return 0;
 }
 
