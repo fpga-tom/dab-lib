@@ -89,6 +89,27 @@ int dab_pc_queue_pop(dab_pc_queue_t *queue, void **item) {
     return rc;
 }
 
+int dab_pc_queue_pop_timeout(dab_pc_queue_t *queue, void **item, uint32_t timeout_ms) {
+    int rc = 0;
+
+    dab_mutex_lock(&queue->mutex);
+    while (!queue->stop && queue->count == 0u) {
+        rc = dab_cond_wait_timeout(&queue->not_empty, &queue->mutex, timeout_ms);
+        if (rc != 0) {
+            break;
+        }
+    }
+    if (queue->count != 0u) {
+        rc = dab_pc_queue_pop_locked(queue, item);
+    } else if (queue->stop || rc < 0) {
+        rc = -1;
+    } else {
+        rc = 1;
+    }
+    dab_mutex_unlock(&queue->mutex);
+    return rc;
+}
+
 int dab_pc_queue_try_push(dab_pc_queue_t *queue, void *item) {
     int rc = 0;
     dab_mutex_lock(&queue->mutex);

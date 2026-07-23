@@ -15,7 +15,8 @@ typedef enum {
     DAB_SDR_STATUS_UNSUPPORTED = -3,
     DAB_SDR_STATUS_NOT_FOUND = -4,
     DAB_SDR_STATUS_NOT_IMPLEMENTED = -5,
-    DAB_SDR_STATUS_BUSY = -6
+    DAB_SDR_STATUS_BUSY = -6,
+    DAB_SDR_STATUS_TIMEOUT = -7
 } dab_sdr_status_t;
 
 typedef enum {
@@ -53,6 +54,9 @@ typedef struct {
     dab_sdr_status_t (*start)(struct dab_sdr_stream *stream);
     dab_sdr_status_t (*stop)(struct dab_sdr_stream *stream);
     dab_sdr_status_t (*read)(struct dab_sdr_stream *stream, dab_sdr_block_view_t *block);
+    dab_sdr_status_t (*read_timeout)(struct dab_sdr_stream *stream,
+                                     dab_sdr_block_view_t *block,
+                                     uint32_t timeout_ms);
     void (*destroy)(struct dab_sdr_stream *stream);
 } dab_sdr_stream_vtbl_t;
 

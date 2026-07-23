@@ -3,6 +3,7 @@
 
 void test_pc_queue_basic(void);
 void test_pc_queue_stop_wakes_waiter(void);
+void test_pc_queue_timeout(void);
 void test_block_pool_acquire_release(void);
 void test_block_storage_is_compact_and_aligned(void);
 void test_sample_history_wraps_with_contiguous_view(void);
@@ -54,6 +55,7 @@ void test_sdrplay_rejects_invalid_device_specific_config(void);
 void test_rtlsdr_api_reports_unusable_when_not_loaded(void);
 void test_rtlsdr_device_specific_config_propagates_to_samples(void);
 void test_rtlsdr_rejects_invalid_device_specific_config(void);
+void test_scan_config_normalizes_timing(void);
 void test_simd_scalar_fallback(void);
 void test_simd_convert_and_dot(void);
 void test_simd_complex_convert_vector_and_tail(void);
@@ -87,6 +89,7 @@ void test_tframe_push_symbol_partitions_fic_and_msc_and_wraps_frame(void);
 int main(void) {
     test_pc_queue_basic();
     test_pc_queue_stop_wakes_waiter();
+    test_pc_queue_timeout();
     test_block_pool_acquire_release();
     test_block_storage_is_compact_and_aligned();
     test_sample_history_wraps_with_contiguous_view();
@@ -138,6 +141,7 @@ int main(void) {
     test_rtlsdr_api_reports_unusable_when_not_loaded();
     test_rtlsdr_device_specific_config_propagates_to_samples();
     test_rtlsdr_rejects_invalid_device_specific_config();
+    test_scan_config_normalizes_timing();
     test_simd_scalar_fallback();
     test_simd_convert_and_dot();
     test_simd_complex_convert_vector_and_tail();

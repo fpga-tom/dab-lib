@@ -59,6 +59,7 @@ constexpr int kPlaybackStatusTimerId = wxID_HIGHEST + 3;
 constexpr int kSdrSettingsMenuId = wxID_HIGHEST + 4;
 constexpr int kSpectrumSettingsMenuId = wxID_HIGHEST + 5;
 constexpr int kAudioSettingsMenuId = wxID_HIGHEST + 6;
+constexpr int kScanSettingsMenuId = wxID_HIGHEST + 7;
 
 enum class SpectrumDisplayMode {
     RtaBars = 0,
@@ -856,6 +857,94 @@ private:
     wxSpinCtrl *gainSpin_ = nullptr;
 };
 
+class ScanSettingsDialog : public wxDialog {
+public:
+    ScanSettingsDialog(wxWindow *parent, const dab_gui_scan_settings_t &settings)
+        : wxDialog(parent, wxID_ANY, "Scan Settings", wxDefaultPosition, wxDefaultSize,
+                   wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER) {
+        auto *outer = new wxBoxSizer(wxVERTICAL);
+        auto *grid = new wxFlexGridSizer(3, 8, 10);
+
+        perFrequencySpin_ = new wxSpinCtrl(this, wxID_ANY);
+        perFrequencySpin_->SetRange(DAB_SCAN_MIN_PER_FREQUENCY_SECONDS,
+                                    DAB_SCAN_MAX_PER_FREQUENCY_SECONDS);
+        perFrequencySpin_->SetValue(static_cast<int>(settings.per_frequency_seconds));
+
+        labelWaitSpin_ = new wxSpinCtrl(this, wxID_ANY);
+        labelWaitSpin_->SetRange(DAB_SCAN_MIN_LABEL_WAIT_SECONDS,
+                                 DAB_SCAN_MAX_LABEL_WAIT_SECONDS);
+        labelWaitSpin_->SetValue(static_cast<int>(settings.label_wait_seconds));
+
+        hardChannelSpin_ = new wxSpinCtrl(this, wxID_ANY);
+        hardChannelSpin_->SetRange(DAB_SCAN_MIN_HARD_CHANNEL_SECONDS,
+                                   DAB_SCAN_MAX_HARD_CHANNEL_SECONDS);
+        hardChannelSpin_->SetValue(static_cast<int>(settings.hard_channel_seconds));
+
+        AddTimingRow(grid, "Channel sample time", perFrequencySpin_);
+        AddTimingRow(grid, "Extra multiplex label time", labelWaitSpin_);
+        AddTimingRow(grid, "Maximum channel time", hardChannelSpin_);
+        grid->AddGrowableCol(0, 1);
+
+        auto *description = new wxStaticText(
+            this,
+            wxID_ANY,
+            "Longer sample and label times can improve detection of weak multiplexes. "
+            "Maximum channel time is an emergency wall-clock limit.");
+        description->SetForegroundColour(wxColour(95, 104, 116));
+        description->Wrap(430);
+
+        auto *buttons = new wxStdDialogButtonSizer();
+        buttons->AddButton(new wxButton(this, wxID_OK));
+        buttons->AddButton(new wxButton(this, wxID_CANCEL));
+        buttons->Realize();
+
+        outer->Add(grid, 0, wxEXPAND | wxALL, 14);
+        outer->Add(description, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 14);
+        outer->Add(buttons, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 14);
+
+        SetSizerAndFit(outer);
+        SetMinSize(wxSize(470, -1));
+        CentreOnParent();
+
+        perFrequencySpin_->Bind(wxEVT_SPINCTRL, [this](wxSpinEvent &) {
+            UpdateHardChannelRange();
+        });
+        labelWaitSpin_->Bind(wxEVT_SPINCTRL, [this](wxSpinEvent &) {
+            UpdateHardChannelRange();
+        });
+        UpdateHardChannelRange();
+    }
+
+    dab_gui_scan_settings_t Settings() const {
+        dab_gui_scan_settings_t settings;
+        settings.per_frequency_seconds = static_cast<uint32_t>(perFrequencySpin_->GetValue());
+        settings.label_wait_seconds = static_cast<uint32_t>(labelWaitSpin_->GetValue());
+        settings.hard_channel_seconds = static_cast<uint32_t>(hardChannelSpin_->GetValue());
+        return settings;
+    }
+
+private:
+    void AddTimingRow(wxFlexGridSizer *grid, const wxString &label, wxSpinCtrl *spin) {
+        grid->Add(new wxStaticText(this, wxID_ANY, label), 0, wxALIGN_CENTER_VERTICAL);
+        grid->Add(spin, 0, wxALIGN_CENTER_VERTICAL);
+        grid->Add(new wxStaticText(this, wxID_ANY, "seconds"), 0, wxALIGN_CENTER_VERTICAL);
+    }
+
+    void UpdateHardChannelRange() {
+        const int minimum = std::max(
+            static_cast<int>(DAB_SCAN_MIN_HARD_CHANNEL_SECONDS),
+            perFrequencySpin_->GetValue() + labelWaitSpin_->GetValue());
+        hardChannelSpin_->SetRange(minimum, DAB_SCAN_MAX_HARD_CHANNEL_SECONDS);
+        if (hardChannelSpin_->GetValue() < minimum) {
+            hardChannelSpin_->SetValue(minimum);
+        }
+    }
+
+    wxSpinCtrl *perFrequencySpin_ = nullptr;
+    wxSpinCtrl *labelWaitSpin_ = nullptr;
+    wxSpinCtrl *hardChannelSpin_ = nullptr;
+};
+
 class AudioSettingsDialog : public wxDialog {
 public:
     AudioSettingsDialog(wxWindow *parent, const dab_gui_audio_settings_t &settings)
@@ -894,6 +983,19 @@ public:
         description->SetForegroundColour(wxColour(95, 104, 116));
         description->Wrap(390);
 
+        realtimeCheck_ = new wxCheckBox(
+            this,
+            wxID_ANY,
+            "Realtime decoding priority (Windows MMCSS)");
+        realtimeCheck_->SetValue(settings.realtime_decoding != 0);
+        auto *realtimeDescription = new wxStaticText(
+            this,
+            wxID_ANY,
+            "Prioritizes only the DAB decoder and audio writer threads. "
+            "It does not use the unsafe system-wide Realtime process priority.");
+        realtimeDescription->SetForegroundColour(wxColour(95, 104, 116));
+        realtimeDescription->Wrap(390);
+
         auto *buttons = new wxStdDialogButtonSizer();
         buttons->AddButton(new wxButton(this, wxID_OK));
         buttons->AddButton(new wxButton(this, wxID_CANCEL));
@@ -901,6 +1003,8 @@ public:
 
         outer->Add(backendChoice_, 0, wxEXPAND | wxALL, 14);
         outer->Add(description, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 14);
+        outer->Add(realtimeCheck_, 0, wxLEFT | wxRIGHT | wxBOTTOM, 14);
+        outer->Add(realtimeDescription, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 14);
         outer->Add(buttons, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 14);
 
         SetSizerAndFit(outer);
@@ -918,11 +1022,13 @@ public:
         } else {
             settings.backend = DAB_AUDIO_OUTPUT_AUTO;
         }
+        settings.realtime_decoding = realtimeCheck_->GetValue() ? 1 : 0;
         return settings;
     }
 
 private:
     wxRadioBox *backendChoice_ = nullptr;
+    wxCheckBox *realtimeCheck_ = nullptr;
 };
 
 class SpectrumSettingsDialog : public wxDialog {
@@ -1092,7 +1198,8 @@ private:
         }
         scanSucceeded_ = scanResultCode_.load() == 0;
         if (scanSucceeded_) {
-            statusLabel_->SetLabel("Scan complete.");
+            statusLabel_->SetLabel(
+                completionSummary_.empty() ? "Scan complete." : completionSummary_);
             channelLabel_->SetLabel(wxString::Format("Results saved to %s", resultsPath_));
         } else if (scanResultCode_.load() == -2) {
             statusLabel_->SetLabel("Scan cancelled.");
@@ -1164,9 +1271,22 @@ private:
 
         if (parts[0] == "SCAN_COMPLETE" && parts.size() >= 3) {
             long services = 0;
+            long failedChannels = 0;
             parts[2].ToLong(&services);
+            if (parts.size() >= 4) {
+                parts[3].ToLong(&failedChannels);
+            }
             progress_->SetValue(progress_->GetRange());
-            statusLabel_->SetLabel(wxString::Format("Scan complete. Services found: %ld", services));
+            if (failedChannels > 0) {
+                completionSummary_ =
+                    wxString::Format("Scan complete. Services found: %ld; channels skipped: %ld",
+                                     services,
+                                     failedChannels);
+            } else {
+                completionSummary_ =
+                    wxString::Format("Scan complete. Services found: %ld", services);
+            }
+            statusLabel_->SetLabel(completionSummary_);
             return;
         }
 
@@ -1185,6 +1305,7 @@ private:
     std::thread workerThread_;
     std::mutex linesMutex_;
     std::deque<wxString> pendingLines_;
+    wxString completionSummary_;
     bool callbacksEnabled_ = true;
     std::atomic<bool> scanFinished_{false};
     std::atomic<int> scanResultCode_{-1};
@@ -1206,20 +1327,25 @@ MainFrame::MainFrame()
               wxSize(1100, 760)) {
     dab_gui_sdr_default_settings(&sdrSettings_);
     dab_gui_audio_default_settings(&audioSettings_);
+    dab_gui_scan_default_settings(&scanSettings_);
     LoadSdrSettings();
     LoadAudioSettings();
+    LoadScanSettings();
     LoadSpectrumSettings();
     ApplySdrSettings();
     ApplyAudioSettings();
+    ApplyScanSettings();
 
     auto *menuBar = new wxMenuBar();
     auto *settingsMenu = new wxMenu();
     settingsMenu->Append(kSdrSettingsMenuId, "SDR Settings...");
+    settingsMenu->Append(kScanSettingsMenuId, "Scan Settings...");
     settingsMenu->Append(kAudioSettingsMenuId, "Audio Settings...");
     settingsMenu->Append(kSpectrumSettingsMenuId, "Spectrum Settings...");
     menuBar->Append(settingsMenu, "Settings");
     SetMenuBar(menuBar);
     Bind(wxEVT_MENU, &MainFrame::OnSdrSettings, this, kSdrSettingsMenuId);
+    Bind(wxEVT_MENU, &MainFrame::OnScanSettings, this, kScanSettingsMenuId);
     Bind(wxEVT_MENU, &MainFrame::OnAudioSettings, this, kAudioSettingsMenuId);
     Bind(wxEVT_MENU, &MainFrame::OnSpectrumSettings, this, kSpectrumSettingsMenuId);
 
@@ -1287,9 +1413,12 @@ void MainFrame::SaveSdrSettings() {
 void MainFrame::LoadAudioSettings() {
     wxConfig config("dab-lib");
     wxString backend;
+    bool realtimeDecoding = false;
 
     config.Read("/audio/backend", &backend, "auto");
+    config.Read("/audio/realtime_decoding", &realtimeDecoding, false);
     audioSettings_.backend = dab_audio_output_backend_from_string(backend.utf8_string().c_str());
+    audioSettings_.realtime_decoding = realtimeDecoding ? 1 : 0;
     if (audioSettings_.backend != DAB_AUDIO_OUTPUT_AUTO &&
         dab_audio_output_backend_available(audioSettings_.backend) == 0) {
         audioSettings_.backend = DAB_AUDIO_OUTPUT_AUTO;
@@ -1301,6 +1430,40 @@ void MainFrame::SaveAudioSettings() {
 
     config.Write("/audio/backend",
                  wxString::FromUTF8(dab_audio_output_backend_key(audioSettings_.backend)));
+    config.Write("/audio/realtime_decoding", audioSettings_.realtime_decoding != 0);
+    config.Flush();
+}
+
+void MainFrame::LoadScanSettings() {
+    wxConfig config("dab-lib");
+    long perFrequency = DAB_SCAN_DEFAULT_PER_FREQUENCY_SECONDS;
+    long labelWait = DAB_SCAN_DEFAULT_LABEL_WAIT_SECONDS;
+    long hardChannel = DAB_SCAN_DEFAULT_HARD_CHANNEL_SECONDS;
+
+    config.Read("/scan/per_frequency_seconds",
+                &perFrequency,
+                DAB_SCAN_DEFAULT_PER_FREQUENCY_SECONDS);
+    config.Read("/scan/label_wait_seconds",
+                &labelWait,
+                DAB_SCAN_DEFAULT_LABEL_WAIT_SECONDS);
+    config.Read("/scan/hard_channel_seconds",
+                &hardChannel,
+                DAB_SCAN_DEFAULT_HARD_CHANNEL_SECONDS);
+
+    scanSettings_.per_frequency_seconds = static_cast<uint32_t>(std::max(0L, perFrequency));
+    scanSettings_.label_wait_seconds = static_cast<uint32_t>(std::max(0L, labelWait));
+    scanSettings_.hard_channel_seconds = static_cast<uint32_t>(std::max(0L, hardChannel));
+}
+
+void MainFrame::SaveScanSettings() {
+    wxConfig config("dab-lib");
+
+    config.Write("/scan/per_frequency_seconds",
+                 static_cast<long>(scanSettings_.per_frequency_seconds));
+    config.Write("/scan/label_wait_seconds",
+                 static_cast<long>(scanSettings_.label_wait_seconds));
+    config.Write("/scan/hard_channel_seconds",
+                 static_cast<long>(scanSettings_.hard_channel_seconds));
     config.Flush();
 }
 
@@ -1342,6 +1505,11 @@ void MainFrame::ApplyAudioSettings() {
     dab_gui_audio_set_settings(&audioSettings_);
 }
 
+void MainFrame::ApplyScanSettings() {
+    dab_gui_scan_set_settings(&scanSettings_);
+    dab_gui_scan_get_settings(&scanSettings_);
+}
+
 wxString MainFrame::SdrSettingsSummary() const {
     const wxString backend = sdrSettings_.backend == DAB_GUI_SDR_BACKEND_RTLSDR ? "RTL-SDR" : "SDRplay";
     if (sdrSettings_.agc_enabled != 0) {
@@ -1351,7 +1519,17 @@ wxString MainFrame::SdrSettingsSummary() const {
 }
 
 wxString MainFrame::AudioSettingsSummary() const {
-    return wxString::FromUTF8(dab_audio_output_backend_name(audioSettings_.backend));
+    const wxString backend =
+        wxString::FromUTF8(dab_audio_output_backend_name(audioSettings_.backend));
+    return audioSettings_.realtime_decoding != 0 ?
+        backend + ", realtime priority" : backend;
+}
+
+wxString MainFrame::ScanSettingsSummary() const {
+    return wxString::Format("Scan timing: %u s/channel, %u s labels, %u s maximum",
+                            scanSettings_.per_frequency_seconds,
+                            scanSettings_.label_wait_seconds,
+                            scanSettings_.hard_channel_seconds);
 }
 
 wxWindow *MainFrame::CreateBottomPanel(wxWindow *parent) {
@@ -1528,6 +1706,21 @@ void MainFrame::OnSdrSettings(wxCommandEvent &) {
         controlStatusLabel_->SetLabel(wxString::Format("SDR settings: %s", SdrSettingsSummary()));
     }
     UpdatePlaybackControls();
+}
+
+void MainFrame::OnScanSettings(wxCommandEvent &) {
+    ScanSettingsDialog dialog(this, scanSettings_);
+
+    if (dialog.ShowModal() != wxID_OK) {
+        return;
+    }
+
+    scanSettings_ = dialog.Settings();
+    ApplyScanSettings();
+    SaveScanSettings();
+    if (controlStatusLabel_ != nullptr) {
+        controlStatusLabel_->SetLabel(ScanSettingsSummary());
+    }
 }
 
 void MainFrame::OnAudioSettings(wxCommandEvent &) {

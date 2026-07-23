@@ -41,3 +41,13 @@ void test_pc_queue_stop_wakes_waiter(void) {
     TEST_ASSERT(rc != 0);
     dab_pc_queue_destroy(&queue);
 }
+
+void test_pc_queue_timeout(void) {
+    void *storage[1] = {0};
+    dab_pc_queue_t queue;
+    void *item = 0;
+
+    TEST_ASSERT(dab_pc_queue_init(&queue, storage, 1u) == 0);
+    TEST_ASSERT(dab_pc_queue_pop_timeout(&queue, &item, 10u) == 1);
+    dab_pc_queue_destroy(&queue);
+}

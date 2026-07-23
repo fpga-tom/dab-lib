@@ -5,6 +5,7 @@
 #include <string.h>
 
 #if defined(_WIN32)
+#include <avrt.h>
 #include <process.h>
 #include <windows.h>
 
@@ -59,6 +60,35 @@ int dab_thread_join(dab_thread_t *thread, int *result) {
         *result = (int)code;
     }
     return 0;
+}
+
+int dab_thread_realtime_audio_begin(dab_thread_realtime_audio_scope_t *scope) {
+    DWORD task_index = 0u;
+    HANDLE task_handle;
+
+    if (scope == 0 || scope->active != 0) {
+        return -1;
+    }
+    task_handle = AvSetMmThreadCharacteristicsW(L"Pro Audio", &task_index);
+    if (task_handle == 0) {
+        return -1;
+    }
+    if (!AvSetMmThreadPriority(task_handle, AVRT_PRIORITY_HIGH)) {
+        (void)AvRevertMmThreadCharacteristics(task_handle);
+        return -1;
+    }
+    scope->platform_handle = task_handle;
+    scope->active = 1;
+    return 0;
+}
+
+void dab_thread_realtime_audio_end(dab_thread_realtime_audio_scope_t *scope) {
+    if (scope == 0 || scope->active == 0) {
+        return;
+    }
+    (void)AvRevertMmThreadCharacteristics((HANDLE)scope->platform_handle);
+    scope->platform_handle = 0;
+    scope->active = 0;
 }
 #else
 #include <pthread.h>
@@ -136,5 +166,20 @@ int dab_thread_join(dab_thread_t *thread, int *result) {
         *result = (int)(intptr_t)value;
     }
     return 0;
+}
+
+int dab_thread_realtime_audio_begin(dab_thread_realtime_audio_scope_t *scope) {
+    if (scope == 0 || scope->active != 0) {
+        return -1;
+    }
+    return 0;
+}
+
+void dab_thread_realtime_audio_end(dab_thread_realtime_audio_scope_t *scope) {
+    if (scope == 0) {
+        return;
+    }
+    scope->platform_handle = 0;
+    scope->active = 0;
 }
 #endif

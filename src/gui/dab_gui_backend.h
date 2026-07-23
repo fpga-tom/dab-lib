@@ -5,6 +5,7 @@
 
 #include "dab/audio/audio_output.h"
 #include "dab/core/audio_spectrum.h"
+#include "dab/scan.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -57,7 +58,14 @@ typedef struct {
 
 typedef struct {
     dab_audio_output_backend_t backend;
+    int realtime_decoding;
 } dab_gui_audio_settings_t;
+
+typedef struct {
+    uint32_t per_frequency_seconds;
+    uint32_t label_wait_seconds;
+    uint32_t hard_channel_seconds;
+} dab_gui_scan_settings_t;
 
 void dab_gui_sdr_default_settings(dab_gui_sdr_settings_t *settings);
 void dab_gui_sdr_set_settings(const dab_gui_sdr_settings_t *settings);
@@ -65,6 +73,9 @@ void dab_gui_sdr_get_settings(dab_gui_sdr_settings_t *settings);
 void dab_gui_audio_default_settings(dab_gui_audio_settings_t *settings);
 void dab_gui_audio_set_settings(const dab_gui_audio_settings_t *settings);
 void dab_gui_audio_get_settings(dab_gui_audio_settings_t *settings);
+void dab_gui_scan_default_settings(dab_gui_scan_settings_t *settings);
+void dab_gui_scan_set_settings(const dab_gui_scan_settings_t *settings);
+void dab_gui_scan_get_settings(dab_gui_scan_settings_t *settings);
 
 int dab_gui_scan_run(const char *output_path, dab_gui_scan_event_callback_t callback, void *user);
 void dab_gui_scan_cancel_current(void);

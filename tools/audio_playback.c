@@ -8,7 +8,7 @@
 enum {
     DAB_AUDIO_FRAMES_PER_BUFFER = 2048,
     DAB_AUDIO_RING_SECONDS = 2,
-    DAB_AUDIO_PREFILL_BLOCKS = 3
+    DAB_AUDIO_STARTUP_PREFILL_MS = 1500
 };
 
 static dab_mutex_t g_spectrum_callback_mutex;
@@ -280,14 +280,20 @@ static void dab_audio_playback_signal_output_failed(dab_audio_playback_t *audio)
 
 static int dab_audio_playback_thread_main(void *arg) {
     dab_audio_playback_t *audio = (dab_audio_playback_t *)arg;
+    dab_thread_realtime_audio_scope_t realtime_scope = {0};
     dab_audio_output_t *output;
     int16_t *out;
     const size_t channels = (size_t)audio->channels;
-    const size_t prefill_frames = DAB_AUDIO_FRAMES_PER_BUFFER * DAB_AUDIO_PREFILL_BLOCKS;
+    size_t prefill_frames;
 
+    if (audio->realtime_enabled != 0u &&
+        dab_thread_realtime_audio_begin(&realtime_scope) != 0) {
+        fprintf(stderr, "audio playback: Windows realtime audio scheduling is unavailable\n");
+    }
     out = (int16_t *)malloc(DAB_AUDIO_FRAMES_PER_BUFFER * channels * sizeof(int16_t));
     if (out == 0) {
         dab_audio_playback_signal_output_failed(audio);
+        dab_thread_realtime_audio_end(&realtime_scope);
         return 0;
     }
     output = dab_audio_output_create(audio->output_backend);
@@ -295,6 +301,7 @@ static int dab_audio_playback_thread_main(void *arg) {
         fprintf(stderr, "audio playback: output allocation failed\n");
         free(out);
         dab_audio_playback_signal_output_failed(audio);
+        dab_thread_realtime_audio_end(&realtime_scope);
         return 0;
     }
     if (dab_audio_output_open(output,
@@ -307,6 +314,7 @@ static int dab_audio_playback_thread_main(void *arg) {
         dab_audio_output_destroy(output);
         free(out);
         dab_audio_playback_signal_output_failed(audio);
+        dab_thread_realtime_audio_end(&realtime_scope);
         return 0;
     }
     dab_mutex_lock(&audio->ring_mutex);
@@ -318,13 +326,24 @@ static int dab_audio_playback_thread_main(void *arg) {
            dab_audio_output_backend_name(dab_audio_output_active_backend(output)),
            audio->sample_rate,
            audio->channels);
+    prefill_frames =
+        ((size_t)audio->sample_rate * DAB_AUDIO_STARTUP_PREFILL_MS) / 1000u;
+    if (prefill_frames < DAB_AUDIO_FRAMES_PER_BUFFER) {
+        prefill_frames = DAB_AUDIO_FRAMES_PER_BUFFER;
+    }
+    if (prefill_frames > audio->ring_frames) {
+        prefill_frames = audio->ring_frames;
+    }
 
     while (audio->thread_stop == 0u) {
         if (audio->ring_ready != 0u) {
+            size_t required_frames;
+
             dab_mutex_lock(&audio->ring_mutex);
+            required_frames = audio->prebuffer_done == 0u ?
+                prefill_frames : DAB_AUDIO_FRAMES_PER_BUFFER;
             while (audio->thread_stop == 0u &&
-                   audio->prebuffer_done == 0u &&
-                   audio->ring_count < prefill_frames) {
+                   audio->ring_count < required_frames) {
                 dab_cond_wait(&audio->ring_cond, &audio->ring_mutex);
             }
             if (audio->thread_stop == 0u && audio->ring_count >= prefill_frames) {
@@ -338,10 +357,8 @@ static int dab_audio_playback_thread_main(void *arg) {
         {
             size_t got = dab_audio_ring_read_frames(audio, out, DAB_AUDIO_FRAMES_PER_BUFFER);
 
-            if (got < DAB_AUDIO_FRAMES_PER_BUFFER) {
-                memset(&out[got * channels],
-                       0,
-                       (DAB_AUDIO_FRAMES_PER_BUFFER - got) * channels * sizeof(int16_t));
+            if (got != DAB_AUDIO_FRAMES_PER_BUFFER) {
+                continue;
             }
             if (dab_audio_output_write(output, out, DAB_AUDIO_FRAMES_PER_BUFFER) != 0) {
                 fprintf(stderr,
@@ -357,6 +374,7 @@ static int dab_audio_playback_thread_main(void *arg) {
     dab_mutex_unlock(&audio->ring_mutex);
     dab_audio_output_destroy(output);
     free(out);
+    dab_thread_realtime_audio_end(&realtime_scope);
     return 0;
 }
 

@@ -31,9 +31,23 @@ typedef struct {
 typedef int (*dab_scan_callback_t)(const dab_scan_event_t *event, void *user);
 typedef int (*dab_scan_cancel_callback_t)(void *user);
 
+enum {
+    DAB_SCAN_DEFAULT_PER_FREQUENCY_SECONDS = 4,
+    DAB_SCAN_MIN_PER_FREQUENCY_SECONDS = 2,
+    DAB_SCAN_MAX_PER_FREQUENCY_SECONDS = 15,
+    DAB_SCAN_DEFAULT_LABEL_WAIT_SECONDS = 6,
+    DAB_SCAN_MIN_LABEL_WAIT_SECONDS = 2,
+    DAB_SCAN_MAX_LABEL_WAIT_SECONDS = 20,
+    DAB_SCAN_DEFAULT_HARD_CHANNEL_SECONDS = 45,
+    DAB_SCAN_MIN_HARD_CHANNEL_SECONDS = 10,
+    DAB_SCAN_MAX_HARD_CHANNEL_SECONDS = 120
+};
+
 typedef struct {
     const char *driver;
     uint32_t per_frequency_seconds;
+    uint32_t label_wait_seconds;
+    uint32_t hard_channel_seconds;
     int gain_db;
     int agc_enabled;
     int ppm_correction;
@@ -45,6 +59,7 @@ typedef struct {
 } dab_scan_config_t;
 
 void dab_scan_default_config(dab_scan_config_t *config);
+void dab_scan_normalize_config(dab_scan_config_t *config);
 int dab_scan_band_iii(const dab_scan_config_t *config, dab_scan_callback_t callback, void *user);
 int dab_scan_frequency_hz(const dab_scan_config_t *config,
                           const char *channel,

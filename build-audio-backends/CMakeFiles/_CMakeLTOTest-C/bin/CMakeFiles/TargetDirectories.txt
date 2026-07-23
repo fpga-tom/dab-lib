@@ -1,4 +1,0 @@
-C:/Users/tomas/source/repos/fpga-tom/dab-lib/build-audio-backends/CMakeFiles/_CMakeLTOTest-C/bin/CMakeFiles/foo.dir
-C:/Users/tomas/source/repos/fpga-tom/dab-lib/build-audio-backends/CMakeFiles/_CMakeLTOTest-C/bin/CMakeFiles/boo.dir
-C:/Users/tomas/source/repos/fpga-tom/dab-lib/build-audio-backends/CMakeFiles/_CMakeLTOTest-C/bin/CMakeFiles/ALL_BUILD.dir
-C:/Users/tomas/source/repos/fpga-tom/dab-lib/build-audio-backends/CMakeFiles/_CMakeLTOTest-C/bin/CMakeFiles/ZERO_CHECK.dir

@@ -19,6 +19,7 @@
 #include "dab/hal/sdr_device.h"
 #include "dab/hal/rtlsdr_device.h"
 #include "dab/hal/sdrplay_device.h"
+#include "dab/os/os_thread.h"
 #if defined(DAB_RECEIVE_NO_MAIN)
 #include "dab/receive.h"
 #endif
@@ -416,7 +417,12 @@ static void reset_runtime_state(dab_null_detect_t *detector,
     }
 #if defined(DAB_HAVE_AUDIO_PLAYBACK)
     if (audio != 0) {
+        const dab_audio_output_backend_t output_backend = audio->output_backend;
+        const uint8_t realtime_enabled = audio->realtime_enabled;
+
         dab_audio_playback_close(audio);
+        audio->output_backend = output_backend;
+        audio->realtime_enabled = realtime_enabled;
         audio->debug_enabled = (uint8_t)(audio_debug_enabled != 0);
     }
 #else
@@ -994,9 +1000,12 @@ int main(int argc, char **argv) {
     uint32_t last_audio_msc_frames_seen = 0u;
     uint32_t last_audio_tframe_symbol_index = 0u;
     int rc = 1;
+    const int realtime_audio_enabled = env_enabled("DAB_AUDIO_REALTIME", 0);
+    dab_thread_realtime_audio_scope_t realtime_scope = {0};
 #if defined(DAB_HAVE_AUDIO_PLAYBACK)
     dab_audio_playback_t audio = {0};
     audio.output_backend = dab_audio_output_backend_from_string(getenv("DAB_AUDIO_BACKEND"));
+    audio.realtime_enabled = (uint8_t)(realtime_audio_enabled != 0);
     audio.debug_enabled = (uint8_t)(audio_debug_enabled != 0);
 #else
     void *audio = 0;
@@ -1200,6 +1209,10 @@ int main(int argc, char **argv) {
         fprintf(stderr, "ofdm init failed\n");
         dab_fic_destroy(&fic);
         return 2;
+    }
+    if (realtime_audio_enabled != 0 &&
+        dab_thread_realtime_audio_begin(&realtime_scope) != 0) {
+        fprintf(stderr, "DAB decoding: Windows realtime audio scheduling is unavailable\n");
     }
 
     fft_i = (float *)calloc(acquire_config.fft_samples, sizeof(*fft_i));
@@ -2298,5 +2311,6 @@ cleanup:
     free(active_i);
     free(fft_q);
     free(fft_i);
+    dab_thread_realtime_audio_end(&realtime_scope);
     return rc;
 }

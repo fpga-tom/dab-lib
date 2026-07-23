@@ -24,6 +24,7 @@
 #include "dab/hal/sdr_device.h"
 #include "dab/hal/rtlsdr_device.h"
 #include "dab/hal/sdrplay_device.h"
+#include "dab/os/os_time.h"
 #include "dab/scan.h"
 
 #ifndef DAB_SCAN_CANCEL_REQUESTED
@@ -98,7 +99,9 @@ static const dab_channel_t kBandIIIChannels[] = {
 };
 
 enum {
-    DAB_CHANNEL_COUNT = (int)(sizeof(kBandIIIChannels) / sizeof(kBandIIIChannels[0]))
+    DAB_CHANNEL_COUNT = (int)(sizeof(kBandIIIChannels) / sizeof(kBandIIIChannels[0])),
+    DAB_SCAN_READ_TIMEOUT_MS = 250,
+    DAB_SCAN_READ_STALL_SECONDS = 3
 };
 
 typedef struct {
@@ -912,6 +915,8 @@ static int scan_frequency(scan_runtime_t *runtime,
                           const dab_channel_t *channel,
                           uint32_t channel_index,
                           uint32_t per_frequency_seconds,
+                          uint32_t label_wait_seconds,
+                          uint32_t hard_channel_seconds,
                           int gain_db,
                           FILE *results_fp,
                           const dab_scan_context_t *scan_context) {
@@ -925,6 +930,8 @@ static int scan_frequency(scan_runtime_t *runtime,
     uint64_t scan_deadline_sample = 0u;
     uint64_t current_sample_end = 0u;
     uint64_t metadata_updated_sample = 0u;
+    uint64_t last_sample_wall_ns = 0u;
+    uint64_t hard_wall_deadline_ns = 0u;
     uint32_t best_service_count = 0u;
     uint32_t best_label_count = 0u;
     int have_scan_start = 0;
@@ -945,7 +952,8 @@ static int scan_frequency(scan_runtime_t *runtime,
     stream_config.bandwidth_hz = 1536000u;
     stream_config.gain_db = gain_db;
     scan_sample_limit = (uint64_t)per_frequency_seconds * (uint64_t)stream_config.sample_rate;
-    label_wait_sample_limit = 10ull * (uint64_t)stream_config.sample_rate;
+    label_wait_sample_limit =
+        (uint64_t)label_wait_seconds * (uint64_t)stream_config.sample_rate;
     block_limit = (uint32_t)(scan_sample_limit / 256u) + 1024u;
     if (block_limit < 120u) {
         block_limit = 120u;
@@ -994,20 +1002,41 @@ static int scan_frequency(scan_runtime_t *runtime,
         dab_sdr_stream_close(stream);
         return -1;
     }
+    last_sample_wall_ns = dab_time_monotonic_ns();
+    hard_wall_deadline_ns =
+        last_sample_wall_ns + (uint64_t)hard_channel_seconds * 1000000000ull;
 
     for (block_index = 0u; block_index < block_limit; ++block_index) {
         dab_sdr_block_view_t hist_view;
         dab_null_event_t event = {0};
+        dab_sdr_status_t read_status;
+        uint64_t now_ns;
 
         if (scan_cancel_requested(scan_context)) {
             rc = -2;
             goto cleanup;
         }
-        if (stream->vtbl->read(stream, &src_block) != DAB_SDR_STATUS_OK) {
+        now_ns = dab_time_monotonic_ns();
+        if (now_ns >= hard_wall_deadline_ns) {
+            break;
+        }
+        read_status = stream->vtbl->read_timeout != 0 ?
+            stream->vtbl->read_timeout(stream, &src_block, DAB_SCAN_READ_TIMEOUT_MS) :
+            stream->vtbl->read(stream, &src_block);
+        if (read_status == DAB_SDR_STATUS_TIMEOUT) {
+            now_ns = dab_time_monotonic_ns();
+            if (now_ns - last_sample_wall_ns >=
+                (uint64_t)DAB_SCAN_READ_STALL_SECONDS * 1000000000ull) {
+                break;
+            }
+            continue;
+        }
+        if (read_status != DAB_SDR_STATUS_OK) {
             fprintf(stderr, "read failed for %s at block %u\n", channel->channel, block_index);
             (void)scan_emit_channel_error(scan_context, channel, "sample read failed");
             goto cleanup;
         }
+        last_sample_wall_ns = dab_time_monotonic_ns();
         if (scan_cancel_requested(scan_context)) {
             rc = -2;
             goto cleanup;
@@ -1233,11 +1262,46 @@ void dab_scan_default_config(dab_scan_config_t *config) {
     }
     *config = (dab_scan_config_t){0};
     config->driver = "rtlsdr";
-    config->per_frequency_seconds = 4u;
+    config->per_frequency_seconds = DAB_SCAN_DEFAULT_PER_FREQUENCY_SECONDS;
+    config->label_wait_seconds = DAB_SCAN_DEFAULT_LABEL_WAIT_SECONDS;
+    config->hard_channel_seconds = DAB_SCAN_DEFAULT_HARD_CHANNEL_SECONDS;
     config->gain_db = 40;
     config->agc_enabled = 1;
     config->use_real_device = 1;
     config->android_usb_fd = -1;
+}
+
+void dab_scan_normalize_config(dab_scan_config_t *config) {
+    uint32_t minimum_hard_seconds;
+
+    if (config == 0) {
+        return;
+    }
+    if (config->per_frequency_seconds == 0u) {
+        config->per_frequency_seconds = DAB_SCAN_DEFAULT_PER_FREQUENCY_SECONDS;
+    } else if (config->per_frequency_seconds < DAB_SCAN_MIN_PER_FREQUENCY_SECONDS) {
+        config->per_frequency_seconds = DAB_SCAN_MIN_PER_FREQUENCY_SECONDS;
+    } else if (config->per_frequency_seconds > DAB_SCAN_MAX_PER_FREQUENCY_SECONDS) {
+        config->per_frequency_seconds = DAB_SCAN_MAX_PER_FREQUENCY_SECONDS;
+    }
+    if (config->label_wait_seconds == 0u) {
+        config->label_wait_seconds = DAB_SCAN_DEFAULT_LABEL_WAIT_SECONDS;
+    } else if (config->label_wait_seconds < DAB_SCAN_MIN_LABEL_WAIT_SECONDS) {
+        config->label_wait_seconds = DAB_SCAN_MIN_LABEL_WAIT_SECONDS;
+    } else if (config->label_wait_seconds > DAB_SCAN_MAX_LABEL_WAIT_SECONDS) {
+        config->label_wait_seconds = DAB_SCAN_MAX_LABEL_WAIT_SECONDS;
+    }
+    if (config->hard_channel_seconds == 0u) {
+        config->hard_channel_seconds = DAB_SCAN_DEFAULT_HARD_CHANNEL_SECONDS;
+    } else if (config->hard_channel_seconds < DAB_SCAN_MIN_HARD_CHANNEL_SECONDS) {
+        config->hard_channel_seconds = DAB_SCAN_MIN_HARD_CHANNEL_SECONDS;
+    } else if (config->hard_channel_seconds > DAB_SCAN_MAX_HARD_CHANNEL_SECONDS) {
+        config->hard_channel_seconds = DAB_SCAN_MAX_HARD_CHANNEL_SECONDS;
+    }
+    minimum_hard_seconds = config->per_frequency_seconds + config->label_wait_seconds;
+    if (config->hard_channel_seconds < minimum_hard_seconds) {
+        config->hard_channel_seconds = minimum_hard_seconds;
+    }
 }
 
 static void scan_set_rtlsdr_real_adapter(int enabled) {
@@ -1258,12 +1322,16 @@ int dab_scan_band_iii(const dab_scan_config_t *config, dab_scan_callback_t callb
     scan_runtime_t runtime = {0};
     uint32_t channel_index;
     uint32_t total_services = 0u;
+    uint32_t completed_channels = 0u;
     int rc = -1;
 
     if (config == 0) {
         dab_scan_default_config(&default_config);
-        config = &default_config;
+    } else {
+        default_config = *config;
     }
+    dab_scan_normalize_config(&default_config);
+    config = &default_config;
 
     scan_context.config = config;
     scan_context.callback = callback;
@@ -1312,18 +1380,26 @@ int dab_scan_band_iii(const dab_scan_config_t *config, dab_scan_callback_t callb
                            &rtlsdr_config,
                            &kBandIIIChannels[channel_index],
                            channel_index,
-                           config->per_frequency_seconds != 0u ? config->per_frequency_seconds : 4u,
+                           config->per_frequency_seconds,
+                           config->label_wait_seconds,
+                           config->hard_channel_seconds,
                            config->gain_db,
                            0,
                            &scan_context);
         if (services < 0) {
             if (services == -2) {
                 (void)scan_emit_error(&scan_context, "scan cancelled");
+                rc = services;
+                goto cleanup;
             }
-            rc = services;
-            goto cleanup;
+            continue;
         }
+        completed_channels++;
         total_services += (uint32_t)services;
+    }
+    if (completed_channels == 0u) {
+        (void)scan_emit_error(&scan_context, "all DAB channels failed");
+        goto cleanup;
     }
 
     {
@@ -1366,8 +1442,11 @@ int dab_scan_frequency_hz(const dab_scan_config_t *config,
     }
     if (config == 0) {
         dab_scan_default_config(&default_config);
-        config = &default_config;
+    } else {
+        default_config = *config;
     }
+    dab_scan_normalize_config(&default_config);
+    config = &default_config;
 
     scan_context.config = config;
     scan_context.callback = callback;
@@ -1414,7 +1493,9 @@ int dab_scan_frequency_hz(const dab_scan_config_t *config,
                         &rtlsdr_config,
                         &single_channel,
                         0u,
-                        config->per_frequency_seconds != 0u ? config->per_frequency_seconds : 4u,
+                        config->per_frequency_seconds,
+                        config->label_wait_seconds,
+                        config->hard_channel_seconds,
                         config->gain_db,
                         0,
                         &scan_context);
@@ -1480,7 +1561,7 @@ int main(int argc, char **argv) {
     dab_scan_config_t scan_config;
     dab_scan_context_t scan_context;
     const char *output_path = 0;
-    uint32_t per_frequency_seconds = 4u;
+    uint32_t per_frequency_seconds = DAB_SCAN_DEFAULT_PER_FREQUENCY_SECONDS;
     uint32_t channel_index;
     uint32_t total_services = 0u;
     FILE *results_fp = 0;
@@ -1578,6 +1659,8 @@ int main(int argc, char **argv) {
                            &kBandIIIChannels[channel_index],
                            channel_index,
                            per_frequency_seconds,
+                           scan_config.label_wait_seconds,
+                           scan_config.hard_channel_seconds,
                            40,
                            results_fp,
                            &scan_context);

@@ -2,8 +2,8 @@ cmake_minimum_required(VERSION 3.21)
 
 project(dab_lib C CXX)
 
-set(DAB_APP_VERSION "0.1.3")
-set(DAB_CAPTURE_BLOCK_COUNT 32 CACHE STRING "Preallocated IQ blocks per open SDR stream")
+set(DAB_APP_VERSION "0.1.4")
+set(DAB_CAPTURE_BLOCK_COUNT 256 CACHE STRING "Preallocated IQ blocks per open SDR stream")
 if(DAB_CAPTURE_BLOCK_COUNT LESS 2)
     message(FATAL_ERROR "DAB_CAPTURE_BLOCK_COUNT must be at least 2")
 endif()
@@ -307,7 +307,9 @@ target_include_directories(dab
 target_compile_definitions(dab PUBLIC DAB_CAPTURE_BLOCK_COUNT=${DAB_CAPTURE_BLOCK_COUNT})
 set_target_properties(dab PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-if(NOT WIN32)
+if(WIN32)
+    target_link_libraries(dab PUBLIC avrt)
+else()
     target_link_libraries(dab PUBLIC m ${CMAKE_DL_LIBS})
 endif()
 
@@ -605,6 +607,7 @@ if(DAB_BUILD_TESTS)
         tests/test_sdrplay.c
         tests/test_rtlsdr_api.c
         tests/test_rtlsdr.c
+        tests/test_scan_config.c
         tests/test_sample_history.c
         tests/test_pc_queue.c
         tests/test_simd.c

@@ -6,6 +6,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(_WIN32)
+#include <windows.h>
+#endif
+
 #include "../../include/dab/hal/sdr_device.h"
 #include "../../include/dab/hal/rtlsdr_device.h"
 #include "../../include/dab/hal/sdrplay_device.h"
@@ -161,8 +165,19 @@ void dab_gui_scan_cancel_current(void) {
     dab_gui_scan_cancel_set(1);
 }
 
+static int dab_gui_scan_replace_results(const char *temporary_path, const char *output_path) {
+#if defined(_WIN32)
+    return MoveFileExA(temporary_path,
+                       output_path,
+                       MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) ? 0 : -1;
+#else
+    return rename(temporary_path, output_path);
+#endif
+}
+
 int dab_gui_scan_run(const char *output_path, dab_gui_scan_event_callback_t callback, void *user) {
     dab_gui_sdr_settings_t settings;
+    dab_gui_scan_settings_t scan_settings;
     const char *driver = "sdrplay";
     dab_sdr_open_params_t params = {"sdrplay", NULL, NULL};
     dab_sdrplay_config_t sdrplay_config;
@@ -172,27 +187,39 @@ int dab_gui_scan_run(const char *output_path, dab_gui_scan_event_callback_t call
     dab_scan_config_t scan_config;
     dab_scan_context_t scan_context;
     FILE *results_fp = 0;
+    char *temporary_path = 0;
     uint32_t channel_index;
     uint32_t total_services = 0u;
+    uint32_t completed_channels = 0u;
+    uint32_t failed_channels = 0u;
     int scan_error_reported = 0;
     int rc = -1;
 
     if (output_path == 0 || output_path[0] == '\0') {
         return -1;
     }
+    temporary_path = (char *)malloc(strlen(output_path) + 6u);
+    if (temporary_path == 0) {
+        return -1;
+    }
+    snprintf(temporary_path, strlen(output_path) + 6u, "%s.tmp", output_path);
+    (void)remove(temporary_path);
 
     g_scan_sink.callback = callback;
     g_scan_sink.user = user;
     dab_gui_scan_cancel_set(0);
 
     dab_gui_sdr_get_settings(&settings);
+    dab_gui_scan_get_settings(&scan_settings);
     if (settings.backend == DAB_GUI_SDR_BACKEND_RTLSDR) {
         driver = "rtlsdr";
     }
     params.driver = driver;
     dab_scan_default_config(&scan_config);
     scan_config.driver = driver;
-    scan_config.per_frequency_seconds = 4u;
+    scan_config.per_frequency_seconds = scan_settings.per_frequency_seconds;
+    scan_config.label_wait_seconds = scan_settings.label_wait_seconds;
+    scan_config.hard_channel_seconds = scan_settings.hard_channel_seconds;
     scan_config.gain_db = settings.gain_db;
     scan_config.agc_enabled = settings.agc_enabled != 0;
     scan_config.use_real_device = 1;
@@ -228,7 +255,7 @@ int dab_gui_scan_run(const char *output_path, dab_gui_scan_event_callback_t call
         goto cleanup;
     }
 
-    results_fp = fopen(output_path, "wb");
+    results_fp = fopen(temporary_path, "wb");
     if (results_fp == 0) {
         dab_gui_scan_emit_line("SCAN_ERROR\tfailed to open scan results file");
         goto cleanup;
@@ -247,7 +274,9 @@ int dab_gui_scan_run(const char *output_path, dab_gui_scan_event_callback_t call
                            &rtlsdr_config,
                            &kBandIIIChannels[channel_index],
                            channel_index,
-                           4u,
+                           scan_settings.per_frequency_seconds,
+                           scan_settings.label_wait_seconds,
+                           scan_settings.hard_channel_seconds,
                            settings.gain_db,
                            results_fp,
                            &scan_context);
@@ -261,14 +290,40 @@ int dab_gui_scan_run(const char *output_path, dab_gui_scan_event_callback_t call
                 snprintf(line, sizeof(line), "SCAN_ERROR\tchannel %s failed", kBandIIIChannels[channel_index].channel);
                 dab_gui_scan_emit_line(line);
             }
-            goto cleanup;
+            failed_channels++;
+            scan_error_reported = 0;
+            continue;
         }
+        completed_channels++;
         total_services += (uint32_t)services;
+    }
+    if (completed_channels == 0u) {
+        dab_gui_scan_emit_line("SCAN_ERROR\tall DAB channels failed");
+        goto cleanup;
+    }
+    if (dab_gui_scan_cancel_requested()) {
+        rc = -2;
+        goto cleanup;
+    }
+    if (fclose(results_fp) != 0) {
+        results_fp = 0;
+        dab_gui_scan_emit_line("SCAN_ERROR\tfailed to finalize scan results");
+        goto cleanup;
+    }
+    results_fp = 0;
+    if (dab_gui_scan_replace_results(temporary_path, output_path) != 0) {
+        dab_gui_scan_emit_line("SCAN_ERROR\tfailed to replace scan results");
+        goto cleanup;
     }
 
     if (callback != 0) {
         char complete[512];
-        snprintf(complete, sizeof(complete), "SCAN_COMPLETE\t%s\t%u", output_path, total_services);
+        snprintf(complete,
+                 sizeof(complete),
+                 "SCAN_COMPLETE\t%s\t%u\t%u",
+                 output_path,
+                 total_services,
+                 failed_channels);
         callback(complete, user);
     }
     rc = 0;
@@ -277,11 +332,15 @@ cleanup:
     if (results_fp != 0) {
         fclose(results_fp);
     }
+    if (rc != 0 && temporary_path != 0) {
+        (void)remove(temporary_path);
+    }
     if (device != 0) {
         dab_sdr_device_close(device);
     }
     scan_runtime_destroy(&runtime);
     g_scan_sink = (dab_gui_scan_sink_t){0};
     dab_gui_scan_cancel_set(0);
+    free(temporary_path);
     return rc;
 }

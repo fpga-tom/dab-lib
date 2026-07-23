@@ -22,6 +22,7 @@ int dab_pc_queue_init(dab_pc_queue_t *queue, void **storage, uint32_t capacity);
 void dab_pc_queue_destroy(dab_pc_queue_t *queue);
 int dab_pc_queue_push(dab_pc_queue_t *queue, void *item);
 int dab_pc_queue_pop(dab_pc_queue_t *queue, void **item);
+int dab_pc_queue_pop_timeout(dab_pc_queue_t *queue, void **item, uint32_t timeout_ms);
 int dab_pc_queue_try_push(dab_pc_queue_t *queue, void *item);
 int dab_pc_queue_try_pop(dab_pc_queue_t *queue, void **item);
 void dab_pc_queue_stop(dab_pc_queue_t *queue);

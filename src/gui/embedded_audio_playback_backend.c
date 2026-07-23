@@ -742,6 +742,7 @@ static int dab_gui_playback_thread_main(void *arg) {
     dab_gui_setenv_real_backend();
     dab_gui_setenv_value("DAB_SDR_BACKEND", settings.backend == DAB_GUI_SDR_BACKEND_RTLSDR ? "rtlsdr" : "sdrplay");
     dab_gui_setenv_value("DAB_AUDIO_BACKEND", dab_audio_output_backend_key(audio_settings.backend));
+    dab_gui_setenv_value("DAB_AUDIO_REALTIME", audio_settings.realtime_decoding != 0 ? "1" : "0");
     dab_gui_setenv_value("DAB_SYNC_PROBE_GAIN_DB", gain_arg);
     g_stop_requested = 0;
     dab_gui_embedded_audio_status_reset();

@@ -175,6 +175,39 @@ static dab_sdr_status_t dab_rtlsdr_stream_read(struct dab_sdr_stream *stream, da
     return DAB_SDR_STATUS_OK;
 }
 
+static dab_sdr_status_t dab_rtlsdr_stream_read_timeout(struct dab_sdr_stream *stream,
+                                                       dab_sdr_block_view_t *block,
+                                                       uint32_t timeout_ms) {
+    dab_rtlsdr_stream_t *impl = (dab_rtlsdr_stream_t *)stream;
+    dab_iq_block_t *next_block = 0;
+    int pop_rc;
+
+    if (impl == 0 || block == 0) {
+        return DAB_SDR_STATUS_INVALID_ARGUMENT;
+    }
+    if (!impl->started) {
+        return DAB_SDR_STATUS_ERROR;
+    }
+    if (impl->current_block != 0) {
+        (void)dab_iq_block_release(&impl->pool, impl->current_block);
+        impl->current_block = 0;
+    }
+    pop_rc = dab_pc_queue_pop_timeout(&impl->filled_blocks, (void **)&next_block, timeout_ms);
+    if (pop_rc > 0) {
+        return DAB_SDR_STATUS_TIMEOUT;
+    }
+    if (pop_rc < 0) {
+        return DAB_SDR_STATUS_ERROR;
+    }
+
+    impl->current_block = next_block;
+    block->iq_interleaved = next_block->iq;
+    block->sample_count = next_block->valid_samples;
+    block->sample_index = next_block->sequence;
+    block->timestamp_ns = next_block->timestamp_ns;
+    return DAB_SDR_STATUS_OK;
+}
+
 static void dab_rtlsdr_stream_destroy(struct dab_sdr_stream *stream) {
     dab_rtlsdr_stream_t *impl = (dab_rtlsdr_stream_t *)stream;
     if (impl == 0) {
@@ -195,6 +228,7 @@ static const dab_sdr_stream_vtbl_t DAB_RTLSDR_STREAM_VTBL = {
     dab_rtlsdr_stream_start,
     dab_rtlsdr_stream_stop,
     dab_rtlsdr_stream_read,
+    dab_rtlsdr_stream_read_timeout,
     dab_rtlsdr_stream_destroy
 };
 

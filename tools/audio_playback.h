@@ -36,6 +36,7 @@ typedef struct {
 #endif
     dab_audio_output_t *output;
     dab_audio_output_backend_t output_backend;
+    uint8_t realtime_enabled;
     uint8_t decoder_backend;
     uint8_t configured;
     uint8_t debug_enabled;
