@@ -353,16 +353,22 @@ namespace winrt::DabMeasurementWinUI::implementation
         }
         m_selected_service_id = 0u;
         UpdateRfContext();
+        UpdateDabContext();
     }
 
     void MainWindow::ReceiverWorkspace_Click(IInspectable const&, RoutedEventArgs const&)
     {
-        ShowWorkspace(false);
+        ShowWorkspace(WorkspaceKind::receiver);
     }
 
     void MainWindow::RfMeasurements_Click(IInspectable const&, RoutedEventArgs const&)
     {
-        ShowWorkspace(true);
+        ShowWorkspace(WorkspaceKind::rf_measurements);
+    }
+
+    void MainWindow::DabMeasurements_Click(IInspectable const&, RoutedEventArgs const&)
+    {
+        ShowWorkspace(WorkspaceKind::dab_measurements);
     }
 
     void MainWindow::RootLayout_SizeChanged(IInspectable const&, SizeChangedEventArgs const& args)
@@ -386,6 +392,10 @@ namespace winrt::DabMeasurementWinUI::implementation
         if (RfWorkspace())
         {
             RfWorkspace().Width(workspace_width);
+        }
+        if (DabWorkspace())
+        {
+            DabWorkspace().Width(workspace_width);
         }
         if (RfOverviewContent())
         {
@@ -748,6 +758,7 @@ namespace winrt::DabMeasurementWinUI::implementation
         StatusChannelText().Text(L"custom");
         m_selected_service_id = 0u;
         UpdateRfContext();
+        UpdateDabContext();
 
         if (!m_receiver.IsActive())
         {
@@ -1077,6 +1088,7 @@ namespace winrt::DabMeasurementWinUI::implementation
                                                         SelectionChangedEventArgs const&)
     {
         ApplySelectedServiceComponents();
+        UpdateDabContext();
     }
 
     void MainWindow::ServicesListView_ItemClick(IInspectable const&,
@@ -1287,6 +1299,7 @@ namespace winrt::DabMeasurementWinUI::implementation
         }
 
         m_selected_service_id = service_id;
+        UpdateDabContext();
         if (!m_receiver.IsActive())
         {
             AddTimelineEvent(L"Selected " + service_name + L" — press Start to play");
@@ -1336,6 +1349,10 @@ namespace winrt::DabMeasurementWinUI::implementation
         {
         case ReceiverState::starting:
             m_metrics_stale = false;
+            DabModeBadgeText().Text(L"STARTING");
+            DabSyncBadgeText().Text(L"ACQUIRING");
+            DabOverviewStatusValueText().Text(L"STARTING");
+            DabOverviewStatusDetailText().Text(status_text(status.message));
             if (m_rf_null_controls_ready)
             {
                 RfNullLiveText().Text(L"STARTING");
@@ -1350,6 +1367,7 @@ namespace winrt::DabMeasurementWinUI::implementation
             break;
         case ReceiverState::running:
             m_metrics_stale = false;
+            DabModeBadgeText().Text(L"● LIVE");
             RfLiveBadgeText().Text(L"● LIVE");
             SetReceiverControlsEnabled(false);
             StartButton().IsEnabled(true);
@@ -1361,6 +1379,10 @@ namespace winrt::DabMeasurementWinUI::implementation
             break;
         case ReceiverState::recovering:
             m_metrics_stale = true;
+            DabModeBadgeText().Text(L"STALE");
+            DabSyncBadgeText().Text(L"RECOVERING");
+            DabOverviewStatusValueText().Text(L"STALE");
+            DabOverviewStatusDetailText().Text(status_text(status.message));
             if (m_rf_null_controls_ready)
             {
                 RfNullLiveText().Text(L"STALE");
@@ -1387,6 +1409,10 @@ namespace winrt::DabMeasurementWinUI::implementation
                 box_value(hstring{ L"WarningBrush" })).as<Brush>());
             break;
         case ReceiverState::stopping:
+            DabModeBadgeText().Text(L"STOPPING");
+            DabSyncBadgeText().Text(L"STOPPING");
+            DabOverviewStatusValueText().Text(L"STOPPING");
+            DabOverviewStatusDetailText().Text(status_text(status.message));
             if (m_rf_null_controls_ready)
             {
                 RfNullLiveText().Text(L"STOPPING");
@@ -1401,6 +1427,10 @@ namespace winrt::DabMeasurementWinUI::implementation
             break;
         case ReceiverState::stopped:
             m_metrics_stale = false;
+            DabModeBadgeText().Text(L"IDLE");
+            DabSyncBadgeText().Text(L"NOT SYNCED");
+            DabOverviewStatusValueText().Text(L"IDLE");
+            DabOverviewStatusDetailText().Text(L"Receiver stopped; last measurements retained");
             if (m_rf_null_controls_ready)
             {
                 RfNullLiveText().Text(L"IDLE");
@@ -1425,6 +1455,10 @@ namespace winrt::DabMeasurementWinUI::implementation
             break;
         case ReceiverState::failed:
             m_metrics_stale = false;
+            DabModeBadgeText().Text(L"ERROR");
+            DabSyncBadgeText().Text(L"NOT SYNCED");
+            DabOverviewStatusValueText().Text(L"ERROR");
+            DabOverviewStatusDetailText().Text(status_text(status.message));
             if (m_rf_null_controls_ready)
             {
                 RfNullLiveText().Text(L"ERROR");
@@ -1469,32 +1503,51 @@ namespace winrt::DabMeasurementWinUI::implementation
         GainNumberBox().IsEnabled(enabled);
     }
 
-    void MainWindow::ShowWorkspace(bool rf_measurements)
+    void MainWindow::ShowWorkspace(WorkspaceKind workspace)
     {
-        if (rf_measurements && m_cir_panel_maximized)
+        if (workspace != WorkspaceKind::receiver && m_cir_panel_maximized)
         {
             SetCirPanelMaximized(false);
         }
-        bool const changed = m_rf_workspace_active != rf_measurements;
-        m_rf_workspace_active = rf_measurements;
-        ReceiverWorkspaceMain().Visibility(rf_measurements ? Visibility::Collapsed : Visibility::Visible);
-        ReceiverTimelinePanel().Visibility(rf_measurements ? Visibility::Collapsed : Visibility::Visible);
-        RfWorkspace().Visibility(rf_measurements ? Visibility::Visible : Visibility::Collapsed);
-        ReceiverNavIndicator().Visibility(rf_measurements ? Visibility::Collapsed : Visibility::Visible);
-        RfNavIndicator().Visibility(rf_measurements ? Visibility::Visible : Visibility::Collapsed);
-        ReceiverNavigationButton().Opacity(rf_measurements ? 0.70 : 1.0);
-        RfNavigationButton().Opacity(rf_measurements ? 1.0 : 0.70);
-        RfToolbarButton().Opacity(rf_measurements ? 1.0 : 0.82);
+        bool const receiver_active = workspace == WorkspaceKind::receiver;
+        bool const rf_active = workspace == WorkspaceKind::rf_measurements;
+        bool const dab_active = workspace == WorkspaceKind::dab_measurements;
+        bool const changed = m_active_workspace != workspace;
+        m_active_workspace = workspace;
+        m_rf_workspace_active = rf_active;
+        ReceiverWorkspaceMain().Visibility(receiver_active ? Visibility::Visible : Visibility::Collapsed);
+        ReceiverTimelinePanel().Visibility(receiver_active ? Visibility::Visible : Visibility::Collapsed);
+        RfWorkspace().Visibility(rf_active ? Visibility::Visible : Visibility::Collapsed);
+        DabWorkspace().Visibility(dab_active ? Visibility::Visible : Visibility::Collapsed);
+        ReceiverNavIndicator().Visibility(receiver_active ? Visibility::Visible : Visibility::Collapsed);
+        RfNavIndicator().Visibility(rf_active ? Visibility::Visible : Visibility::Collapsed);
+        DabNavIndicator().Visibility(dab_active ? Visibility::Visible : Visibility::Collapsed);
+        ReceiverNavigationButton().Opacity(receiver_active ? 1.0 : 0.70);
+        RfNavigationButton().Opacity(rf_active ? 1.0 : 0.70);
+        DabNavigationButton().Opacity(dab_active ? 1.0 : 0.70);
+        RfToolbarButton().Opacity(rf_active ? 1.0 : 0.82);
+        DabToolbarButton().Opacity(dab_active ? 1.0 : 0.82);
         ApplyWorkspaceWidth(RootLayout().ActualWidth());
-        if (rf_measurements)
+        if (rf_active)
         {
             UpdateRfContext();
         }
+        else if (dab_active)
+        {
+            UpdateDabContext();
+        }
         if (changed)
         {
-            AddTimelineEvent(rf_measurements
-                ? hstring{ L"Opened RF Measurements workspace" }
-                : hstring{ L"Opened Receiver workspace" });
+            hstring message{ L"Opened Receiver workspace" };
+            if (rf_active)
+            {
+                message = L"Opened RF Measurements workspace";
+            }
+            else if (dab_active)
+            {
+                message = L"Opened DAB Measurements workspace";
+            }
+            AddTimelineEvent(message);
         }
     }
 
@@ -1535,6 +1588,282 @@ namespace winrt::DabMeasurementWinUI::implementation
         RfConfigAgcText().Text(L"Disabled");
         RfConfigAntennaText().Text(L"A");
         RfConfigCalibrationText().Text(L"Not configured");
+    }
+
+    void MainWindow::UpdateDabContext()
+    {
+        // Channel selection can run while controls later in the XAML document
+        // are still being created.
+        if (!DabContextText())
+        {
+            return;
+        }
+
+        hstring channel{ L"—" };
+        hstring frequency{ L"— MHz" };
+        if (auto const selected_channel = ChannelComboBox().SelectedItem().try_as<ComboBoxItem>())
+        {
+            channel = unbox_value<hstring>(selected_channel.Content());
+        }
+        if (FrequencyTextBox())
+        {
+            frequency = FrequencyTextBox().Text();
+        }
+
+        hstring ensemble{ L"Awaiting FIC" };
+        if (m_have_catalog)
+        {
+            ensemble = fic_label_text(m_latest_catalog.ensemble_label);
+            if (ensemble.empty())
+            {
+                wchar_t fallback[48]{};
+                swprintf_s(fallback, L"Ensemble 0x%04X", m_latest_catalog.ensemble_id);
+                ensemble = fallback;
+            }
+        }
+
+        dab_receive_service_info_t const* service = nullptr;
+        if (m_selected_service_id != 0u)
+        {
+            for (uint32_t index = 0u; index < m_latest_catalog.service_count; ++index)
+            {
+                if (m_latest_catalog.services[index].service_id == m_selected_service_id)
+                {
+                    service = &m_latest_catalog.services[index];
+                    break;
+                }
+            }
+        }
+        if (service == nullptr)
+        {
+            int32_t const selected_index = ServicesListView().SelectedIndex();
+            if (m_have_catalog && selected_index >= 0 &&
+                static_cast<uint32_t>(selected_index) < m_latest_catalog.service_count)
+            {
+                service = &m_latest_catalog.services[static_cast<uint32_t>(selected_index)];
+            }
+        }
+
+        hstring service_name{ L"Not selected" };
+        hstring service_id{ L"—" };
+        if (service != nullptr)
+        {
+            service_name = fic_label_text(service->label);
+            if (service_name.empty())
+            {
+                service_name = L"Unnamed service";
+            }
+            wchar_t id_text[32]{};
+            swprintf_s(id_text, L"0x%08X", service->service_id);
+            service_id = id_text;
+        }
+
+        dab_receive_component_info_t const* component = nullptr;
+        if (service != nullptr)
+        {
+            for (uint32_t index = 0u; index < service->component_count; ++index)
+            {
+                auto const& candidate = service->components[index];
+                if (candidate.kind == DAB_RECEIVE_COMPONENT_STREAM_AUDIO &&
+                    candidate.primary != 0u)
+                {
+                    component = &candidate;
+                    break;
+                }
+            }
+            if (component == nullptr)
+            {
+                for (uint32_t index = 0u; index < service->component_count; ++index)
+                {
+                    if (service->components[index].kind == DAB_RECEIVE_COMPONENT_STREAM_AUDIO)
+                    {
+                        component = &service->components[index];
+                        break;
+                    }
+                }
+            }
+            if (component == nullptr && service->component_count != 0u)
+            {
+                component = &service->components[0];
+            }
+        }
+
+        hstring component_name{ L"Awaiting service component" };
+        hstring component_detail{ L"Awaiting service component" };
+        hstring subchannel{ L"—" };
+        hstring protection{ L"—" };
+        if (component != nullptr)
+        {
+            component_name = component_kind_text(component->kind);
+            if (component->primary != 0u)
+            {
+                component_name = component_name + L" · primary";
+            }
+
+            wchar_t detail[160]{};
+            if (component->has_subchannel != 0u)
+            {
+                swprintf_s(detail,
+                           L"%s · SubCh %u · SC type %u",
+                           component_name.c_str(),
+                           component->subchannel_id,
+                           component->service_component_type);
+                component_detail = detail;
+                subchannel = to_hstring(component->subchannel_id);
+                if (component->subchannel_valid != 0u)
+                {
+                    wchar_t protection_text[96]{};
+                    if (component->protection_kind == 0u)
+                    {
+                        swprintf_s(protection_text,
+                                   L"UEP · table %u · index %u · %u CU",
+                                   component->protection_table_switch,
+                                   component->protection_index,
+                                   component->subchannel_size_cu);
+                    }
+                    else
+                    {
+                        swprintf_s(protection_text,
+                                   L"EEP · option %u · level %u · %u CU",
+                                   component->protection_option,
+                                   component->protection_level,
+                                   component->subchannel_size_cu);
+                    }
+                    protection = protection_text;
+                }
+                else
+                {
+                    protection = L"Allocation pending";
+                }
+            }
+            else
+            {
+                wchar_t component_text[96]{};
+                swprintf_s(component_text,
+                           L"%s · component %u · SC type %u",
+                           component_name.c_str(),
+                           component->component_index,
+                           component->service_component_type);
+                component_detail = component_text;
+            }
+        }
+
+        DabContextText().Text(channel + L" · " + frequency + L" · Ensemble: " +
+                              ensemble + L" · Service: " + service_name);
+        DabComponentContextText().Text(L"Component: " + component_detail);
+        DabOverviewEnsembleText().Text(ensemble);
+        DabOverviewServiceText().Text(service_name);
+        DabOverviewComponentText().Text(component_detail);
+        DabOverviewServiceIdText().Text(service_id);
+        DabMscServiceText().Text(service_name);
+        DabMscComponentText().Text(component_name);
+        DabMscSubchannelText().Text(subchannel);
+        DabMscProtectionText().Text(protection);
+
+        DabFicEnsembleText().Text(ensemble);
+        if (m_have_catalog)
+        {
+            wchar_t ensemble_id[24]{};
+            swprintf_s(ensemble_id, L"0x%04X", m_latest_catalog.ensemble_id);
+            DabFicEnsembleIdText().Text(ensemble_id);
+            DabFicServicesText().Text(to_hstring(m_latest_catalog.service_count));
+            DabFicCatalogSequenceText().Text(to_hstring(m_latest_catalog.sequence));
+        }
+        else
+        {
+            DabFicEnsembleIdText().Text(L"—");
+            DabFicServicesText().Text(L"0");
+            DabFicCatalogSequenceText().Text(L"—");
+        }
+    }
+
+    void MainWindow::ApplyDabSnapshot(dab_receive_snapshot_t const& snapshot)
+    {
+        UpdateDabContext();
+
+        bool const locked = snapshot.locked != 0;
+        DabModeBadgeText().Text(L"● LIVE");
+        DabSyncBadgeText().Text(locked ? L"● SYNCED" : L"ACQUIRING");
+        DabSyncBadgeText().Foreground(Application::Current().Resources().Lookup(
+            box_value(hstring{ locked
+                ? L"MeasurementAccentBrush"
+                : L"WarningBrush" })).as<Brush>());
+
+        constexpr uint32_t fibs_per_frame = 12u;
+        bool const have_fic = locked && snapshot.fic_frames_seen != 0u;
+        double const fic_quality = have_fic
+            ? std::clamp(static_cast<double>(snapshot.fic_total_valid_fibs) /
+                         (static_cast<double>(snapshot.fic_frames_seen) * fibs_per_frame),
+                         0.0,
+                         1.0)
+            : 0.0;
+        hstring const fic_quality_text = have_fic
+            ? format_float(static_cast<float>(fic_quality * 100.0), L"%")
+            : hstring{ L"—" };
+        DabOverviewFicValueText().Text(fic_quality_text);
+        DabOverviewFicDetailText().Text(have_fic
+            ? to_hstring(snapshot.fic_valid_fibs_last_frame) + L" / 12 valid FIBs in latest frame"
+            : hstring{ L"Awaiting synchronized FIC" });
+        DabOverviewFicFramesText().Text(to_hstring(snapshot.fic_frames_seen));
+        DabFicFramesText().Text(to_hstring(snapshot.fic_frames_seen));
+        DabFicBlocksText().Text(to_hstring(snapshot.fic_blocks_decoded_last_frame));
+        DabFicValidText().Text(to_hstring(snapshot.fic_valid_fibs_last_frame) + L" / 12");
+        DabFicQualityText().Text(fic_quality_text);
+        DabFicTotalText().Text(to_hstring(snapshot.fic_total_valid_fibs));
+
+        hstring const msc_state = snapshot.msc_synchronized != 0 ? L"SYNCED" : L"ACQUIRING";
+        hstring const superframe_state = snapshot.msc_superframe_valid != 0 ? L"VALID" : L"INVALID";
+        hstring const audio_state = snapshot.msc_audio_valid != 0 ? L"AVAILABLE" : L"WAITING";
+        DabOverviewMscValueText().Text(msc_state);
+        DabOverviewMscDetailText().Text(to_hstring(snapshot.msc_frames_seen) + L" MSC frames processed");
+        DabOverviewMscFramesText().Text(to_hstring(snapshot.msc_frames_seen));
+        DabMscFramesText().Text(to_hstring(snapshot.msc_frames_seen));
+        DabMscSyncText().Text(msc_state);
+        DabMscSuperframeText().Text(superframe_state);
+        DabMscAudioText().Text(audio_state);
+        DabMscGenerationText().Text(to_hstring(snapshot.msc_superframe_generation));
+
+        bool const have_attempt = snapshot.msc_decode_attempts != 0u;
+        uint32_t const successful_decodes =
+            snapshot.msc_decode_attempts >= snapshot.msc_decode_failures
+                ? snapshot.msc_decode_attempts - snapshot.msc_decode_failures
+                : 0u;
+        hstring const success_rate = have_attempt
+            ? format_float(100.0f * static_cast<float>(successful_decodes) /
+                           static_cast<float>(snapshot.msc_decode_attempts),
+                           L"%")
+            : hstring{ L"—" };
+        hstring dab_state{ L"WAITING" };
+        if (snapshot.msc_audio_valid != 0)
+        {
+            dab_state = snapshot.msc_last_decode_ok != 0 ? L"DECODING" : L"ACQUIRING";
+        }
+        hstring const last_decode = !have_attempt
+            ? hstring{ L"No decode attempt" }
+            : (snapshot.msc_last_decode_ok != 0
+                ? hstring{ L"Latest decode successful" }
+                : hstring{ L"Latest decode failed" });
+
+        DabOverviewDabValueText().Text(dab_state);
+        DabOverviewDabDetailText().Text(last_decode);
+        DabOverviewGenerationText().Text(to_hstring(snapshot.msc_superframe_generation));
+        DabOverviewResetText().Text(to_hstring(snapshot.msc_runtime_reset_count));
+        DabOverviewStatusValueText().Text(locked ? L"SYNCED" : L"ACQUIRING");
+        DabOverviewStatusDetailText().Text(L"Snapshot " + to_hstring(snapshot.sequence));
+
+        DabPlusStateText().Text(dab_state);
+        DabPlusLastDecodeText().Text(last_decode);
+        DabPlusSuccessRateText().Text(success_rate);
+        DabPlusRsLastText().Text(to_hstring(snapshot.msc_rs_corrected_last_superframe));
+        DabPlusResetsText().Text(to_hstring(snapshot.msc_runtime_reset_count));
+        DabPlusGenerationText().Text(to_hstring(snapshot.msc_superframe_generation));
+        DabPlusAttemptsText().Text(to_hstring(snapshot.msc_decode_attempts));
+        DabPlusFailuresText().Text(to_hstring(snapshot.msc_decode_failures));
+        DabPlusRsTotalText().Text(to_hstring(snapshot.msc_rs_corrected_total));
+        DabPlusLastDecodeDetailText().Text(last_decode);
+        wchar_t reconfiguration[32]{};
+        swprintf_s(reconfiguration, L"Reason mask 0x%02X", snapshot.msc_last_reconfig_reason);
+        DabPlusReconfigText().Text(reconfiguration);
     }
 
     void MainWindow::UpdateCpuUsage()
@@ -2838,6 +3167,7 @@ namespace winrt::DabMeasurementWinUI::implementation
         }
         SampleCounterText().Text(L"frame " + to_hstring(snapshot.sequence));
         ApplyRfSnapshot(snapshot);
+        ApplyDabSnapshot(snapshot);
     }
 
     void MainWindow::ApplyCatalog(dab_receive_catalog_t const& catalog)
@@ -2932,6 +3262,7 @@ namespace winrt::DabMeasurementWinUI::implementation
         }
 
         hstring const timeline_name = EnsembleNameText().Text();
+        UpdateDabContext();
         AddTimelineEvent(L"FIC catalog · " + timeline_name + L" · " +
                          to_hstring(catalog.service_count) + L" services");
     }
@@ -2948,6 +3279,7 @@ namespace winrt::DabMeasurementWinUI::implementation
             empty_item.Content(box_value(L"Select a decoded service"));
             empty_item.IsEnabled(false);
             component_items.Append(empty_item);
+            UpdateDabContext();
             return;
         }
 
@@ -2959,6 +3291,7 @@ namespace winrt::DabMeasurementWinUI::implementation
             empty_item.Content(box_value(L"No FIC components decoded yet"));
             empty_item.IsEnabled(false);
             component_items.Append(empty_item);
+            UpdateDabContext();
             return;
         }
 
@@ -3034,6 +3367,7 @@ namespace winrt::DabMeasurementWinUI::implementation
             panel.Children().Append(detail_text);
             component_items.Append(panel);
         }
+        UpdateDabContext();
     }
 
     void MainWindow::ClearCatalogView()
@@ -3051,6 +3385,7 @@ namespace winrt::DabMeasurementWinUI::implementation
         service_items.Append(service_placeholder);
         ServicesListView().SelectedIndex(-1);
         ApplySelectedServiceComponents();
+        UpdateDabContext();
     }
 
     void MainWindow::UpdateCirPlot(dab::measurement::MeasurementFrame const& frame)
@@ -4933,5 +5268,16 @@ namespace winrt::DabMeasurementWinUI::implementation
             items.RemoveAt(0u);
         }
         TimelineList().ScrollIntoView(items.GetAt(items.Size() - 1u));
+
+        if (DabEventsList())
+        {
+            auto dab_items = DabEventsList().Items();
+            dab_items.Append(box_value(hstring{ prefix } + message));
+            while (dab_items.Size() > 200u)
+            {
+                dab_items.RemoveAt(0u);
+            }
+            DabEventsList().ScrollIntoView(dab_items.GetAt(dab_items.Size() - 1u));
+        }
     }
 }

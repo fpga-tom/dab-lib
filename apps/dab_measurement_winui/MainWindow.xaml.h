@@ -20,6 +20,7 @@ namespace winrt::DabMeasurementWinUI::implementation
         void ServicesListView_ItemClick(IInspectable const&, Microsoft::UI::Xaml::Controls::ItemClickEventArgs const&);
         void ReceiverWorkspace_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void RfMeasurements_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void DabMeasurements_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void RootLayout_SizeChanged(IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
         void RfWorkspace_SizeChanged(IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
         void CirExpandButton_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -68,6 +69,13 @@ namespace winrt::DabMeasurementWinUI::implementation
         void Window_Closed(IInspectable const&, Microsoft::UI::Xaml::WindowEventArgs const&);
 
     private:
+        enum class WorkspaceKind
+        {
+            receiver,
+            rf_measurements,
+            dab_measurements,
+        };
+
         void OnTimerTick(IInspectable const&, IInspectable const&);
         std::optional<dab::measurement::ReceiverSettings> ReadReceiverSettings();
         void HandleReceiverStatus(dab::measurement::ReceiverStatus const& status);
@@ -83,7 +91,9 @@ namespace winrt::DabMeasurementWinUI::implementation
         void AppendRfHistory(float power_dbfs, float cn_db);
         void UpdateRfHistoryVisuals();
         void UpdateRfContext();
-        void ShowWorkspace(bool rf_measurements);
+        void UpdateDabContext();
+        void ApplyDabSnapshot(dab_receive_snapshot_t const& snapshot);
+        void ShowWorkspace(WorkspaceKind workspace);
         void SetCirPanelMaximized(bool maximized);
         void ApplyWorkspaceWidth(double root_width);
         void UpdateCpuUsage();
@@ -160,6 +170,7 @@ namespace winrt::DabMeasurementWinUI::implementation
         size_t m_rf_history_count{ 0u };
         float m_latest_mer_db{ 0.0f };
         bool m_latest_mer_valid{ false };
+        WorkspaceKind m_active_workspace{ WorkspaceKind::receiver };
         bool m_rf_workspace_active{ false };
         bool m_cir_panel_maximized{ false };
         bool m_rf_was_locked{ false };
