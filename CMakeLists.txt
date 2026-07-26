@@ -580,6 +580,7 @@ if(DAB_BUILD_TESTS)
         tests/test_hal.c
         tests/test_msc.c
         tests/test_measurement_alarm.c
+        tests/test_measurement_session_recorder.cpp
         tests/test_rf_calibration.c
         tests/test_null_detect.c
         tests/test_ofdm.c
@@ -599,13 +600,16 @@ if(DAB_BUILD_TESTS)
         tests/test_prs_template.c
         tests/test_sync.c
         tests/test_tframe.c
+        apps/dab_measurement_winui/MeasurementSessionRecorder.cpp
     )
 
     target_link_libraries(dab_tests PRIVATE dab)
+    dab_set_windows_stack_size(dab_tests 8388608)
     target_include_directories(dab_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/receive
         ${CMAKE_CURRENT_SOURCE_DIR}/src/hal/sdrplay
         ${CMAKE_CURRENT_SOURCE_DIR}/src/hal/rtlsdr
+        ${CMAKE_CURRENT_SOURCE_DIR}/apps/dab_measurement_winui
     )
 
     add_test(NAME dab_tests COMMAND dab_tests)

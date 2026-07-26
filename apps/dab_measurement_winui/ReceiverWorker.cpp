@@ -13,10 +13,12 @@ namespace dab::measurement
 {
     ReceiverWorker::ReceiverWorker(SnapshotMailbox& mailbox,
                                    MeasurementMailbox& measurement_mailbox,
-                                   CatalogMailbox& catalog_mailbox) noexcept
+                                   CatalogMailbox& catalog_mailbox,
+                                   MeasurementSessionRecorder& session_recorder) noexcept
         : m_mailbox(mailbox),
           m_measurement_mailbox(measurement_mailbox),
-          m_catalog_mailbox(catalog_mailbox)
+          m_catalog_mailbox(catalog_mailbox),
+          m_session_recorder(session_recorder)
     {
     }
 
@@ -343,6 +345,7 @@ namespace dab::measurement
         }
         worker->ApplyAudioMeasurements(adjusted);
         worker->ApplyCalibration(adjusted);
+        worker->m_session_recorder.RecordSnapshot(adjusted);
         worker->m_mailbox.Publish(adjusted);
         return 0;
     }
@@ -417,7 +420,22 @@ namespace dab::measurement
         dab_receive_measurement_frame_t adjusted = *frame;
         worker->m_last_session_measurement_sequence = frame->sequence;
         adjusted.sequence += worker->m_measurement_sequence_offset;
+        worker->m_session_recorder.RecordMeasurement(adjusted);
         worker->m_measurement_mailbox.Publish(adjusted);
+        return 0;
+    }
+
+    int ReceiverWorker::CatalogCallback(
+        dab_receive_catalog_t const* catalog,
+        void* user) noexcept
+    {
+        if (catalog == nullptr || user == nullptr)
+        {
+            return -1;
+        }
+        auto* worker = static_cast<ReceiverWorker*>(user);
+        worker->m_session_recorder.RecordCatalog(*catalog);
+        worker->m_catalog_mailbox.Publish(*catalog);
         return 0;
     }
 
@@ -425,6 +443,12 @@ namespace dab::measurement
     {
         try
         {
+            if (event.type != DAB_RECEIVE_EVENT_AUDIO_AU)
+            {
+                m_session_recorder.RecordEvent(
+                    static_cast<uint32_t>(event.type),
+                    event.message != nullptr ? event.message : "");
+            }
             if (event.type == DAB_RECEIVE_EVENT_ERROR)
             {
                 PublishStatus(State(), event.message != nullptr ? event.message : "Receiver error", true);
@@ -534,8 +558,8 @@ namespace dab::measurement
         config.measurement_decimation = settings.measurement_decimation;
         config.stream_watchdog_timeout_ms = settings.stream_watchdog_timeout_ms;
         config.decoder_watchdog_timeout_ms = settings.decoder_watchdog_timeout_ms;
-        config.catalog = &CatalogMailbox::Callback;
-        config.catalog_user = &m_catalog_mailbox;
+        config.catalog = &ReceiverWorker::CatalogCallback;
+        config.catalog_user = this;
 
         for (;;)
         {

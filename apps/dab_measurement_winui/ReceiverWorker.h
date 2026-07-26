@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CatalogMailbox.h"
+#include "MeasurementSessionRecorder.h"
 #include "MeasurementMailbox.h"
 #include "SnapshotMailbox.h"
 #include "audio_playback.h"
@@ -55,7 +56,8 @@ namespace dab::measurement
     public:
         ReceiverWorker(SnapshotMailbox& mailbox,
                        MeasurementMailbox& measurement_mailbox,
-                       CatalogMailbox& catalog_mailbox) noexcept;
+                       CatalogMailbox& catalog_mailbox,
+                       MeasurementSessionRecorder& session_recorder) noexcept;
         ~ReceiverWorker();
 
         ReceiverWorker(ReceiverWorker const&) = delete;
@@ -138,6 +140,7 @@ namespace dab::measurement
         static int EventCallback(dab_receive_event_t const* event, void* user) noexcept;
         static int SnapshotCallback(dab_receive_snapshot_t const* snapshot, void* user) noexcept;
         static int MeasurementCallback(dab_receive_measurement_frame_t const* frame, void* user) noexcept;
+        static int CatalogCallback(dab_receive_catalog_t const* catalog, void* user) noexcept;
 
         int OnEvent(dab_receive_event_t const& event) noexcept;
         void Run(ReceiverSettings settings) noexcept;
@@ -163,6 +166,7 @@ namespace dab::measurement
         SnapshotMailbox& m_mailbox;
         MeasurementMailbox& m_measurement_mailbox;
         CatalogMailbox& m_catalog_mailbox;
+        MeasurementSessionRecorder& m_session_recorder;
         std::atomic<bool> m_cancel_requested{ false };
         std::atomic<ReceiverState> m_state{ ReceiverState::stopped };
         std::thread m_thread;

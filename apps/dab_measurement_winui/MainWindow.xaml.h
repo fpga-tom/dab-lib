@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CatalogMailbox.h"
+#include "MeasurementSessionRecorder.h"
 #include "MainWindow.g.h"
 #include "MeasurementMailbox.h"
 #include "ReceiverWorker.h"
@@ -48,6 +49,7 @@ namespace winrt::DabMeasurementWinUI::implementation
         winrt::fire_and_forget ToolsOpenCaptureFolder_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void ToolsCopyDiagnosticSummary_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void ToolsRfCalibration_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        winrt::fire_and_forget ToolsRecordingBrowser_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void CalibrationCapturePoint_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void CalibrationClearProfile_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         winrt::fire_and_forget CalibrationOpenFolder_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -143,6 +145,8 @@ namespace winrt::DabMeasurementWinUI::implementation
 
         void OnTimerTick(IInspectable const&, IInspectable const&);
         void ResetFileSession(bool closed);
+        void StopMeasurementRecording(winrt::hstring const& reason);
+        void UpdateRecordingUi();
         winrt::fire_and_forget ShowHelpDialog(
             winrt::hstring const& title,
             winrt::hstring const& content);
@@ -257,13 +261,15 @@ namespace winrt::DabMeasurementWinUI::implementation
         void AddTimelineEvent(winrt::hstring const& message);
 
         Microsoft::UI::Xaml::DispatcherTimer m_timer;
+        dab::measurement::MeasurementSessionRecorder m_session_recorder;
         dab::measurement::SnapshotMailbox m_mailbox;
         dab::measurement::MeasurementMailbox m_measurement_mailbox;
         dab::measurement::CatalogMailbox m_catalog_mailbox;
         dab::measurement::ReceiverWorker m_receiver{
             m_mailbox,
             m_measurement_mailbox,
-            m_catalog_mailbox
+            m_catalog_mailbox,
+            m_session_recorder
         };
         dab_receive_catalog_t m_latest_catalog{};
         bool m_have_catalog{ false };
@@ -277,6 +283,7 @@ namespace winrt::DabMeasurementWinUI::implementation
         uint32_t m_selected_service_id{ 0u };
         uint32_t m_active_service_id{ 0u };
         bool m_receiver_menu_ready{ false };
+        bool m_recording_failure_reported{ false };
         bool m_receiver_agc_enabled{ false };
         int32_t m_receiver_ppm_correction{ 0 };
         bool m_receiver_bias_tee_enabled{ false };

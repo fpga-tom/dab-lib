@@ -51,6 +51,20 @@ namespace
         return module_path;
     }
 
+    std::filesystem::path measurement_recordings_root()
+    {
+        wchar_t profile[32768]{};
+        DWORD const length = GetEnvironmentVariableW(
+            L"USERPROFILE",
+            profile,
+            static_cast<DWORD>(std::size(profile)));
+        std::filesystem::path root =
+            length != 0u && length < std::size(profile)
+                ? std::filesystem::path{ profile } / L"Documents"
+                : std::filesystem::temp_directory_path();
+        return root / L"DAB Measurement Workbench" / L"Recordings";
+    }
+
     hstring format_float(float value, wchar_t const* suffix, int precision = 1)
     {
         wchar_t buffer[64]{};
@@ -542,6 +556,7 @@ namespace winrt::DabMeasurementWinUI::implementation
     {
         m_timer.Stop();
         m_receiver.StopAndJoin();
+        m_session_recorder.Stop();
     }
 
     void MainWindow::RootLayout_Loaded(
@@ -585,6 +600,9 @@ namespace winrt::DabMeasurementWinUI::implementation
 
     void MainWindow::ResetFileSession(bool closed)
     {
+        StopMeasurementRecording(closed
+            ? hstring{ L"Recording stopped because the session was closed" }
+            : hstring{ L"Recording stopped because a new session was created" });
         bool const receiver_active = m_receiver.IsActive();
         m_pending_receiver_restart.reset();
         if (receiver_active)
@@ -1550,6 +1568,39 @@ namespace winrt::DabMeasurementWinUI::implementation
         UpdateCalibrationUi(m_have_latest_rf_snapshot
             ? &m_latest_rf_snapshot
             : nullptr);
+    }
+
+    winrt::fire_and_forget MainWindow::ToolsRecordingBrowser_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        auto lifetime = get_strong();
+        auto const folder_path = measurement_recordings_root();
+        std::error_code error;
+        std::filesystem::create_directories(folder_path, error);
+        if (error)
+        {
+            AddTimelineEvent(
+                L"Unable to create the recordings folder");
+            co_return;
+        }
+        try
+        {
+            auto const folder =
+                co_await Windows::Storage::StorageFolder::GetFolderFromPathAsync(
+                    folder_path.wstring());
+            bool const opened =
+                co_await Windows::System::Launcher::LaunchFolderAsync(folder);
+            AddTimelineEvent(opened
+                ? hstring{ L"Opened measurement recordings folder" }
+                : hstring{ L"Windows declined to open the recordings folder" });
+        }
+        catch (hresult_error const& exception)
+        {
+            AddTimelineEvent(
+                L"Unable to open the recordings folder: " +
+                exception.message());
+        }
     }
 
     void MainWindow::LoadCalibrationProfile()
@@ -3542,7 +3593,227 @@ namespace winrt::DabMeasurementWinUI::implementation
 
     void MainWindow::RecordButton_Click(IInspectable const&, RoutedEventArgs const&)
     {
-        AddTimelineEvent(L"Recording is not implemented in the live receiver proof of concept");
+        if (m_session_recorder.IsActive())
+        {
+            StopMeasurementRecording(L"Measurement recording stopped");
+            return;
+        }
+
+        using dab::measurement::ReceiverState;
+        ReceiverState const receiver_state = m_receiver.State();
+        if (receiver_state != ReceiverState::running &&
+            receiver_state != ReceiverState::recovering)
+        {
+            AddTimelineEvent(
+                L"Recording requires a running receiver");
+            return;
+        }
+
+        dab::measurement::MeasurementSessionStartInfo info;
+        info.recordings_root = measurement_recordings_root();
+        info.context = to_string(DabContextText().Text());
+        if (auto const selected =
+                DeviceComboBox().SelectedItem().try_as<ComboBoxItem>())
+        {
+            info.device =
+                to_string(unbox_value<hstring>(selected.Content()));
+        }
+        if (auto const selected =
+                ChannelComboBox().SelectedItem().try_as<ComboBoxItem>())
+        {
+            info.channel =
+                to_string(unbox_value<hstring>(selected.Content()));
+        }
+        info.driver = m_have_latest_rf_snapshot
+            ? m_latest_rf_snapshot.device_driver
+            : (DeviceComboBox().SelectedIndex() == 1
+                ? "rtlsdr"
+                : "sdrplay");
+        info.serial = m_have_latest_rf_snapshot
+            ? m_latest_rf_snapshot.device_serial
+            : "";
+        info.frequency_hz = m_have_latest_rf_snapshot
+            ? m_latest_rf_snapshot.frequency_hz
+            : 0u;
+        info.sample_rate_hz = m_have_latest_rf_snapshot
+            ? m_latest_rf_snapshot.sample_rate_hz
+            : 2048000u;
+        info.gain_reduction_db =
+            m_have_latest_rf_snapshot &&
+            m_latest_rf_snapshot.applied_gain_valid != 0
+                ? m_latest_rf_snapshot.if_gain_reduction_db
+                : static_cast<int>(std::lround(GainNumberBox().Value()));
+        info.agc_enabled = m_receiver_agc_enabled;
+        info.calibration_profile_id =
+            m_have_latest_rf_snapshot
+                ? m_latest_rf_snapshot.calibration_profile_id
+                : "";
+        if (m_have_catalog)
+        {
+            info.ensemble =
+                to_string(fic_label_text(m_latest_catalog.ensemble_label));
+            for (uint32_t index = 0u;
+                 index < m_latest_catalog.service_count;
+                 ++index)
+            {
+                if (m_latest_catalog.services[index].service_id ==
+                    m_selected_service_id)
+                {
+                    info.service = to_string(fic_label_text(
+                        m_latest_catalog.services[index].label));
+                    break;
+                }
+            }
+        }
+
+        std::string error;
+        if (!m_session_recorder.Start(std::move(info), error))
+        {
+            AddTimelineEvent(
+                L"Measurement recording could not start: " +
+                to_hstring(error));
+            UpdateRecordingUi();
+            return;
+        }
+        m_recording_failure_reported = false;
+        if (m_have_latest_rf_snapshot)
+        {
+            m_session_recorder.RecordSnapshot(m_latest_rf_snapshot);
+        }
+        if (m_have_catalog)
+        {
+            m_session_recorder.RecordCatalog(m_latest_catalog);
+        }
+        auto const status = m_session_recorder.Status();
+        AddTimelineEvent(
+            L"Measurement recording started · " +
+            hstring{ status.session_path.wstring() });
+        UpdateRecordingUi();
+    }
+
+    void MainWindow::StopMeasurementRecording(hstring const& reason)
+    {
+        auto const before = m_session_recorder.Status();
+        if (!before.active &&
+            (!before.failed || m_recording_failure_reported))
+        {
+            return;
+        }
+        if (before.active)
+        {
+            m_session_recorder.RecordEvent(
+                0x10001u,
+                to_string(reason));
+        }
+        auto const completed = m_session_recorder.Stop();
+        UpdateRecordingUi();
+
+        wchar_t summary[160]{};
+        swprintf_s(summary,
+                   L" · %.1f MB · %llu measurement frames · %llu dropped",
+                   static_cast<double>(completed.bytes_written) /
+                       (1024.0 * 1024.0),
+                   static_cast<unsigned long long>(
+                       completed.measurement_records),
+                   static_cast<unsigned long long>(
+                       completed.dropped_records));
+        AddTimelineEvent(
+            reason + summary + L" · " +
+            hstring{ completed.session_path.wstring() });
+    }
+
+    void MainWindow::UpdateRecordingUi()
+    {
+        if (!RecordButton())
+        {
+            return;
+        }
+        auto status = m_session_recorder.Status();
+        uint64_t const seconds = status.elapsed_ns / 1000000000ull;
+        wchar_t duration[32]{};
+        swprintf_s(duration,
+                   L"%02llu:%02llu:%02llu",
+                   static_cast<unsigned long long>(seconds / 3600ull),
+                   static_cast<unsigned long long>((seconds / 60ull) % 60ull),
+                   static_cast<unsigned long long>(seconds % 60ull));
+
+        if (status.active)
+        {
+            RecordButtonLabel().Text(hstring{ L"● REC " } + duration);
+            RecordButton().Background(
+                Application::Current().Resources().Lookup(
+                    box_value(hstring{ L"RecordingBrush" })).as<Brush>());
+            RecordButton().Foreground(
+                SolidColorBrush{ Colors::White() });
+            wchar_t status_text_buffer[128]{};
+            swprintf_s(status_text_buffer,
+                       status.dropped_records == 0u
+                           ? L"recording %ls · %.1f MB"
+                           : L"recording %ls · %.1f MB · %llu dropped",
+                       duration,
+                       static_cast<double>(
+                           status.bytes_written + status.queued_bytes) /
+                           (1024.0 * 1024.0),
+                       static_cast<unsigned long long>(
+                           status.dropped_records));
+            StatusRecordText().Text(status_text_buffer);
+            StatusRecordText().Foreground(
+                Application::Current().Resources().Lookup(
+                    box_value(hstring{ status.dropped_records == 0u
+                        ? L"RecordingBrush"
+                        : L"WarningBrush" })).as<Brush>());
+            ToolTipService::SetToolTip(
+                RecordButton(),
+                box_value(hstring{ L"Stop recording · " } +
+                          hstring{ status.session_path.wstring() }));
+        }
+        else
+        {
+            RecordButtonLabel().Text(L"Record");
+            RecordButton().Background(
+                Application::Current().Resources().Lookup(
+                    box_value(hstring{ L"PanelRaisedBrush" })).as<Brush>());
+            RecordButton().Foreground(
+                SolidColorBrush{ Colors::White() });
+            if (status.failed)
+            {
+                StatusRecordText().Text(
+                    hstring{ L"recording error · " } +
+                    to_hstring(status.error));
+                StatusRecordText().Foreground(
+                    Application::Current().Resources().Lookup(
+                        box_value(hstring{ L"WarningBrush" })).as<Brush>());
+                if (!m_recording_failure_reported)
+                {
+                    m_recording_failure_reported = true;
+                    status = m_session_recorder.Stop();
+                    AddTimelineEvent(
+                        hstring{ L"Measurement recording failed: " } +
+                        to_hstring(status.error) +
+                        L" · receiver continues running");
+                }
+            }
+            else
+            {
+                StatusRecordText().Text(L"not recording");
+                StatusRecordText().Foreground(
+                    Application::Current().Resources().Lookup(
+                        box_value(hstring{ L"MutedTextBrush" })).as<Brush>());
+            }
+            ToolTipService::SetToolTip(
+                RecordButton(),
+                box_value(hstring{
+                    L"Record snapshots and high-rate measurements; "
+                    L"continuous IQ is excluded"
+                }));
+        }
+
+        using dab::measurement::ReceiverState;
+        ReceiverState const receiver_state = m_receiver.State();
+        RecordButton().IsEnabled(
+            status.active ||
+            receiver_state == ReceiverState::running ||
+            receiver_state == ReceiverState::recovering);
     }
 
     void MainWindow::MarkerButton_Click(IInspectable const&, RoutedEventArgs const&)
@@ -3555,6 +3826,7 @@ namespace winrt::DabMeasurementWinUI::implementation
         m_timer.Stop();
         m_pending_receiver_restart.reset();
         m_receiver.StopAndJoin();
+        m_session_recorder.Stop();
     }
 
     void MainWindow::OnTimerTick(IInspectable const&, IInspectable const&)
@@ -3924,6 +4196,11 @@ namespace winrt::DabMeasurementWinUI::implementation
             StatusSyncText().Text(L"idle");
             StatusSyncIndicator().Fill(Application::Current().Resources().Lookup(
                 box_value(hstring{ L"MutedTextBrush" })).as<Brush>());
+            if (!m_pending_receiver_restart.has_value())
+            {
+                StopMeasurementRecording(
+                    L"Measurement recording stopped with the receiver");
+            }
             break;
         case ReceiverState::failed:
             m_metrics_stale = false;
@@ -3964,6 +4241,8 @@ namespace winrt::DabMeasurementWinUI::implementation
             StatusSyncText().Text(L"error");
             StatusSyncIndicator().Fill(Application::Current().Resources().Lookup(
                 box_value(hstring{ L"WarningBrush" })).as<Brush>());
+            StopMeasurementRecording(
+                L"Measurement recording stopped after receiver failure");
             break;
         }
 
@@ -4006,6 +4285,7 @@ namespace winrt::DabMeasurementWinUI::implementation
         ReceiverGainSubmenu().IsEnabled(!active && !m_receiver_agc_enabled);
         ReceiverFrontEndSubmenu().IsEnabled(!active);
         ReceiverPpmSubmenu().IsEnabled(!active);
+        UpdateRecordingUi();
 
         int32_t const device_index = DeviceComboBox().SelectedIndex();
         ReceiverSdrplayMenuItem().IsChecked(device_index != 1);
@@ -10955,6 +11235,7 @@ namespace winrt::DabMeasurementWinUI::implementation
 
     void MainWindow::AddTimelineEvent(hstring const& message)
     {
+        m_session_recorder.RecordEvent(0x10000u, to_string(message));
         uint64_t const elapsed_ms = m_tick * 250ull;
         wchar_t prefix[32]{};
         swprintf_s(prefix,

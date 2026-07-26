@@ -422,9 +422,9 @@
                 <MenuFlyoutItem Text="Copy session diagnostic summary"
                                 Click="ToolsCopyDiagnosticSummary_Click" />
                 <MenuFlyoutSeparator />
-                <MenuFlyoutItem Text="Recording browser..."
-                                IsEnabled="False"
-                                ToolTipService.ToolTip="Recording and replay are not implemented yet" />
+                <MenuFlyoutItem Text="Open recordings folder..."
+                                Click="ToolsRecordingBrowser_Click"
+                                ToolTipService.ToolTip="Open saved measurement-session folders" />
                 <MenuFlyoutItem Text="Developer diagnostics..."
                                 IsEnabled="False"
                                 ToolTipService.ToolTip="Developer diagnostics are not exposed in this build" />
@@ -472,7 +472,7 @@
                         <ColumnDefinition Width="75" />
                         <ColumnDefinition Width="120" />
                         <ColumnDefinition Width="75" />
-                        <ColumnDefinition Width="85" />
+                        <ColumnDefinition Width="140" />
                         <ColumnDefinition Width="85" />
                         <ColumnDefinition Width="58" />
                         <ColumnDefinition Width="58" />
@@ -545,7 +545,7 @@
                     <Button Grid.Column="5"
                             x:Name="RecordButton"
                             IsEnabled="False"
-                            ToolTipService.ToolTip="Recording will be added after the live receiver path is validated"
+                            ToolTipService.ToolTip="Record a replayable measurement session (continuous IQ is excluded)"
                             Height="34"
                             VerticalAlignment="Bottom"
                             HorizontalAlignment="Stretch"
@@ -4574,7 +4574,7 @@
                     <Ellipse x:Name="StatusSyncIndicator" Width="7" Height="7" Fill="{StaticResource MutedTextBrush}" />
                     <TextBlock x:Name="StatusSyncText" Text="idle" />
                 </StackPanel>
-                <TextBlock Grid.Column="3" x:Name="StatusRecordText" Text="not recording" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" />
+    <TextBlock Grid.Column="3" x:Name="StatusRecordText" Text="not recording" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" />
                 <TextBlock Grid.Column="4" x:Name="StatusCalibrationText" Text="Uncalibrated" VerticalAlignment="Center" Foreground="{StaticResource WarningBrush}" />
                 <TextBlock Grid.Column="5" x:Name="StatusOverrunText" Text="no overruns" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" />
                 <TextBlock Grid.Column="7" x:Name="StatusCpuText" Text="CPU —" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" FontFamily="Consolas" />

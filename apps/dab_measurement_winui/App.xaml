@@ -18,6 +18,7 @@
             <Color x:Key="AccentColor">#FF35D0BA</Color>
             <Color x:Key="SpectrumColor">#FF54E2FF</Color>
             <Color x:Key="WarningColor">#FFFFC857</Color>
+            <Color x:Key="RecordingColor">#FFE5484D</Color>
             <Color x:Key="PlotBackgroundColor">#FF07101C</Color>
 
             <SolidColorBrush x:Key="WorkspaceBrush" Color="{StaticResource WorkspaceColor}" />
@@ -28,6 +29,7 @@
             <SolidColorBrush x:Key="MeasurementAccentBrush" Color="{StaticResource AccentColor}" />
             <SolidColorBrush x:Key="SpectrumBrush" Color="{StaticResource SpectrumColor}" />
             <SolidColorBrush x:Key="WarningBrush" Color="{StaticResource WarningColor}" />
+            <SolidColorBrush x:Key="RecordingBrush" Color="{StaticResource RecordingColor}" />
             <SolidColorBrush x:Key="PlotBackgroundBrush" Color="{StaticResource PlotBackgroundColor}" />
 
             <Style x:Key="PanelCardStyle" TargetType="Border">
