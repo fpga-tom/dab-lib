@@ -21,6 +21,19 @@ namespace winrt::DabMeasurementWinUI::implementation
         winrt::fire_and_forget FileExportEventsCsv_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         winrt::fire_and_forget FileSaveScreenshot_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void FileExit_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void ReceiverStartStop_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void ReceiverDevice_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void ReceiverPreviousChannel_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void ReceiverNextChannel_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void ReceiverChannel_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void ReceiverEnterFrequency_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void ReceiverGainAdjust_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void ReceiverGainPreset_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void ReceiverAgc_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void ReceiverPpmAdjust_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void ReceiverBiasTee_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void ReceiverOpenServiceBrowser_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void ReceiverDiagnostics_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void StartButton_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void ChannelComboBox_SelectionChanged(IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
         void ServicesListView_SelectionChanged(IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
@@ -50,6 +63,7 @@ namespace winrt::DabMeasurementWinUI::implementation
         void DabPlusMetricCard_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void DabPlusSuperframeSelectionChanged(IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
         void DabPlusAudioUnitSelectionChanged(IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
+        void RootLayout_Loaded(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void RootLayout_SizeChanged(IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
         void RfWorkspace_SizeChanged(IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
         void CirExpandButton_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -110,6 +124,8 @@ namespace winrt::DabMeasurementWinUI::implementation
         std::optional<dab::measurement::ReceiverSettings> ReadReceiverSettings();
         void HandleReceiverStatus(dab::measurement::ReceiverStatus const& status);
         void SetReceiverControlsEnabled(bool enabled);
+        void UpdateReceiverMenuState();
+        void SelectReceiverChannel(int32_t index);
         void ApplySnapshot(dab_receive_snapshot_t const& snapshot);
         void ApplyRfSnapshot(dab_receive_snapshot_t const& snapshot);
         void UpdateRfInputHistogram(dab_receive_snapshot_t const& snapshot);
@@ -226,6 +242,10 @@ namespace winrt::DabMeasurementWinUI::implementation
         bool m_metrics_stale{ false };
         uint32_t m_selected_service_id{ 0u };
         uint32_t m_active_service_id{ 0u };
+        bool m_receiver_menu_ready{ false };
+        bool m_receiver_agc_enabled{ false };
+        int32_t m_receiver_ppm_correction{ 0 };
+        bool m_receiver_bias_tee_enabled{ false };
         std::optional<dab::measurement::ReceiverSettings> m_pending_receiver_restart;
         static constexpr size_t rf_history_capacity = 240u;
         std::array<float, rf_history_capacity> m_rf_power_history{};

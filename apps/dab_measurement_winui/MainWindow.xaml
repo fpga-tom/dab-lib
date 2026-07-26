@@ -10,9 +10,10 @@
     Closed="Window_Closed"
     Title="DAB+ Measurement Workbench">
 
-    <Grid x:Name="RootLayout"
+        <Grid x:Name="RootLayout"
           Background="{StaticResource WorkspaceBrush}"
           RequestedTheme="Dark"
+          Loaded="RootLayout_Loaded"
           SizeChanged="RootLayout_SizeChanged">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -76,8 +77,141 @@
                                 KeyboardAcceleratorTextOverride="Alt+F4" />
             </MenuBarItem>
             <MenuBarItem Title="Receiver">
-                <MenuFlyoutItem Text="Device setup..." />
-                <MenuFlyoutItem Text="Band III channel plan" />
+                <MenuFlyoutItem x:Name="ReceiverStartStopMenuItem"
+                                Text="Start receiver"
+                                Click="ReceiverStartStop_Click"
+                                KeyboardAcceleratorTextOverride="F5">
+                    <MenuFlyoutItem.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="F5" />
+                    </MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
+                <MenuFlyoutSeparator />
+                <MenuFlyoutSubItem x:Name="ReceiverDeviceSubmenu" Text="Device">
+                    <ToggleMenuFlyoutItem x:Name="ReceiverSdrplayMenuItem"
+                                          Text="SDRplay RSP1A"
+                                          Tag="0"
+                                          IsChecked="True"
+                                          Click="ReceiverDevice_Click" />
+                    <ToggleMenuFlyoutItem x:Name="ReceiverRtlSdrMenuItem"
+                                          Text="RTL-SDR"
+                                          Tag="1"
+                                          Click="ReceiverDevice_Click" />
+                    <MenuFlyoutSeparator />
+                    <MenuFlyoutItem Text="Device setup..."
+                                    IsEnabled="False"
+                                    ToolTipService.ToolTip="Device-specific setup is not implemented yet" />
+                </MenuFlyoutSubItem>
+                <MenuFlyoutSubItem x:Name="ReceiverChannelSubmenu" Text="Band III channel">
+                    <MenuFlyoutItem x:Name="ReceiverChannelStatusMenuItem"
+                                    Text="Current: 10C · 213.360 MHz"
+                                    IsEnabled="False" />
+                    <MenuFlyoutSeparator />
+                    <MenuFlyoutItem Text="Previous channel"
+                                    Click="ReceiverPreviousChannel_Click" />
+                    <MenuFlyoutItem Text="Next channel"
+                                    Click="ReceiverNextChannel_Click" />
+                    <MenuFlyoutSeparator />
+                    <MenuFlyoutSubItem Text="Blocks 5–9">
+                        <MenuFlyoutItem Text="5A · 174.928 MHz" Tag="0" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutItem Text="5B · 176.640 MHz" Tag="1" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutItem Text="5C · 178.352 MHz" Tag="2" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutItem Text="5D · 180.064 MHz" Tag="3" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutSeparator />
+                        <MenuFlyoutItem Text="6A · 181.936 MHz" Tag="4" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutItem Text="6B · 183.648 MHz" Tag="5" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutItem Text="6C · 185.360 MHz" Tag="6" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutItem Text="6D · 187.072 MHz" Tag="7" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutSeparator />
+                        <MenuFlyoutItem Text="7A · 188.928 MHz" Tag="8" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutItem Text="7B · 190.640 MHz" Tag="9" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutItem Text="7C · 192.352 MHz" Tag="10" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutItem Text="7D · 194.064 MHz" Tag="11" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutSeparator />
+                        <MenuFlyoutItem Text="8A · 195.936 MHz" Tag="12" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutItem Text="8B · 197.648 MHz" Tag="13" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutItem Text="8C · 199.360 MHz" Tag="14" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutItem Text="8D · 201.072 MHz" Tag="15" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutSeparator />
+                        <MenuFlyoutItem Text="9A · 202.928 MHz" Tag="16" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutItem Text="9B · 204.640 MHz" Tag="17" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutItem Text="9C · 206.352 MHz" Tag="18" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutItem Text="9D · 208.064 MHz" Tag="19" Click="ReceiverChannel_Click" />
+                    </MenuFlyoutSubItem>
+                    <MenuFlyoutSubItem Text="Blocks 10–13">
+                        <MenuFlyoutItem Text="10A · 209.936 MHz" Tag="20" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutItem Text="10B · 211.648 MHz" Tag="21" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutItem Text="10C · 213.360 MHz" Tag="22" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutItem Text="10D · 215.072 MHz" Tag="23" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutSeparator />
+                        <MenuFlyoutItem Text="11A · 216.928 MHz" Tag="24" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutItem Text="11B · 218.640 MHz" Tag="25" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutItem Text="11C · 220.352 MHz" Tag="26" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutItem Text="11D · 222.064 MHz" Tag="27" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutSeparator />
+                        <MenuFlyoutItem Text="12A · 223.936 MHz" Tag="28" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutItem Text="12B · 225.648 MHz" Tag="29" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutItem Text="12C · 227.360 MHz" Tag="30" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutItem Text="12D · 229.072 MHz" Tag="31" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutSeparator />
+                        <MenuFlyoutItem Text="13A · 230.784 MHz" Tag="32" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutItem Text="13B · 232.496 MHz" Tag="33" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutItem Text="13C · 234.208 MHz" Tag="34" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutItem Text="13D · 235.776 MHz" Tag="35" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutItem Text="13E · 237.488 MHz" Tag="36" Click="ReceiverChannel_Click" />
+                        <MenuFlyoutItem Text="13F · 239.200 MHz" Tag="37" Click="ReceiverChannel_Click" />
+                    </MenuFlyoutSubItem>
+                </MenuFlyoutSubItem>
+                <MenuFlyoutItem x:Name="ReceiverEnterFrequencyMenuItem"
+                                Text="Enter frequency..."
+                                Click="ReceiverEnterFrequency_Click"
+                                KeyboardAcceleratorTextOverride="Ctrl+L">
+                    <MenuFlyoutItem.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="L" Modifiers="Control" />
+                    </MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem Text="Scan Band III..."
+                                IsEnabled="False"
+                                ToolTipService.ToolTip="Band scanning is not integrated with this application yet" />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutSubItem x:Name="ReceiverGainSubmenu" Text="Gain">
+                    <MenuFlyoutItem x:Name="ReceiverGainStatusMenuItem"
+                                    Text="Current: 40 dB"
+                                    IsEnabled="False" />
+                    <MenuFlyoutSeparator />
+                    <MenuFlyoutItem Text="Decrease 1 dB" Tag="-1" Click="ReceiverGainAdjust_Click" />
+                    <MenuFlyoutItem Text="Increase 1 dB" Tag="1" Click="ReceiverGainAdjust_Click" />
+                    <MenuFlyoutSeparator />
+                    <MenuFlyoutItem Text="20 dB" Tag="20" Click="ReceiverGainPreset_Click" />
+                    <MenuFlyoutItem Text="30 dB" Tag="30" Click="ReceiverGainPreset_Click" />
+                    <MenuFlyoutItem Text="40 dB" Tag="40" Click="ReceiverGainPreset_Click" />
+                    <MenuFlyoutItem Text="50 dB" Tag="50" Click="ReceiverGainPreset_Click" />
+                </MenuFlyoutSubItem>
+                <MenuFlyoutSubItem x:Name="ReceiverFrontEndSubmenu" Text="Front end">
+                    <ToggleMenuFlyoutItem x:Name="ReceiverAgcMenuItem"
+                                          Text="Automatic gain control"
+                                          Click="ReceiverAgc_Click" />
+                    <ToggleMenuFlyoutItem x:Name="ReceiverBiasTeeMenuItem"
+                                          Text="Bias tee"
+                                          Click="ReceiverBiasTee_Click" />
+                    <MenuFlyoutSubItem x:Name="ReceiverPpmSubmenu" Text="Frequency correction">
+                        <MenuFlyoutItem x:Name="ReceiverPpmStatusMenuItem"
+                                        Text="Current: 0 ppm"
+                                        IsEnabled="False" />
+                        <MenuFlyoutSeparator />
+                        <MenuFlyoutItem Text="Decrease 1 ppm" Tag="-1" Click="ReceiverPpmAdjust_Click" />
+                        <MenuFlyoutItem Text="Reset to 0 ppm" Tag="reset" Click="ReceiverPpmAdjust_Click" />
+                        <MenuFlyoutItem Text="Increase 1 ppm" Tag="1" Click="ReceiverPpmAdjust_Click" />
+                    </MenuFlyoutSubItem>
+                </MenuFlyoutSubItem>
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem Text="Open service browser"
+                                Click="ReceiverOpenServiceBrowser_Click" />
+                <MenuFlyoutItem Text="Audio output device..."
+                                IsEnabled="False"
+                                ToolTipService.ToolTip="The receiver currently uses the system default audio output" />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem Text="RF input and transport diagnostics"
+                                Click="ReceiverDiagnostics_Click" />
             </MenuBarItem>
             <MenuBarItem Title="Measurement">
                 <MenuFlyoutItem Text="New measurement profile..." />
@@ -710,7 +844,10 @@
                 </Grid>
             </Border>
 
-            <TabView Grid.Row="1" IsAddTabButtonVisible="False" TabWidthMode="SizeToContent">
+            <TabView x:Name="RfTabView"
+                     Grid.Row="1"
+                     IsAddTabButtonVisible="False"
+                     TabWidthMode="SizeToContent">
                 <TabViewItem Header="Overview" IsClosable="False">
                     <ScrollViewer VerticalScrollBarVisibility="Auto"
                                   HorizontalScrollMode="Disabled"

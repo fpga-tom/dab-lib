@@ -518,6 +518,14 @@ namespace winrt::DabMeasurementWinUI::implementation
         m_receiver.StopAndJoin();
     }
 
+    void MainWindow::RootLayout_Loaded(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        m_receiver_menu_ready = true;
+        UpdateReceiverMenuState();
+    }
+
     void MainWindow::ResetFileSession(bool closed)
     {
         bool const receiver_active = m_receiver.IsActive();
@@ -870,6 +878,255 @@ namespace winrt::DabMeasurementWinUI::implementation
         Close();
     }
 
+    void MainWindow::ReceiverStartStop_Click(
+        IInspectable const& sender,
+        RoutedEventArgs const& args)
+    {
+        if (!StartButton().IsEnabled())
+        {
+            return;
+        }
+        StartButton_Click(sender, args);
+        UpdateReceiverMenuState();
+    }
+
+    void MainWindow::ReceiverDevice_Click(
+        IInspectable const& sender,
+        RoutedEventArgs const&)
+    {
+        if (m_receiver.IsActive())
+        {
+            UpdateReceiverMenuState();
+            return;
+        }
+
+        auto const item = sender.try_as<ToggleMenuFlyoutItem>();
+        if (!item || !item.Tag())
+        {
+            return;
+        }
+        std::wstring const value{ unbox_value<hstring>(item.Tag()).c_str() };
+        wchar_t* end = nullptr;
+        long const index = std::wcstol(value.c_str(), &end, 10);
+        if (end == value.c_str() || index < 0 ||
+            index >= static_cast<long>(DeviceComboBox().Items().Size()))
+        {
+            UpdateReceiverMenuState();
+            return;
+        }
+
+        DeviceComboBox().SelectedIndex(static_cast<int32_t>(index));
+        UpdateReceiverMenuState();
+        AddTimelineEvent(index == 1
+            ? hstring{ L"Receiver device set to RTL-SDR" }
+            : hstring{ L"Receiver device set to SDRplay RSP1A" });
+    }
+
+    void MainWindow::SelectReceiverChannel(int32_t index)
+    {
+        if (m_receiver.IsActive() ||
+            index < 0 ||
+            index >= static_cast<int32_t>(ChannelComboBox().Items().Size()))
+        {
+            return;
+        }
+
+        if (ChannelComboBox().SelectedIndex() != index)
+        {
+            ChannelComboBox().SelectedIndex(index);
+            auto const selected = ChannelComboBox().SelectedItem().try_as<ComboBoxItem>();
+            if (selected)
+            {
+                AddTimelineEvent(
+                    L"Tuned to Band III channel " +
+                    unbox_value<hstring>(selected.Content()));
+            }
+        }
+        UpdateReceiverMenuState();
+    }
+
+    void MainWindow::ReceiverPreviousChannel_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        SelectReceiverChannel(ChannelComboBox().SelectedIndex() - 1);
+    }
+
+    void MainWindow::ReceiverNextChannel_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        SelectReceiverChannel(ChannelComboBox().SelectedIndex() + 1);
+    }
+
+    void MainWindow::ReceiverChannel_Click(
+        IInspectable const& sender,
+        RoutedEventArgs const&)
+    {
+        auto const item = sender.try_as<MenuFlyoutItem>();
+        if (!item || !item.Tag())
+        {
+            return;
+        }
+        std::wstring const value{ unbox_value<hstring>(item.Tag()).c_str() };
+        wchar_t* end = nullptr;
+        long const index = std::wcstol(value.c_str(), &end, 10);
+        if (end != value.c_str())
+        {
+            SelectReceiverChannel(static_cast<int32_t>(index));
+        }
+    }
+
+    void MainWindow::ReceiverEnterFrequency_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        if (m_receiver.IsActive())
+        {
+            return;
+        }
+        ShowWorkspace(WorkspaceKind::receiver);
+        FrequencyTextBox().Focus(FocusState::Programmatic);
+        FrequencyTextBox().SelectAll();
+    }
+
+    void MainWindow::ReceiverGainAdjust_Click(
+        IInspectable const& sender,
+        RoutedEventArgs const&)
+    {
+        if (m_receiver.IsActive() || m_receiver_agc_enabled)
+        {
+            return;
+        }
+        auto const item = sender.try_as<MenuFlyoutItem>();
+        if (!item || !item.Tag())
+        {
+            return;
+        }
+        std::wstring const value{ unbox_value<hstring>(item.Tag()).c_str() };
+        wchar_t* end = nullptr;
+        long const delta = std::wcstol(value.c_str(), &end, 10);
+        if (end == value.c_str())
+        {
+            return;
+        }
+        double gain = GainNumberBox().Value();
+        if (!std::isfinite(gain))
+        {
+            gain = 40.0;
+        }
+        gain = std::clamp(gain + static_cast<double>(delta), 0.0, 100.0);
+        GainNumberBox().Value(gain);
+        UpdateReceiverMenuState();
+    }
+
+    void MainWindow::ReceiverGainPreset_Click(
+        IInspectable const& sender,
+        RoutedEventArgs const&)
+    {
+        if (m_receiver.IsActive() || m_receiver_agc_enabled)
+        {
+            return;
+        }
+        auto const item = sender.try_as<MenuFlyoutItem>();
+        if (!item || !item.Tag())
+        {
+            return;
+        }
+        std::wstring const value{ unbox_value<hstring>(item.Tag()).c_str() };
+        wchar_t* end = nullptr;
+        long const gain = std::wcstol(value.c_str(), &end, 10);
+        if (end == value.c_str())
+        {
+            return;
+        }
+        GainNumberBox().Value(static_cast<double>(std::clamp(gain, 0l, 100l)));
+        UpdateReceiverMenuState();
+    }
+
+    void MainWindow::ReceiverAgc_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        if (m_receiver.IsActive())
+        {
+            UpdateReceiverMenuState();
+            return;
+        }
+        m_receiver_agc_enabled = ReceiverAgcMenuItem().IsChecked();
+        SetReceiverControlsEnabled(true);
+        UpdateReceiverMenuState();
+        AddTimelineEvent(m_receiver_agc_enabled
+            ? hstring{ L"Receiver AGC enabled" }
+            : hstring{ L"Receiver AGC disabled" });
+    }
+
+    void MainWindow::ReceiverPpmAdjust_Click(
+        IInspectable const& sender,
+        RoutedEventArgs const&)
+    {
+        if (m_receiver.IsActive())
+        {
+            return;
+        }
+        auto const item = sender.try_as<MenuFlyoutItem>();
+        if (!item || !item.Tag())
+        {
+            return;
+        }
+        std::wstring const value{ unbox_value<hstring>(item.Tag()).c_str() };
+        if (value == L"reset")
+        {
+            m_receiver_ppm_correction = 0;
+        }
+        else
+        {
+            wchar_t* end = nullptr;
+            long const delta = std::wcstol(value.c_str(), &end, 10);
+            if (end == value.c_str())
+            {
+                return;
+            }
+            m_receiver_ppm_correction = std::clamp(
+                m_receiver_ppm_correction + static_cast<int32_t>(delta),
+                -100,
+                100);
+        }
+        UpdateReceiverMenuState();
+    }
+
+    void MainWindow::ReceiverBiasTee_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        if (m_receiver.IsActive())
+        {
+            UpdateReceiverMenuState();
+            return;
+        }
+        m_receiver_bias_tee_enabled = ReceiverBiasTeeMenuItem().IsChecked();
+        UpdateReceiverMenuState();
+        AddTimelineEvent(m_receiver_bias_tee_enabled
+            ? hstring{ L"Receiver bias tee enabled" }
+            : hstring{ L"Receiver bias tee disabled" });
+    }
+
+    void MainWindow::ReceiverOpenServiceBrowser_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        ShowWorkspace(WorkspaceKind::receiver);
+        ServicesListView().Focus(FocusState::Programmatic);
+    }
+
+    void MainWindow::ReceiverDiagnostics_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        ShowWorkspace(WorkspaceKind::rf_measurements);
+        RfTabView().SelectedIndex(2);
+    }
+
     void MainWindow::ChannelComboBox_SelectionChanged(IInspectable const&, SelectionChangedEventArgs const&)
     {
         auto selected_channel = ChannelComboBox().SelectedItem().try_as<ComboBoxItem>();
@@ -895,6 +1152,7 @@ namespace winrt::DabMeasurementWinUI::implementation
         m_selected_service_id = 0u;
         UpdateRfContext();
         UpdateDabContext();
+        UpdateReceiverMenuState();
     }
 
     void MainWindow::ReceiverWorkspace_Click(IInspectable const&, RoutedEventArgs const&)
@@ -2235,6 +2493,7 @@ namespace winrt::DabMeasurementWinUI::implementation
             m_catalog_mailbox_version = catalog_version;
             ApplyCatalog(catalog);
         }
+        UpdateReceiverMenuState();
     }
 
     std::optional<dab::measurement::ReceiverSettings> MainWindow::ReadReceiverSettings()
@@ -2259,7 +2518,9 @@ namespace winrt::DabMeasurementWinUI::implementation
         settings.frequency_hz = static_cast<uint64_t>(std::llround(frequency_mhz * 1000000.0));
         settings.service_id = m_selected_service_id;
         settings.gain_db = static_cast<int>(std::clamp(std::lround(gain_value), 0l, 100l));
-        settings.agc_enabled = false;
+        settings.agc_enabled = m_receiver_agc_enabled;
+        settings.ppm_correction = m_receiver_ppm_correction;
+        settings.bias_tee_enabled = m_receiver_bias_tee_enabled;
         settings.use_real_device = true;
 
         StatusDeviceText().Text(settings.driver == "rtlsdr" ? L"RTL-SDR" : L"SDRplay RSP1A");
@@ -2594,7 +2855,59 @@ namespace winrt::DabMeasurementWinUI::implementation
         DeviceComboBox().IsEnabled(enabled);
         ChannelComboBox().IsEnabled(enabled);
         FrequencyTextBox().IsEnabled(enabled);
-        GainNumberBox().IsEnabled(enabled);
+        GainNumberBox().IsEnabled(enabled && !m_receiver_agc_enabled);
+        UpdateReceiverMenuState();
+    }
+
+    void MainWindow::UpdateReceiverMenuState()
+    {
+        if (!m_receiver_menu_ready)
+        {
+            return;
+        }
+
+        bool const active = m_receiver.IsActive();
+        ReceiverStartStopMenuItem().Text(active ? L"Stop receiver" : L"Start receiver");
+        ReceiverStartStopMenuItem().IsEnabled(StartButton().IsEnabled());
+        ReceiverDeviceSubmenu().IsEnabled(!active);
+        ReceiverChannelSubmenu().IsEnabled(!active);
+        ReceiverEnterFrequencyMenuItem().IsEnabled(!active);
+        ReceiverGainSubmenu().IsEnabled(!active && !m_receiver_agc_enabled);
+        ReceiverFrontEndSubmenu().IsEnabled(!active);
+        ReceiverPpmSubmenu().IsEnabled(!active);
+
+        int32_t const device_index = DeviceComboBox().SelectedIndex();
+        ReceiverSdrplayMenuItem().IsChecked(device_index != 1);
+        ReceiverRtlSdrMenuItem().IsChecked(device_index == 1);
+        ReceiverAgcMenuItem().IsChecked(m_receiver_agc_enabled);
+        ReceiverBiasTeeMenuItem().IsChecked(m_receiver_bias_tee_enabled);
+
+        auto const selected_channel =
+            ChannelComboBox().SelectedItem().try_as<ComboBoxItem>();
+        if (selected_channel)
+        {
+            ReceiverChannelStatusMenuItem().Text(
+                L"Current: " +
+                unbox_value<hstring>(selected_channel.Content()) +
+                L" \u00b7 " +
+                unbox_value<hstring>(selected_channel.Tag()) +
+                L" MHz");
+        }
+
+        double gain = GainNumberBox().Value();
+        if (!std::isfinite(gain))
+        {
+            gain = 40.0;
+        }
+        wchar_t gain_text[48]{};
+        swprintf_s(gain_text,
+                   m_receiver_agc_enabled ? L"Current: AGC (manual %ld dB)" : L"Current: %ld dB",
+                   std::lround(gain));
+        ReceiverGainStatusMenuItem().Text(gain_text);
+
+        wchar_t ppm_text[40]{};
+        swprintf_s(ppm_text, L"Current: %+d ppm", m_receiver_ppm_correction);
+        ReceiverPpmStatusMenuItem().Text(ppm_text);
     }
 
     void MainWindow::ShowWorkspace(WorkspaceKind workspace)
