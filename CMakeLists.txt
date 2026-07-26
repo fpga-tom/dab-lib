@@ -601,6 +601,7 @@ if(DAB_BUILD_TESTS)
         tests/test_sync.c
         tests/test_tframe.c
         apps/dab_measurement_winui/MeasurementSessionRecorder.cpp
+        apps/dab_measurement_winui/MeasurementSessionReplay.cpp
     )
 
     target_link_libraries(dab_tests PRIVATE dab)

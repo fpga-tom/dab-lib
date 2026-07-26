@@ -107,6 +107,7 @@
     <ClInclude Include="CatalogMailbox.h" />
     <ClInclude Include="CalibrationProfileStore.h" />
     <ClInclude Include="MeasurementSessionRecorder.h" />
+    <ClInclude Include="MeasurementSessionReplay.h" />
     <ClInclude Include="MeasurementMailbox.h" />
     <ClInclude Include="ReceiverWorker.h" />
     <ClInclude Include="SnapshotMailbox.h" />
@@ -128,6 +129,9 @@
     <ClCompile Include="CatalogMailbox.cpp" />
     <ClCompile Include="CalibrationProfileStore.cpp" />
     <ClCompile Include="MeasurementSessionRecorder.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="MeasurementSessionReplay.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="MeasurementMailbox.cpp" />

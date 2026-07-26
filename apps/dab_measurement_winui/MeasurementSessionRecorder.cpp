@@ -283,7 +283,7 @@ namespace dab::measurement
         {
             PendingRecord record;
             record.type = MeasurementSessionRecordType::snapshot;
-            record.timestamp_ns = snapshot.timestamp_ns;
+            record.timestamp_ns = ElapsedNs();
             record.sequence = snapshot.sequence;
             record.payload.resize(sizeof(snapshot));
             std::memcpy(record.payload.data(), &snapshot, sizeof(snapshot));
@@ -352,7 +352,7 @@ namespace dab::measurement
 
             PendingRecord record;
             record.type = MeasurementSessionRecordType::measurement;
-            record.timestamp_ns = frame.timestamp_ns;
+            record.timestamp_ns = ElapsedNs();
             record.sequence = frame.sequence;
             size_t const float_count =
                 spectrum_count +
@@ -680,6 +680,7 @@ namespace dab::measurement
                      << json_escape(m_info.application_version) << "\",\n"
                      << "  \"started_unix_ns\": " << m_started_unix_ns << ",\n"
                      << "  \"elapsed_ns\": " << status.elapsed_ns << ",\n"
+                     << "  \"record_timestamps\": \"capture_elapsed_ns\",\n"
                      << "  \"context\": \"" << json_escape(m_info.context)
                      << "\",\n"
                      << "  \"device\": \"" << json_escape(m_info.device)

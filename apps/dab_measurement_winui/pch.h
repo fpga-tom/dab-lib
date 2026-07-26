@@ -14,6 +14,7 @@
 #include <winrt/Windows.Graphics.h>
 #include <winrt/Windows.Graphics.Imaging.h>
 #include <winrt/Windows.Storage.h>
+#include <winrt/Windows.Storage.Pickers.h>
 #include <winrt/Windows.Storage.Streams.h>
 #include <winrt/Windows.UI.h>
 #include <winrt/Microsoft.UI.Dispatching.h>
@@ -35,6 +36,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <coroutine>
 #include <cstdint>
 #include <cwchar>
 #include <deque>
@@ -43,3 +45,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include <microsoft.ui.xaml.window.h>
+#include <shobjidl_core.h>

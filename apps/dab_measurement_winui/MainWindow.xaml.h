@@ -2,6 +2,7 @@
 
 #include "CatalogMailbox.h"
 #include "MeasurementSessionRecorder.h"
+#include "MeasurementSessionReplay.h"
 #include "MainWindow.g.h"
 #include "MeasurementMailbox.h"
 #include "ReceiverWorker.h"
@@ -16,6 +17,7 @@ namespace winrt::DabMeasurementWinUI::implementation
         ~MainWindow();
 
         void FileNewSession_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        winrt::fire_and_forget FileOpenRecording_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void FileCloseSession_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         winrt::fire_and_forget FileSaveSnapshot_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         winrt::fire_and_forget FileExportMeasurementsCsv_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -132,6 +134,9 @@ namespace winrt::DabMeasurementWinUI::implementation
         void RfHistoryAlarmEnable_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void AudioButton_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void RecordButton_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void ReplayPlayPause_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void ReplaySpeed_SelectionChanged(IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
+        void ReplayPosition_ValueChanged(IInspectable const&, Microsoft::UI::Xaml::Controls::Primitives::RangeBaseValueChangedEventArgs const&);
         void MarkerButton_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void Window_Closed(IInspectable const&, Microsoft::UI::Xaml::WindowEventArgs const&);
 
@@ -145,6 +150,13 @@ namespace winrt::DabMeasurementWinUI::implementation
 
         void OnTimerTick(IInspectable const&, IInspectable const&);
         void ResetFileSession(bool closed);
+        void CloseReplaySession();
+        void AdvanceReplay();
+        void SeekReplay(uint64_t timestamp_ns);
+        bool ApplyReplayRecord(
+            dab::measurement::MeasurementSessionReplayRecord const& record,
+            bool include_event);
+        void UpdateReplayUi();
         void StopMeasurementRecording(winrt::hstring const& reason);
         void UpdateRecordingUi();
         winrt::fire_and_forget ShowHelpDialog(
@@ -262,6 +274,7 @@ namespace winrt::DabMeasurementWinUI::implementation
 
         Microsoft::UI::Xaml::DispatcherTimer m_timer;
         dab::measurement::MeasurementSessionRecorder m_session_recorder;
+        dab::measurement::MeasurementSessionReplay m_session_replay;
         dab::measurement::SnapshotMailbox m_mailbox;
         dab::measurement::MeasurementMailbox m_measurement_mailbox;
         dab::measurement::CatalogMailbox m_catalog_mailbox;
@@ -284,6 +297,14 @@ namespace winrt::DabMeasurementWinUI::implementation
         uint32_t m_active_service_id{ 0u };
         bool m_receiver_menu_ready{ false };
         bool m_recording_failure_reported{ false };
+        bool m_replay_loaded{ false };
+        bool m_replay_importing{ false };
+        bool m_replay_playing{ false };
+        bool m_replay_slider_internal{ false };
+        bool m_replay_applying_record{ false };
+        double m_replay_speed{ 1.0 };
+        uint64_t m_replay_position_ns{ 0u };
+        std::chrono::steady_clock::time_point m_replay_last_tick{};
         bool m_receiver_agc_enabled{ false };
         int32_t m_receiver_ppm_correction{ 0 };
         bool m_receiver_bias_tee_enabled{ false };

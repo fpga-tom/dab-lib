@@ -33,9 +33,13 @@
                     </MenuFlyoutItem.KeyboardAccelerators>
                 </MenuFlyoutItem>
                 <MenuFlyoutItem Text="Open recording..."
-                                IsEnabled="False"
-                                ToolTipService.ToolTip="Recording replay is not implemented yet"
-                                KeyboardAcceleratorTextOverride="Ctrl+O" />
+                                Click="FileOpenRecording_Click"
+                                ToolTipService.ToolTip="Import and replay a DAB measurement session"
+                                KeyboardAcceleratorTextOverride="Ctrl+O">
+                    <MenuFlyoutItem.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="O" Modifiers="Control" />
+                    </MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
                 <MenuFlyoutSubItem Text="Recent recordings" IsEnabled="False">
                     <MenuFlyoutItem Text="No recent recordings" IsEnabled="False" />
                 </MenuFlyoutSubItem>
@@ -587,11 +591,62 @@
                         </StackPanel>
                     </Button>
 
-                    <StackPanel Grid.Column="9" HorizontalAlignment="Right" VerticalAlignment="Center">
-                        <Border Padding="10,4" CornerRadius="12" Background="#2935D0BA">
-                            <TextBlock x:Name="DataModeText" Text="LIVE METRICS" Foreground="{StaticResource MeasurementAccentBrush}" FontSize="11" FontWeight="SemiBold" />
-                        </Border>
-                        <TextBlock x:Name="DataSeamText" Text="receiver stopped" Margin="0,4,0,0" HorizontalAlignment="Right" Foreground="{StaticResource MutedTextBrush}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                    <StackPanel Grid.Column="9"
+                                Orientation="Horizontal"
+                                Spacing="10"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Center">
+                        <StackPanel x:Name="ReplayControlsPanel"
+                                    Visibility="Collapsed"
+                                    Orientation="Horizontal"
+                                    Spacing="7"
+                                    VerticalAlignment="Bottom">
+                            <Button x:Name="ReplayPlayPauseButton"
+                                    Height="34"
+                                    MinWidth="74"
+                                    Click="ReplayPlayPause_Click">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon x:Name="ReplayPlayPauseIcon"
+                                              Glyph="&#xE769;"
+                                              FontSize="13" />
+                                    <TextBlock x:Name="ReplayPlayPauseText"
+                                               Text="Pause" />
+                                </StackPanel>
+                            </Button>
+                            <ComboBox x:Name="ReplaySpeedComboBox"
+                                      Width="74"
+                                      Height="34"
+                                      SelectedIndex="2"
+                                      SelectionChanged="ReplaySpeed_SelectionChanged"
+                                      ToolTipService.ToolTip="Replay speed">
+                                <ComboBoxItem Content="0.25&#xD7;" Tag="0.25" />
+                                <ComboBoxItem Content="0.5&#xD7;" Tag="0.5" />
+                                <ComboBoxItem Content="1&#xD7;" Tag="1" />
+                                <ComboBoxItem Content="2&#xD7;" Tag="2" />
+                                <ComboBoxItem Content="4&#xD7;" Tag="4" />
+                            </ComboBox>
+                            <Slider x:Name="ReplayPositionSlider"
+                                    Width="190"
+                                    Height="34"
+                                    Minimum="0"
+                                    Maximum="1000"
+                                    ValueChanged="ReplayPosition_ValueChanged"
+                                    ToolTipService.ToolTip="Seek in recording" />
+                            <TextBlock x:Name="ReplayPositionText"
+                                       Width="112"
+                                       VerticalAlignment="Center"
+                                       Text="00:00 / 00:00"
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       FontSize="11" />
+                        </StackPanel>
+                        <StackPanel x:Name="DataModePanel"
+                                    MinWidth="108"
+                                    VerticalAlignment="Center">
+                            <Border Padding="10,4" CornerRadius="12" Background="#2935D0BA">
+                                <TextBlock x:Name="DataModeText" Text="LIVE METRICS" Foreground="{StaticResource MeasurementAccentBrush}" FontSize="11" FontWeight="SemiBold" />
+                            </Border>
+                            <TextBlock x:Name="DataSeamText" Text="receiver stopped" Margin="0,4,0,0" HorizontalAlignment="Right" Foreground="{StaticResource MutedTextBrush}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
                     </StackPanel>
                 </Grid>
             </ScrollViewer>

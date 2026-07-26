@@ -28,6 +28,48 @@ using namespace Microsoft::UI::Xaml::Shapes;
 
 namespace
 {
+    struct resume_dispatcher_queue
+    {
+        Microsoft::UI::Dispatching::DispatcherQueue dispatcher;
+
+        bool await_ready() const noexcept
+        {
+            return dispatcher.HasThreadAccess();
+        }
+
+        bool await_suspend(std::coroutine_handle<> continuation) const noexcept
+        {
+            return dispatcher.TryEnqueue(
+                [continuation]() mutable
+                {
+                    continuation.resume();
+                });
+        }
+
+        bool await_resume() const noexcept
+        {
+            return dispatcher.HasThreadAccess();
+        }
+    };
+
+    struct scoped_true
+    {
+        explicit scoped_true(bool& value) noexcept
+            : target(value),
+              previous(value)
+        {
+            target = true;
+        }
+
+        ~scoped_true()
+        {
+            target = previous;
+        }
+
+        bool& target;
+        bool previous;
+    };
+
     std::wstring application_icon_path()
     {
         std::wstring module_path(32768u, L'\0');
@@ -603,6 +645,7 @@ namespace winrt::DabMeasurementWinUI::implementation
         StopMeasurementRecording(closed
             ? hstring{ L"Recording stopped because the session was closed" }
             : hstring{ L"Recording stopped because a new session was created" });
+        CloseReplaySession();
         bool const receiver_active = m_receiver.IsActive();
         m_pending_receiver_restart.reset();
         if (receiver_active)
@@ -656,11 +699,193 @@ namespace winrt::DabMeasurementWinUI::implementation
             : hstring{ L"New measurement session created" });
     }
 
+    void MainWindow::CloseReplaySession()
+    {
+        bool const was_replay = m_replay_loaded;
+        m_session_replay.Close();
+        m_replay_loaded = false;
+        m_replay_playing = false;
+        m_replay_importing = false;
+        m_replay_position_ns = 0u;
+        m_replay_last_tick = {};
+        m_replay_slider_internal = false;
+        if (ReplayControlsPanel())
+        {
+            ReplayControlsPanel().Visibility(Visibility::Collapsed);
+        }
+        if (was_replay)
+        {
+            dab_receive_snapshot_t snapshot{};
+            uint64_t version = 0u;
+            if (m_mailbox.TryReadLatest(m_mailbox_version,
+                                        snapshot,
+                                        version))
+            {
+                m_mailbox_version = version;
+                m_fic_mailbox_history_version = version;
+            }
+            dab::measurement::MeasurementFrame measurement;
+            if (m_measurement_mailbox.TryReadLatest(
+                    m_measurement_mailbox_version,
+                    measurement,
+                    version))
+            {
+                m_measurement_mailbox_version = version;
+            }
+            dab_receive_catalog_t catalog{};
+            if (m_catalog_mailbox.TryReadLatest(
+                    m_catalog_mailbox_version,
+                    catalog,
+                    version))
+            {
+                m_catalog_mailbox_version = version;
+            }
+        }
+    }
+
     void MainWindow::FileNewSession_Click(
         IInspectable const&,
         RoutedEventArgs const&)
     {
         ResetFileSession(false);
+    }
+
+    winrt::fire_and_forget MainWindow::FileOpenRecording_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        auto lifetime = get_strong();
+        try
+        {
+            Windows::Storage::Pickers::FolderPicker picker;
+            picker.SuggestedStartLocation(
+                Windows::Storage::Pickers::PickerLocationId::DocumentsLibrary);
+            picker.FileTypeFilter().Append(L"*");
+
+            HWND window_handle = nullptr;
+            check_hresult(
+                lifetime.as<::IWindowNative>()->get_WindowHandle(
+                    &window_handle));
+            check_hresult(
+                picker.as<::IInitializeWithWindow>()->Initialize(
+                    window_handle));
+
+            auto const folder = co_await picker.PickSingleFolderAsync();
+            if (!folder)
+            {
+                co_return;
+            }
+
+            m_replay_importing = true;
+            DataModeText().Text(L"IMPORTING");
+            DataSeamText().Text(L"validating recording and CRCs");
+            StartButton().IsEnabled(false);
+            RecordButton().IsEnabled(false);
+
+            dab::measurement::MeasurementSessionReplay imported;
+            std::string import_error;
+            auto const dispatcher = DispatcherQueue();
+            std::filesystem::path const selected_path{
+                folder.Path().c_str()
+            };
+            co_await resume_background();
+            bool const opened = imported.Open(selected_path, import_error);
+            if (!(co_await resume_dispatcher_queue{ dispatcher }))
+            {
+                co_return;
+            }
+            m_replay_importing = false;
+
+            if (!opened)
+            {
+                DataModeText().Text(L"LIVE METRICS");
+                DataSeamText().Text(L"recording import failed");
+                AddTimelineEvent(
+                    L"Recording import failed: " +
+                    to_hstring(import_error));
+                m_replay_last_tick = std::chrono::steady_clock::now();
+                UpdateReceiverMenuState();
+                co_return;
+            }
+
+            StopMeasurementRecording(
+                L"Measurement recording stopped to open replay");
+            m_pending_receiver_restart.reset();
+            m_receiver.StopAndJoin();
+            ResetFileSession(false);
+            TimelineList().Items().Clear();
+            if (DabEventsList())
+            {
+                DabEventsList().Items().Clear();
+            }
+
+            m_session_replay = std::move(imported);
+            m_replay_loaded = true;
+            m_replay_playing = true;
+            m_replay_position_ns = 0u;
+            m_replay_last_tick = std::chrono::steady_clock::now();
+            m_metrics_stale = false;
+            ReplayControlsPanel().Visibility(Visibility::Visible);
+
+            auto const& info = m_session_replay.Info();
+            int32_t channel_index = -1;
+            for (uint32_t index = 0u;
+                 index < ChannelComboBox().Items().Size();
+                 ++index)
+            {
+                auto const item =
+                    ChannelComboBox().Items().GetAt(index)
+                        .try_as<ComboBoxItem>();
+                if (item &&
+                    unbox_value<hstring>(item.Content()) ==
+                        to_hstring(info.channel))
+                {
+                    channel_index = static_cast<int32_t>(index);
+                    break;
+                }
+            }
+            if (channel_index >= 0)
+            {
+                ChannelComboBox().SelectedIndex(channel_index);
+            }
+            else if (info.frequency_hz != 0u)
+            {
+                FrequencyTextBox().Text(
+                    format_float(
+                        static_cast<float>(info.frequency_hz) /
+                            1000000.0f,
+                        L" MHz",
+                        3));
+            }
+            if (!info.device.empty())
+            {
+                StatusDeviceText().Text(to_hstring(info.device));
+            }
+            if (!info.channel.empty())
+            {
+                StatusChannelText().Text(to_hstring(info.channel));
+            }
+
+            SeekReplay(0u);
+            AddTimelineEvent(
+                L"Recording imported · " +
+                hstring{ info.session_path.filename().wstring() } +
+                L" · " +
+                to_hstring(info.record_count) +
+                L" CRC-validated records");
+            ShowWorkspace(WorkspaceKind::receiver);
+            UpdateReplayUi();
+            UpdateReceiverMenuState();
+        }
+        catch (hresult_error const& error)
+        {
+            m_replay_importing = false;
+            AddTimelineEvent(
+                L"Recording import failed: " + error.message());
+            m_replay_last_tick = std::chrono::steady_clock::now();
+            UpdateReceiverMenuState();
+        }
+        co_return;
     }
 
     void MainWindow::FileCloseSession_Click(
@@ -3550,6 +3775,12 @@ namespace winrt::DabMeasurementWinUI::implementation
 
     void MainWindow::AudioButton_Click(IInspectable const&, RoutedEventArgs const&)
     {
+        if (m_replay_loaded)
+        {
+            AddTimelineEvent(
+                L"Replay contains audio measurements, not decoded PCM audio");
+            return;
+        }
         AddTimelineEvent(L"Audio playback is enabled and follows the selected DAB+ service");
     }
 
@@ -3573,6 +3804,12 @@ namespace winrt::DabMeasurementWinUI::implementation
 
     void MainWindow::StartButton_Click(IInspectable const&, RoutedEventArgs const&)
     {
+        if (m_replay_loaded || m_replay_importing)
+        {
+            AddTimelineEvent(
+                L"Create a new measurement session before starting the live receiver");
+            return;
+        }
         if (m_receiver.IsActive())
         {
             m_receiver.RequestStop();
@@ -3593,6 +3830,11 @@ namespace winrt::DabMeasurementWinUI::implementation
 
     void MainWindow::RecordButton_Click(IInspectable const&, RoutedEventArgs const&)
     {
+        if (m_replay_loaded || m_replay_importing)
+        {
+            AddTimelineEvent(L"Replay sessions cannot be recorded");
+            return;
+        }
         if (m_session_recorder.IsActive())
         {
             StopMeasurementRecording(L"Measurement recording stopped");
@@ -3729,6 +3971,17 @@ namespace winrt::DabMeasurementWinUI::implementation
             return;
         }
         auto status = m_session_recorder.Status();
+        if (m_replay_loaded || m_replay_importing)
+        {
+            RecordButtonLabel().Text(L"Record");
+            RecordButton().IsEnabled(false);
+            StatusRecordText().Text(
+                m_replay_importing ? L"importing recording" : L"replay");
+            StatusRecordText().Foreground(
+                Application::Current().Resources().Lookup(
+                    box_value(hstring{ L"MutedTextBrush" })).as<Brush>());
+            return;
+        }
         uint64_t const seconds = status.elapsed_ns / 1000000000ull;
         wchar_t duration[32]{};
         swprintf_s(duration,
@@ -3816,6 +4069,339 @@ namespace winrt::DabMeasurementWinUI::implementation
             receiver_state == ReceiverState::recovering);
     }
 
+    void MainWindow::ReplayPlayPause_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        if (!m_replay_loaded)
+        {
+            return;
+        }
+        auto const duration = m_session_replay.Info().duration_ns;
+        if (!m_replay_playing &&
+            m_replay_position_ns >= duration)
+        {
+            SeekReplay(0u);
+        }
+        m_replay_playing = !m_replay_playing;
+        m_replay_last_tick = std::chrono::steady_clock::now();
+        UpdateReplayUi();
+    }
+
+    void MainWindow::ReplaySpeed_SelectionChanged(
+        IInspectable const&,
+        SelectionChangedEventArgs const&)
+    {
+        if (!ReplaySpeedComboBox())
+        {
+            return;
+        }
+        auto const item =
+            ReplaySpeedComboBox().SelectedItem().try_as<ComboBoxItem>();
+        if (!item || !item.Tag())
+        {
+            return;
+        }
+        std::wstring const text{
+            unbox_value<hstring>(item.Tag()).c_str()
+        };
+        wchar_t* end = nullptr;
+        double const speed = std::wcstod(text.c_str(), &end);
+        if (end != text.c_str() &&
+            std::isfinite(speed) &&
+            speed > 0.0)
+        {
+            m_replay_speed = speed;
+            m_replay_last_tick = std::chrono::steady_clock::now();
+            if (m_replay_loaded)
+            {
+                UpdateReplayUi();
+            }
+        }
+    }
+
+    void MainWindow::ReplayPosition_ValueChanged(
+        IInspectable const&,
+        RangeBaseValueChangedEventArgs const& args)
+    {
+        if (!m_replay_loaded || m_replay_slider_internal)
+        {
+            return;
+        }
+        uint64_t const duration = m_session_replay.Info().duration_ns;
+        double const fraction = std::clamp(args.NewValue() / 1000.0,
+                                           0.0,
+                                           1.0);
+        uint64_t const target = static_cast<uint64_t>(
+            std::llround(fraction * static_cast<double>(duration)));
+        SeekReplay(target);
+        UpdateReplayUi();
+    }
+
+    void MainWindow::AdvanceReplay()
+    {
+        if (!m_replay_loaded)
+        {
+            return;
+        }
+
+        auto const now = std::chrono::steady_clock::now();
+        if (m_replay_last_tick == std::chrono::steady_clock::time_point{})
+        {
+            m_replay_last_tick = now;
+        }
+        if (m_replay_playing)
+        {
+            uint64_t const duration = m_session_replay.Info().duration_ns;
+            uint64_t const elapsed_ns = static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    now - m_replay_last_tick).count());
+            long double const scaled =
+                static_cast<long double>(elapsed_ns) *
+                static_cast<long double>(m_replay_speed);
+            uint64_t const advance = scaled >=
+                    static_cast<long double>(
+                        (std::numeric_limits<uint64_t>::max)())
+                ? (std::numeric_limits<uint64_t>::max)()
+                : static_cast<uint64_t>(scaled);
+            m_replay_position_ns =
+                advance >= duration - (std::min)(duration,
+                                                  m_replay_position_ns)
+                    ? duration
+                    : m_replay_position_ns + advance;
+
+            std::string error;
+            for (size_t batch = 0u; batch < 16u; ++batch)
+            {
+                std::vector<
+                    dab::measurement::MeasurementSessionReplayRecord>
+                    records;
+                if (!m_session_replay.ReadUntil(
+                        m_replay_position_ns,
+                        records,
+                        256u,
+                        error))
+                {
+                    m_replay_playing = false;
+                    AddTimelineEvent(
+                        L"Replay stopped: " + to_hstring(error));
+                    break;
+                }
+                for (auto const& record : records)
+                {
+                    if (!ApplyReplayRecord(record, true))
+                    {
+                        m_replay_playing = false;
+                        break;
+                    }
+                }
+                if (!m_replay_playing || records.size() < 256u)
+                {
+                    break;
+                }
+            }
+
+            if (m_replay_position_ns >= duration)
+            {
+                m_replay_playing = false;
+            }
+        }
+        m_replay_last_tick = now;
+        UpdateReplayUi();
+    }
+
+    void MainWindow::SeekReplay(uint64_t timestamp_ns)
+    {
+        if (!m_replay_loaded)
+        {
+            return;
+        }
+        timestamp_ns = (std::min)(
+            timestamp_ns,
+            m_session_replay.Info().duration_ns);
+
+        ClearCatalogView();
+        ResetDabOverviewHistory();
+        ResetFicMeasurementSession();
+        ResetMscMeasurementSession();
+        ResetRfSyncDiagnostics();
+        ResetRfChannelDiagnostics();
+        ResetRfNullScope();
+        m_rf_history_write = 0u;
+        m_rf_history_count = 0u;
+        m_latest_mer_valid = false;
+        UpdateRfHistoryVisuals();
+        ResetRfHistorySession();
+
+        std::vector<dab::measurement::MeasurementSessionReplayRecord> state;
+        std::string error;
+        if (!m_session_replay.Seek(timestamp_ns, state, error))
+        {
+            m_replay_playing = false;
+            AddTimelineEvent(L"Replay seek failed: " + to_hstring(error));
+            return;
+        }
+        for (auto const& record : state)
+        {
+            if (!ApplyReplayRecord(record, false))
+            {
+                m_replay_playing = false;
+                break;
+            }
+        }
+        m_replay_position_ns = timestamp_ns;
+        m_replay_last_tick = std::chrono::steady_clock::now();
+    }
+
+    bool MainWindow::ApplyReplayRecord(
+        dab::measurement::MeasurementSessionReplayRecord const& record,
+        bool include_event)
+    {
+        std::string error;
+        switch (record.type)
+        {
+        case dab::measurement::MeasurementSessionRecordType::snapshot:
+        {
+            dab_receive_snapshot_t snapshot{};
+            if (!dab::measurement::MeasurementSessionReplay::DecodeSnapshot(
+                    record,
+                    snapshot,
+                    error))
+            {
+                break;
+            }
+            scoped_true applying{ m_replay_applying_record };
+            AppendFicFrameTelemetry(snapshot);
+            if (!m_fic_timeline_frozen)
+            {
+                UpdateFicTimelineVisuals();
+                RefreshFicFailureList();
+            }
+            m_metrics_stale = false;
+            ApplySnapshot(snapshot);
+            return true;
+        }
+        case dab::measurement::MeasurementSessionRecordType::measurement:
+        {
+            dab::measurement::MeasurementFrame frame;
+            if (!dab::measurement::MeasurementSessionReplay::DecodeMeasurement(
+                    record,
+                    frame,
+                    error))
+            {
+                break;
+            }
+            scoped_true applying{ m_replay_applying_record };
+            UpdatePlots(frame);
+            return true;
+        }
+        case dab::measurement::MeasurementSessionRecordType::catalog:
+        {
+            dab_receive_catalog_t catalog{};
+            if (!dab::measurement::MeasurementSessionReplay::DecodeCatalog(
+                    record,
+                    catalog,
+                    error))
+            {
+                break;
+            }
+            scoped_true applying{ m_replay_applying_record };
+            ApplyCatalog(catalog);
+            return true;
+        }
+        case dab::measurement::MeasurementSessionRecordType::event:
+        {
+            if (!include_event)
+            {
+                return true;
+            }
+            uint32_t event_type = 0u;
+            std::string message;
+            if (!dab::measurement::MeasurementSessionReplay::DecodeEvent(
+                    record,
+                    event_type,
+                    message,
+                    error))
+            {
+                break;
+            }
+            AddTimelineEvent(
+                L"Replay " +
+                format_duration(record.timestamp_ns) +
+                L" · " +
+                to_hstring(message));
+            return true;
+        }
+        case dab::measurement::MeasurementSessionRecordType::metadata:
+            return true;
+        default:
+            error = "Unknown replay record type";
+            break;
+        }
+
+        AddTimelineEvent(
+            L"Replay data is incompatible: " + to_hstring(error));
+        return false;
+    }
+
+    void MainWindow::UpdateReplayUi()
+    {
+        if (!m_replay_loaded)
+        {
+            return;
+        }
+        uint64_t const duration = m_session_replay.Info().duration_ns;
+        m_replay_slider_internal = true;
+        ReplayPositionSlider().Value(
+            duration == 0u
+                ? 0.0
+                : 1000.0 *
+                    static_cast<double>(m_replay_position_ns) /
+                    static_cast<double>(duration));
+        m_replay_slider_internal = false;
+        ReplayPositionText().Text(
+            format_duration(m_replay_position_ns) +
+            L" / " +
+            format_duration(duration));
+
+        ReplayPlayPauseIcon().Glyph(
+            m_replay_playing ? L"\uE769" : L"\uE768");
+        ReplayPlayPauseText().Text(
+            m_replay_playing ? L"Pause" :
+            (m_replay_position_ns >= duration ? L"Replay" : L"Play"));
+
+        hstring const replay_state =
+            m_replay_playing
+                ? hstring{ L"● REPLAY" }
+                : (m_replay_position_ns >= duration
+                    ? hstring{ L"REPLAY COMPLETE" }
+                    : hstring{ L"REPLAY PAUSED" });
+        DataModeText().Text(replay_state);
+        DabModeBadgeText().Text(replay_state);
+        RfLiveBadgeText().Text(replay_state);
+        DataSeamText().Text(
+            hstring{
+                m_session_replay.Info().session_path.filename().wstring()
+            } +
+            L" · " +
+            format_float(
+                static_cast<float>(m_replay_speed),
+                L"×",
+                m_replay_speed < 1.0 ? 2 : 0));
+        StatusRecordText().Text(L"replay");
+        StatusRecordText().Foreground(
+            Application::Current().Resources().Lookup(
+                box_value(hstring{ L"MutedTextBrush" })).as<Brush>());
+
+        StartButton().IsEnabled(false);
+        StartButtonLabel().Text(L"Replay loaded");
+        RecordButton().IsEnabled(false);
+        DeviceComboBox().IsEnabled(false);
+        ChannelComboBox().IsEnabled(false);
+        FrequencyTextBox().IsEnabled(false);
+        GainNumberBox().IsEnabled(false);
+    }
+
     void MainWindow::MarkerButton_Click(IInspectable const&, RoutedEventArgs const&)
     {
         AddTimelineEvent(L"Marker — operator annotation");
@@ -3846,9 +4432,23 @@ namespace winrt::DabMeasurementWinUI::implementation
         if (m_receiver.TryReadStatus(m_receiver_status_version, receiver_status, status_version))
         {
             m_receiver_status_version = status_version;
-            HandleReceiverStatus(receiver_status);
+            if (!m_replay_loaded && !m_replay_importing)
+            {
+                HandleReceiverStatus(receiver_status);
+            }
         }
         m_receiver.JoinFinished();
+        if (m_replay_importing)
+        {
+            UpdateRecordingUi();
+            return;
+        }
+        if (m_replay_loaded)
+        {
+            AdvanceReplay();
+            UpdateReceiverMenuState();
+            return;
+        }
         StartPendingServiceRestart();
 
         std::vector<dab_receive_snapshot_t> fic_snapshots;
@@ -4015,6 +4615,14 @@ namespace winrt::DabMeasurementWinUI::implementation
 
         m_selected_service_id = service_id;
         UpdateDabContext();
+        if (m_replay_loaded)
+        {
+            AddTimelineEvent(
+                L"Selected " + service_name +
+                L" in replay · decoded audio payload was not recorded");
+            DataSeamText().Text(L"replay selection " + service_name);
+            return;
+        }
         if (!m_receiver.IsActive())
         {
             AddTimelineEvent(L"Selected " + service_name + L" — press Start to play");
@@ -4277,15 +4885,29 @@ namespace winrt::DabMeasurementWinUI::implementation
         }
 
         bool const active = m_receiver.IsActive();
-        ReceiverStartStopMenuItem().Text(active ? L"Stop receiver" : L"Start receiver");
-        ReceiverStartStopMenuItem().IsEnabled(StartButton().IsEnabled());
-        ReceiverDeviceSubmenu().IsEnabled(!active);
-        ReceiverChannelSubmenu().IsEnabled(!active);
-        ReceiverEnterFrequencyMenuItem().IsEnabled(!active);
-        ReceiverGainSubmenu().IsEnabled(!active && !m_receiver_agc_enabled);
-        ReceiverFrontEndSubmenu().IsEnabled(!active);
-        ReceiverPpmSubmenu().IsEnabled(!active);
+        bool const replay_unavailable =
+            m_replay_loaded || m_replay_importing;
+        ReceiverStartStopMenuItem().Text(
+            m_replay_loaded
+                ? L"Live receiver unavailable during replay"
+                : (active ? L"Stop receiver" : L"Start receiver"));
+        ReceiverStartStopMenuItem().IsEnabled(
+            !replay_unavailable && StartButton().IsEnabled());
+        ReceiverDeviceSubmenu().IsEnabled(!active && !replay_unavailable);
+        ReceiverChannelSubmenu().IsEnabled(!active && !replay_unavailable);
+        ReceiverEnterFrequencyMenuItem().IsEnabled(
+            !active && !replay_unavailable);
+        ReceiverGainSubmenu().IsEnabled(
+            !active && !replay_unavailable && !m_receiver_agc_enabled);
+        ReceiverFrontEndSubmenu().IsEnabled(
+            !active && !replay_unavailable);
+        ReceiverPpmSubmenu().IsEnabled(
+            !active && !replay_unavailable);
         UpdateRecordingUi();
+        if (m_replay_loaded && !m_replay_importing)
+        {
+            UpdateReplayUi();
+        }
 
         int32_t const device_index = DeviceComboBox().SelectedIndex();
         ReceiverSdrplayMenuItem().IsChecked(device_index != 1);
@@ -8646,7 +9268,7 @@ namespace winrt::DabMeasurementWinUI::implementation
 
     void MainWindow::EvaluateRfAlarm(dab_receive_snapshot_t const& snapshot)
     {
-        if (!m_rf_alarm_enabled)
+        if (!m_rf_alarm_enabled || m_replay_loaded)
         {
             return;
         }
@@ -11235,6 +11857,10 @@ namespace winrt::DabMeasurementWinUI::implementation
 
     void MainWindow::AddTimelineEvent(hstring const& message)
     {
+        if (m_replay_applying_record)
+        {
+            return;
+        }
         m_session_recorder.RecordEvent(0x10000u, to_string(message));
         uint64_t const elapsed_ms = m_tick * 250ull;
         wchar_t prefix[32]{};

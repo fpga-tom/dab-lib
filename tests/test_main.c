@@ -52,6 +52,7 @@ void test_measurement_alarm_requires_duration_and_recovery_hysteresis(void);
 void test_measurement_alarm_short_violation_does_not_accumulate(void);
 void test_measurement_session_recorder_writes_crc_checked_records(void);
 void test_measurement_session_recorder_drops_oversized_record_without_stopping(void);
+void test_measurement_session_replay_rejects_crc_corruption(void);
 void test_rf_calibration_interpolates_matching_operating_point(void);
 void test_rf_calibration_rejects_agc_and_gain_mismatch(void);
 void test_rf_calibration_replaces_duplicate_operating_point(void);
@@ -149,6 +150,7 @@ int main(void) {
     test_measurement_alarm_short_violation_does_not_accumulate();
     test_measurement_session_recorder_writes_crc_checked_records();
     test_measurement_session_recorder_drops_oversized_record_without_stopping();
+    test_measurement_session_replay_rejects_crc_corruption();
     test_rf_calibration_interpolates_matching_operating_point();
     test_rf_calibration_rejects_agc_and_gain_mismatch();
     test_rf_calibration_replaces_duplicate_operating_point();
