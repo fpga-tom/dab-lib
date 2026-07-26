@@ -5,7 +5,10 @@
 #include <cstring>
 #include <cwctype>
 #include <filesystem>
+#include <fstream>
+#include <iomanip>
 #include <limits>
+#include <sstream>
 #include <winrt/Windows.System.h>
 
 extern "C" {
@@ -635,9 +638,11 @@ namespace winrt::DabMeasurementWinUI::implementation
             {
                 UpdateReceiverSpectrumFrequencyScale(
                     center_mhz * 1000000.0 - 1024000.0,
-                    center_mhz * 1000000.0 + 1024000.0);
+                center_mhz * 1000000.0 + 1024000.0);
             }
         }
+        RefreshRecordingCatalogue();
+        UpdateRecordingWorkspace();
     }
 
     void MainWindow::ResetFileSession(bool closed)
@@ -709,6 +714,9 @@ namespace winrt::DabMeasurementWinUI::implementation
         m_replay_position_ns = 0u;
         m_replay_last_tick = {};
         m_replay_slider_internal = false;
+        m_recording_timeline.clear();
+        m_recording_events.clear();
+        m_recording_markers.clear();
         if (ReplayControlsPanel())
         {
             ReplayControlsPanel().Visibility(Visibility::Collapsed);
@@ -740,6 +748,10 @@ namespace winrt::DabMeasurementWinUI::implementation
             {
                 m_catalog_mailbox_version = version;
             }
+        }
+        if (RecordingReplayWorkspace())
+        {
+            UpdateRecordingWorkspace();
         }
     }
 
@@ -776,106 +788,10 @@ namespace winrt::DabMeasurementWinUI::implementation
                 co_return;
             }
 
-            m_replay_importing = true;
-            DataModeText().Text(L"IMPORTING");
-            DataSeamText().Text(L"validating recording and CRCs");
-            StartButton().IsEnabled(false);
-            RecordButton().IsEnabled(false);
-
-            dab::measurement::MeasurementSessionReplay imported;
-            std::string import_error;
-            auto const dispatcher = DispatcherQueue();
             std::filesystem::path const selected_path{
                 folder.Path().c_str()
             };
-            co_await resume_background();
-            bool const opened = imported.Open(selected_path, import_error);
-            if (!(co_await resume_dispatcher_queue{ dispatcher }))
-            {
-                co_return;
-            }
-            m_replay_importing = false;
-
-            if (!opened)
-            {
-                DataModeText().Text(L"LIVE METRICS");
-                DataSeamText().Text(L"recording import failed");
-                AddTimelineEvent(
-                    L"Recording import failed: " +
-                    to_hstring(import_error));
-                m_replay_last_tick = std::chrono::steady_clock::now();
-                UpdateReceiverMenuState();
-                co_return;
-            }
-
-            StopMeasurementRecording(
-                L"Measurement recording stopped to open replay");
-            m_pending_receiver_restart.reset();
-            m_receiver.StopAndJoin();
-            ResetFileSession(false);
-            TimelineList().Items().Clear();
-            if (DabEventsList())
-            {
-                DabEventsList().Items().Clear();
-            }
-
-            m_session_replay = std::move(imported);
-            m_replay_loaded = true;
-            m_replay_playing = true;
-            m_replay_position_ns = 0u;
-            m_replay_last_tick = std::chrono::steady_clock::now();
-            m_metrics_stale = false;
-            ReplayControlsPanel().Visibility(Visibility::Visible);
-
-            auto const& info = m_session_replay.Info();
-            int32_t channel_index = -1;
-            for (uint32_t index = 0u;
-                 index < ChannelComboBox().Items().Size();
-                 ++index)
-            {
-                auto const item =
-                    ChannelComboBox().Items().GetAt(index)
-                        .try_as<ComboBoxItem>();
-                if (item &&
-                    unbox_value<hstring>(item.Content()) ==
-                        to_hstring(info.channel))
-                {
-                    channel_index = static_cast<int32_t>(index);
-                    break;
-                }
-            }
-            if (channel_index >= 0)
-            {
-                ChannelComboBox().SelectedIndex(channel_index);
-            }
-            else if (info.frequency_hz != 0u)
-            {
-                FrequencyTextBox().Text(
-                    format_float(
-                        static_cast<float>(info.frequency_hz) /
-                            1000000.0f,
-                        L" MHz",
-                        3));
-            }
-            if (!info.device.empty())
-            {
-                StatusDeviceText().Text(to_hstring(info.device));
-            }
-            if (!info.channel.empty())
-            {
-                StatusChannelText().Text(to_hstring(info.channel));
-            }
-
-            SeekReplay(0u);
-            AddTimelineEvent(
-                L"Recording imported · " +
-                hstring{ info.session_path.filename().wstring() } +
-                L" · " +
-                to_hstring(info.record_count) +
-                L" CRC-validated records");
-            ShowWorkspace(WorkspaceKind::receiver);
-            UpdateReplayUi();
-            UpdateReceiverMenuState();
+            co_await OpenRecordingPathAsync(selected_path);
         }
         catch (hresult_error const& error)
         {
@@ -885,6 +801,135 @@ namespace winrt::DabMeasurementWinUI::implementation
             m_replay_last_tick = std::chrono::steady_clock::now();
             UpdateReceiverMenuState();
         }
+        co_return;
+    }
+
+    Windows::Foundation::IAsyncAction
+    MainWindow::OpenRecordingPathAsync(
+        std::filesystem::path selected_path)
+    {
+        auto lifetime = get_strong();
+        m_replay_importing = true;
+        DataModeText().Text(L"IMPORTING");
+        DataSeamText().Text(L"validating recording and CRCs");
+        StartButton().IsEnabled(false);
+        RecordButton().IsEnabled(false);
+        if (RecordingWorkspaceModeText())
+        {
+            RecordingWorkspaceModeText().Text(L"IMPORTING");
+            RecordingWorkspaceIntegrityText().Text(L"VALIDATING CRC");
+        }
+
+        dab::measurement::MeasurementSessionReplay imported;
+        std::vector<dab::measurement::MeasurementSessionTimelinePoint>
+            imported_timeline;
+        std::vector<dab::measurement::MeasurementSessionReplayEvent>
+            imported_events;
+        std::string import_error;
+        auto const dispatcher = DispatcherQueue();
+        co_await resume_background();
+        bool opened = imported.Open(selected_path, import_error);
+        if (opened)
+        {
+            opened = imported.BuildTimeline(
+                2048u,
+                imported_timeline,
+                imported_events,
+                import_error);
+        }
+        if (!(co_await resume_dispatcher_queue{ dispatcher }))
+        {
+            co_return;
+        }
+        m_replay_importing = false;
+
+        if (!opened)
+        {
+            DataModeText().Text(L"LIVE METRICS");
+            DataSeamText().Text(L"recording import failed");
+            AddTimelineEvent(
+                L"Recording import failed: " +
+                to_hstring(import_error));
+            m_replay_last_tick = std::chrono::steady_clock::now();
+            UpdateRecordingWorkspace();
+            UpdateReceiverMenuState();
+            co_return;
+        }
+
+        StopMeasurementRecording(
+            L"Measurement recording stopped to open replay");
+        m_pending_receiver_restart.reset();
+        m_receiver.StopAndJoin();
+        ResetFileSession(false);
+        TimelineList().Items().Clear();
+        if (DabEventsList())
+        {
+            DabEventsList().Items().Clear();
+        }
+
+        m_session_replay = std::move(imported);
+        m_recording_timeline = std::move(imported_timeline);
+        m_recording_events = std::move(imported_events);
+        m_replay_loaded = true;
+        m_replay_playing = true;
+        m_replay_position_ns = 0u;
+        m_replay_last_tick = std::chrono::steady_clock::now();
+        m_metrics_stale = false;
+        ReplayControlsPanel().Visibility(Visibility::Visible);
+
+        auto const& info = m_session_replay.Info();
+        m_recording_selected_path = info.session_path;
+        int32_t channel_index = -1;
+        for (uint32_t index = 0u;
+             index < ChannelComboBox().Items().Size();
+             ++index)
+        {
+            auto const item =
+                ChannelComboBox().Items().GetAt(index)
+                    .try_as<ComboBoxItem>();
+            if (item &&
+                unbox_value<hstring>(item.Content()) ==
+                    to_hstring(info.channel))
+            {
+                channel_index = static_cast<int32_t>(index);
+                break;
+            }
+        }
+        if (channel_index >= 0)
+        {
+            ChannelComboBox().SelectedIndex(channel_index);
+        }
+        else if (info.frequency_hz != 0u)
+        {
+            FrequencyTextBox().Text(
+                format_float(
+                    static_cast<float>(info.frequency_hz) /
+                        1000000.0f,
+                    L" MHz",
+                    3));
+        }
+        if (!info.device.empty())
+        {
+            StatusDeviceText().Text(to_hstring(info.device));
+        }
+        if (!info.channel.empty())
+        {
+            StatusChannelText().Text(to_hstring(info.channel));
+        }
+
+        LoadRecordingMarkers();
+        SeekReplay(0u);
+        RefreshRecordingCatalogue();
+        UpdateRecordingWorkspace();
+        AddTimelineEvent(
+            L"Recording imported · " +
+            hstring{ info.session_path.filename().wstring() } +
+            L" · " +
+            to_hstring(info.record_count) +
+            L" CRC-validated records");
+        ShowWorkspace(WorkspaceKind::recording_replay);
+        UpdateReplayUi();
+        UpdateReceiverMenuState();
         co_return;
     }
 
@@ -1518,6 +1563,1309 @@ namespace winrt::DabMeasurementWinUI::implementation
     void MainWindow::DabMeasurements_Click(IInspectable const&, RoutedEventArgs const&)
     {
         ShowWorkspace(WorkspaceKind::dab_measurements);
+    }
+
+    void MainWindow::RecordingReplay_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        ShowWorkspace(WorkspaceKind::recording_replay);
+        RefreshRecordingCatalogue();
+        UpdateRecordingWorkspace();
+    }
+
+    void MainWindow::RecordingRefresh_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        RefreshRecordingCatalogue();
+        RefreshRecordingCaptures();
+    }
+
+    void MainWindow::RefreshRecordingCatalogue()
+    {
+        if (!RecordingSessionListView())
+        {
+            return;
+        }
+
+        auto const previous_selection = m_recording_selected_path;
+        m_recording_catalog.clear();
+        RecordingSessionListView().Items().Clear();
+        RecordingCompareSessionComboBox().Items().Clear();
+
+        auto const root = measurement_recordings_root();
+        std::error_code error;
+        if (std::filesystem::exists(root, error))
+        {
+            std::filesystem::directory_iterator iterator{ root, error };
+            std::filesystem::directory_iterator const end;
+            while (!error && iterator != end)
+            {
+                auto const entry = *iterator;
+                iterator.increment(error);
+                if (!entry.is_directory())
+                {
+                    continue;
+                }
+
+                dab::measurement::MeasurementSessionReplayInfo info;
+                std::string read_error;
+                if (dab::measurement::MeasurementSessionReplay::ReadSessionInfo(
+                        entry.path(),
+                        info,
+                        read_error))
+                {
+                    m_recording_catalog.push_back(std::move(info));
+                }
+            }
+        }
+
+        std::sort(
+            m_recording_catalog.begin(),
+            m_recording_catalog.end(),
+            [](auto const& left, auto const& right)
+            {
+                if (left.started_unix_ns != right.started_unix_ns)
+                {
+                    return left.started_unix_ns > right.started_unix_ns;
+                }
+                return left.session_path.filename().wstring() >
+                    right.session_path.filename().wstring();
+            });
+
+        int32_t selected_index = -1;
+        int32_t active_index = -1;
+        for (size_t index = 0u; index < m_recording_catalog.size(); ++index)
+        {
+            auto const& info = m_recording_catalog[index];
+            StackPanel panel;
+            panel.Spacing(2.0);
+
+            TextBlock name;
+            name.Text(hstring{ info.session_path.filename().wstring() });
+            name.FontSize(15.0);
+            panel.Children().Append(name);
+
+            TextBlock context;
+            context.Text(
+                to_hstring(info.channel.empty() ? "No channel" : info.channel) +
+                L" · " +
+                to_hstring(info.ensemble.empty() ? "No ensemble" : info.ensemble) +
+                L" · " +
+                to_hstring(info.service.empty() ? "No service" : info.service));
+            context.Foreground(
+                Application::Current().Resources().Lookup(
+                    box_value(hstring{ L"MutedTextBrush" })).as<Brush>());
+            context.FontSize(11.0);
+            context.TextTrimming(TextTrimming::CharacterEllipsis);
+            panel.Children().Append(context);
+
+            TextBlock detail;
+            wchar_t detail_buffer[160]{};
+            swprintf_s(
+                detail_buffer,
+                L"%ls · %llu records · %.1f MB · %ls",
+                format_duration(info.duration_ns).c_str(),
+                static_cast<unsigned long long>(info.record_count),
+                static_cast<double>(info.bytes_written) / (1024.0 * 1024.0),
+                to_hstring(info.state.empty() ? "unknown" : info.state).c_str());
+            detail.Text(detail_buffer);
+            detail.Foreground(
+                Application::Current().Resources().Lookup(
+                    box_value(hstring{ L"MutedTextBrush" })).as<Brush>());
+            detail.FontSize(11.0);
+            panel.Children().Append(detail);
+
+            ListViewItem row;
+            row.Content(panel);
+            row.Tag(box_value(hstring{ info.session_path.wstring() }));
+            row.HorizontalContentAlignment(HorizontalAlignment::Stretch);
+            RecordingSessionListView().Items().Append(row);
+
+            if (!previous_selection.empty() &&
+                info.session_path.lexically_normal() ==
+                    previous_selection.lexically_normal())
+            {
+                selected_index = static_cast<int32_t>(index);
+            }
+            if (m_replay_loaded &&
+                info.session_path.lexically_normal() ==
+                    m_session_replay.Info().session_path.lexically_normal())
+            {
+                active_index = static_cast<int32_t>(index);
+            }
+        }
+
+        if (selected_index < 0)
+        {
+            selected_index = active_index >= 0
+                ? active_index
+                : (m_recording_catalog.empty() ? -1 : 0);
+        }
+        if (selected_index >= 0)
+        {
+            RecordingSessionListView().SelectedIndex(selected_index);
+            m_recording_selected_path =
+                m_recording_catalog[static_cast<size_t>(selected_index)]
+                    .session_path;
+        }
+        else
+        {
+            m_recording_selected_path.clear();
+        }
+
+        for (auto const& info : m_recording_catalog)
+        {
+            if (m_replay_loaded &&
+                info.session_path.lexically_normal() ==
+                    m_session_replay.Info().session_path.lexically_normal())
+            {
+                continue;
+            }
+            ComboBoxItem item;
+            item.Content(box_value(
+                hstring{ info.session_path.filename().wstring() } +
+                L" · " +
+                to_hstring(info.channel.empty() ? "—" : info.channel)));
+            item.Tag(box_value(hstring{ info.session_path.wstring() }));
+            RecordingCompareSessionComboBox().Items().Append(item);
+        }
+
+        RecordingCatalogueCountText().Text(
+            to_hstring(m_recording_catalog.size()) +
+            (m_recording_catalog.size() == 1u
+                ? L" session"
+                : L" sessions"));
+        UpdateRecordingSelectedSession();
+    }
+
+    void MainWindow::RecordingSessionList_SelectionChanged(
+        IInspectable const&,
+        SelectionChangedEventArgs const&)
+    {
+        auto const item =
+            RecordingSessionListView().SelectedItem().try_as<ListViewItem>();
+        if (item && item.Tag())
+        {
+            m_recording_selected_path =
+                std::filesystem::path{
+                    unbox_value<hstring>(item.Tag()).c_str()
+                };
+        }
+        UpdateRecordingSelectedSession();
+    }
+
+    void MainWindow::UpdateRecordingSelectedSession()
+    {
+        if (!RecordingSelectedNameText())
+        {
+            return;
+        }
+
+        auto selected = std::find_if(
+            m_recording_catalog.begin(),
+            m_recording_catalog.end(),
+            [&](auto const& info)
+            {
+                return info.session_path.lexically_normal() ==
+                    m_recording_selected_path.lexically_normal();
+            });
+        if (selected == m_recording_catalog.end())
+        {
+            RecordingSelectedNameText().Text(L"Select a recording");
+            RecordingSelectedContextText().Text(
+                L"Channel, ensemble and service will appear here");
+            RecordingSelectedIntegrityBar().Severity(
+                InfoBarSeverity::Informational);
+            RecordingSelectedIntegrityBar().Title(L"Not validated");
+            RecordingSelectedIntegrityBar().Message(
+                L"Open a recording to validate its chunks and record CRCs.");
+            RecordingSelectedDurationText().Text(L"--:--:--");
+            RecordingSelectedRecordsText().Text(L"0");
+            RecordingSelectedSizeText().Text(L"0 MB");
+            RecordingSelectedDroppedText().Text(L"0");
+            RecordingSelectedDeviceText().Text(L"-");
+            RecordingSelectedSampleRateText().Text(L"-");
+            RecordingSelectedSnapshotsText().Text(L"0");
+            RecordingSelectedMeasurementsText().Text(L"0");
+            RecordingSelectedCatalogsText().Text(L"0");
+            RecordingSelectedEventsText().Text(L"0");
+            RecordingSelectedChunksText().Text(L"0");
+            RecordingSelectedStateText().Text(L"-");
+            return;
+        }
+
+        auto const& info = *selected;
+        RecordingSelectedNameText().Text(
+            hstring{ info.session_path.filename().wstring() });
+        wchar_t frequency[48]{};
+        swprintf_s(
+            frequency,
+            L"%.3f MHz",
+            static_cast<double>(info.frequency_hz) / 1000000.0);
+        RecordingSelectedContextText().Text(
+            to_hstring(info.channel.empty() ? "—" : info.channel) +
+            L" · " +
+            frequency +
+            L" · " +
+            to_hstring(info.ensemble.empty() ? "No ensemble" : info.ensemble) +
+            L" · " +
+            to_hstring(info.service.empty() ? "No service" : info.service));
+
+        bool const validated =
+            m_replay_loaded &&
+            info.session_path.lexically_normal() ==
+                m_session_replay.Info().session_path.lexically_normal();
+        if (validated)
+        {
+            RecordingSelectedIntegrityBar().Severity(
+                info.dropped_records == 0u
+                    ? InfoBarSeverity::Success
+                    : InfoBarSeverity::Warning);
+            RecordingSelectedIntegrityBar().Title(
+                info.dropped_records == 0u
+                    ? L"CRC validated"
+                    : L"Validated with recorder drops");
+            RecordingSelectedIntegrityBar().Message(
+                to_hstring(info.record_count) +
+                L" records validated across " +
+                to_hstring(info.chunk_count) +
+                L" chunk files.");
+        }
+        else
+        {
+            RecordingSelectedIntegrityBar().Severity(
+                info.state == "complete"
+                    ? InfoBarSeverity::Informational
+                    : InfoBarSeverity::Warning);
+            RecordingSelectedIntegrityBar().Title(
+                info.state == "complete"
+                    ? L"Manifest inspected"
+                    : L"Incomplete recording");
+            RecordingSelectedIntegrityBar().Message(
+                L"Open this recording to validate every chunk and record CRC.");
+        }
+
+        RecordingSelectedDurationText().Text(format_duration(info.duration_ns));
+        RecordingSelectedRecordsText().Text(to_hstring(info.record_count));
+        RecordingSelectedSizeText().Text(
+            format_float(
+                static_cast<float>(
+                    static_cast<double>(info.bytes_written) /
+                    (1024.0 * 1024.0)),
+                L" MB",
+                1));
+        RecordingSelectedDroppedText().Text(to_hstring(info.dropped_records));
+        RecordingSelectedDeviceText().Text(
+            to_hstring(info.device.empty() ? "Unknown" : info.device));
+        RecordingSelectedSampleRateText().Text(
+            info.sample_rate_hz == 0u
+                ? hstring{ L"-" }
+                : format_float(
+                    static_cast<float>(info.sample_rate_hz) / 1000000.0f,
+                    L" MS/s",
+                    3));
+        RecordingSelectedSnapshotsText().Text(
+            to_hstring(info.snapshot_records));
+        RecordingSelectedMeasurementsText().Text(
+            to_hstring(info.measurement_records));
+        RecordingSelectedCatalogsText().Text(
+            to_hstring(info.catalog_records));
+        RecordingSelectedEventsText().Text(to_hstring(info.event_records));
+        RecordingSelectedChunksText().Text(to_hstring(info.chunk_count));
+        RecordingSelectedStateText().Text(
+            to_hstring(info.state.empty() ? "unknown" : info.state));
+    }
+
+    winrt::fire_and_forget MainWindow::RecordingOpenSelected_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        auto lifetime = get_strong();
+        if (m_recording_selected_path.empty())
+        {
+            AddTimelineEvent(L"Select a recording to open");
+            co_return;
+        }
+        try
+        {
+            co_await OpenRecordingPathAsync(m_recording_selected_path);
+        }
+        catch (hresult_error const& error)
+        {
+            m_replay_importing = false;
+            AddTimelineEvent(
+                L"Recording import failed: " + error.message());
+            UpdateRecordingWorkspace();
+            UpdateReceiverMenuState();
+        }
+    }
+
+    winrt::fire_and_forget MainWindow::RecordingOpenFolder_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        auto lifetime = get_strong();
+        std::filesystem::path folder_path =
+            m_replay_loaded
+                ? m_session_replay.Info().session_path
+                : m_recording_selected_path;
+        if (folder_path.empty())
+        {
+            folder_path = measurement_recordings_root();
+        }
+
+        std::error_code error;
+        if (folder_path == measurement_recordings_root())
+        {
+            std::filesystem::create_directories(folder_path, error);
+        }
+        if (error || !std::filesystem::is_directory(folder_path))
+        {
+            AddTimelineEvent(L"Recording folder is unavailable");
+            co_return;
+        }
+
+        try
+        {
+            auto const folder =
+                co_await Windows::Storage::StorageFolder::GetFolderFromPathAsync(
+                    folder_path.wstring());
+            bool const opened =
+                co_await Windows::System::Launcher::LaunchFolderAsync(folder);
+            AddTimelineEvent(
+                opened
+                    ? hstring{ L"Opened recording folder" }
+                    : hstring{ L"Windows declined to open the recording folder" });
+        }
+        catch (hresult_error const& error)
+        {
+            AddTimelineEvent(
+                L"Unable to open recording folder: " + error.message());
+        }
+    }
+
+    void MainWindow::RecordingTimelineCanvas_PointerPressed(
+        IInspectable const&,
+        PointerRoutedEventArgs const& args)
+    {
+        if (!m_replay_loaded)
+        {
+            return;
+        }
+        double const width = RecordingTimelineCanvas().ActualWidth();
+        if (!(width > 0.0))
+        {
+            return;
+        }
+        double const x = std::clamp(
+            static_cast<double>(
+                args.GetCurrentPoint(
+                    RecordingTimelineCanvas()).Position().X),
+            0.0,
+            width);
+        uint64_t const duration = m_session_replay.Info().duration_ns;
+        uint64_t const target = static_cast<uint64_t>(
+            static_cast<double>(duration) * x / width);
+        m_replay_playing = false;
+        SeekReplay(target);
+        UpdateReplayUi();
+    }
+
+    void MainWindow::RenderRecordingTimeline()
+    {
+        if (!RecordingTimelineCanvas())
+        {
+            return;
+        }
+
+        PointCollection power_points;
+        PointCollection mer_points;
+        PointCollection cfo_points;
+        PointCollection ber_points;
+        PointCollection lock_points;
+        if (m_recording_timeline.empty())
+        {
+            RecordingPowerTrace().Points(power_points);
+            RecordingMerTrace().Points(mer_points);
+            RecordingCfoTrace().Points(cfo_points);
+            RecordingBerTrace().Points(ber_points);
+            RecordingLockTrace().Points(lock_points);
+            RecordingPowerScaleText().Text(L"Power: -");
+            RecordingMerScaleText().Text(L"MER: -");
+            RecordingCfoScaleText().Text(L"CFO: -");
+            UpdateRecordingTimelineCursor();
+            return;
+        }
+
+        auto value_range =
+            [&](auto value, auto valid, float fallback_low, float fallback_high)
+            {
+                float low = (std::numeric_limits<float>::max)();
+                float high = (std::numeric_limits<float>::lowest)();
+                for (auto const& point : m_recording_timeline)
+                {
+                    if (valid(point) && std::isfinite(value(point)))
+                    {
+                        low = (std::min)(low, value(point));
+                        high = (std::max)(high, value(point));
+                    }
+                }
+                if (low > high)
+                {
+                    return std::pair<float, float>{ fallback_low, fallback_high };
+                }
+                if (high - low < 1.0f)
+                {
+                    low -= 0.5f;
+                    high += 0.5f;
+                }
+                return std::pair<float, float>{ low, high };
+            };
+        auto const power_range = value_range(
+            [](auto const& point) { return point.power; },
+            [](auto const& point) { return point.power_valid; },
+            -100.0f,
+            0.0f);
+        auto const mer_range = value_range(
+            [](auto const& point) { return point.mer_db; },
+            [](auto const& point) { return point.mer_valid; },
+            0.0f,
+            30.0f);
+        auto const cfo_range = value_range(
+            [](auto const& point) { return point.cfo_hz; },
+            [](auto const& point) { return point.cfo_valid; },
+            -10.0f,
+            10.0f);
+        float const cfo_extent = (std::max)(
+            10.0f,
+            (std::max)(std::abs(cfo_range.first), std::abs(cfo_range.second)));
+        uint64_t const duration = (std::max)(
+            m_session_replay.Info().duration_ns,
+            m_recording_timeline.back().timestamp_ns);
+
+        auto const x_for = [&](uint64_t timestamp_ns)
+        {
+            return duration == 0u
+                ? 0.0
+                : 1000.0 *
+                    static_cast<double>(timestamp_ns) /
+                    static_cast<double>(duration);
+        };
+        auto const lane_y =
+            [](float value, float low, float high, double top)
+            {
+                double const fraction = std::clamp(
+                    static_cast<double>(value - low) /
+                        static_cast<double>(high - low),
+                    0.0,
+                    1.0);
+                return top + 46.0 * (1.0 - fraction);
+            };
+
+        for (auto const& point : m_recording_timeline)
+        {
+            double const x = x_for(point.timestamp_ns);
+            if (point.power_valid)
+            {
+                power_points.Append(
+                    Point{
+                        static_cast<float>(x),
+                        static_cast<float>(lane_y(
+                            point.power,
+                            power_range.first,
+                            power_range.second,
+                            8.0))
+                    });
+            }
+            if (point.mer_valid)
+            {
+                mer_points.Append(
+                    Point{
+                        static_cast<float>(x),
+                        static_cast<float>(lane_y(
+                            point.mer_db,
+                            mer_range.first,
+                            mer_range.second,
+                            64.0))
+                    });
+            }
+            if (point.cfo_valid)
+            {
+                cfo_points.Append(
+                    Point{
+                        static_cast<float>(x),
+                        static_cast<float>(lane_y(
+                            point.cfo_hz,
+                            -cfo_extent,
+                            cfo_extent,
+                            120.0))
+                    });
+            }
+            if (point.msc_ber_valid)
+            {
+                float const quality = static_cast<float>(std::clamp(
+                    -std::log10((std::max)(point.msc_ber, 1.0e-8f)) / 8.0,
+                    0.0,
+                    1.0));
+                ber_points.Append(
+                    Point{
+                        static_cast<float>(x),
+                        static_cast<float>(lane_y(
+                            quality,
+                            0.0f,
+                            1.0f,
+                            176.0))
+                    });
+            }
+            lock_points.Append(
+                Point{
+                    static_cast<float>(x),
+                    point.locked ? 248.0f : 288.0f
+                });
+        }
+
+        RecordingPowerTrace().Points(power_points);
+        RecordingMerTrace().Points(mer_points);
+        RecordingCfoTrace().Points(cfo_points);
+        RecordingBerTrace().Points(ber_points);
+        RecordingLockTrace().Points(lock_points);
+
+        bool any_calibrated = false;
+        bool any_uncalibrated = false;
+        for (auto const& point : m_recording_timeline)
+        {
+            if (!point.power_valid)
+            {
+                continue;
+            }
+            any_calibrated |= point.power_calibrated;
+            any_uncalibrated |= !point.power_calibrated;
+        }
+        wchar_t scale[160]{};
+        swprintf_s(
+            scale,
+            L"Power: %.1f…%.1f %ls",
+            static_cast<double>(power_range.first),
+            static_cast<double>(power_range.second),
+            any_calibrated && !any_uncalibrated ? L"dBm" :
+            (!any_calibrated ? L"dBFS" : L"dBm/dBFS"));
+        RecordingPowerScaleText().Text(scale);
+        swprintf_s(
+            scale,
+            L"MER: %.1f…%.1f dB",
+            static_cast<double>(mer_range.first),
+            static_cast<double>(mer_range.second));
+        RecordingMerScaleText().Text(scale);
+        swprintf_s(
+            scale,
+            L"CFO: ±%.1f Hz",
+            static_cast<double>(cfo_extent));
+        RecordingCfoScaleText().Text(scale);
+        UpdateRecordingTimelineCursor();
+    }
+
+    void MainWindow::UpdateRecordingTimelineCursor()
+    {
+        if (!RecordingTimelineCursor())
+        {
+            return;
+        }
+        uint64_t const duration =
+            m_replay_loaded ? m_session_replay.Info().duration_ns : 0u;
+        double const x = duration == 0u
+            ? 0.0
+            : 1000.0 *
+                static_cast<double>((std::min)(m_replay_position_ns, duration)) /
+                static_cast<double>(duration);
+        RecordingTimelineCursor().X1(x);
+        RecordingTimelineCursor().X2(x);
+        RecordingTimelineCursorText().Text(
+            m_replay_loaded
+                ? format_duration(m_replay_position_ns) +
+                    L" / " +
+                    format_duration(duration)
+                : hstring{ L"00:00:00" });
+
+        if (m_replay_loaded)
+        {
+            RecordingWorkspaceModeText().Text(
+                m_replay_playing
+                    ? L"● REPLAY"
+                    : (m_replay_position_ns >= duration
+                        ? L"COMPLETE"
+                        : L"PAUSED"));
+        }
+    }
+
+    void MainWindow::RefreshRecordingEvents()
+    {
+        if (!RecordingEventListView())
+        {
+            return;
+        }
+        RecordingEventListView().Items().Clear();
+        for (auto const& event : m_recording_events)
+        {
+            StackPanel panel;
+            panel.Spacing(2.0);
+            TextBlock time;
+            time.Text(
+                format_duration(event.timestamp_ns) +
+                L" · event " +
+                to_hstring(event.event_type));
+            time.FontFamily(FontFamily{ L"Consolas" });
+            time.FontSize(11.0);
+            time.Foreground(
+                Application::Current().Resources().Lookup(
+                    box_value(hstring{ L"MutedTextBrush" })).as<Brush>());
+            panel.Children().Append(time);
+            TextBlock message;
+            message.Text(to_hstring(event.message));
+            message.TextWrapping(TextWrapping::Wrap);
+            panel.Children().Append(message);
+            RecordingEventListView().Items().Append(panel);
+        }
+        RecordingEventCountText().Text(
+            to_hstring(m_recording_events.size()) +
+            (m_recording_events.size() == 1u
+                ? L" event"
+                : L" events"));
+    }
+
+    void MainWindow::RecordingAddMarker_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        if (!m_replay_loaded)
+        {
+            AddTimelineEvent(L"Open a recording before adding a marker");
+            return;
+        }
+        hstring const note = RecordingMarkerTextBox().Text();
+        std::wstring trimmed{ note.c_str() };
+        auto const first = trimmed.find_first_not_of(L" \t\r\n");
+        if (first == std::wstring::npos)
+        {
+            AddTimelineEvent(L"Enter a marker note");
+            return;
+        }
+        trimmed.erase(0u, first);
+        auto const last = trimmed.find_last_not_of(L" \t\r\n");
+        trimmed.erase(last + 1u);
+
+        auto const previous_markers = m_recording_markers;
+        m_recording_markers.push_back(
+            RecordingMarker{ m_replay_position_ns, hstring{ trimmed } });
+        std::sort(
+            m_recording_markers.begin(),
+            m_recording_markers.end(),
+            [](auto const& left, auto const& right)
+            {
+                return left.timestamp_ns < right.timestamp_ns;
+            });
+        if (!SaveRecordingMarkers())
+        {
+            m_recording_markers = previous_markers;
+            AddTimelineEvent(L"Unable to save recording annotation");
+            return;
+        }
+        RecordingMarkerTextBox().Text(L"");
+        RefreshRecordingMarkers();
+        RefreshRecordingCaptures();
+        AddTimelineEvent(
+            L"Replay marker added at " +
+            format_duration(m_replay_position_ns));
+    }
+
+    bool MainWindow::SaveRecordingMarkers()
+    {
+        if (!m_replay_loaded)
+        {
+            return false;
+        }
+        std::ofstream stream{
+            m_session_replay.Info().session_path / L"annotations.csv",
+            std::ios::binary | std::ios::trunc
+        };
+        if (!stream)
+        {
+            return false;
+        }
+        stream << "timestamp_ns,note\r\n";
+        for (auto const& marker : m_recording_markers)
+        {
+            std::string note = to_string(marker.note);
+            std::string escaped;
+            escaped.reserve(note.size() + 2u);
+            escaped.push_back('"');
+            for (char character : note)
+            {
+                if (character == '"')
+                {
+                    escaped.push_back('"');
+                }
+                escaped.push_back(character);
+            }
+            escaped.push_back('"');
+            stream << marker.timestamp_ns << ',' << escaped << "\r\n";
+        }
+        return stream.good();
+    }
+
+    void MainWindow::LoadRecordingMarkers()
+    {
+        m_recording_markers.clear();
+        if (!m_replay_loaded)
+        {
+            return;
+        }
+        std::ifstream stream{
+            m_session_replay.Info().session_path / L"annotations.csv",
+            std::ios::binary
+        };
+        if (!stream)
+        {
+            return;
+        }
+
+        std::string line;
+        std::getline(stream, line);
+        while (std::getline(stream, line))
+        {
+            if (!line.empty() && line.back() == '\r')
+            {
+                line.pop_back();
+            }
+            size_t const separator = line.find(',');
+            if (separator == std::string::npos)
+            {
+                continue;
+            }
+            uint64_t timestamp = 0u;
+            try
+            {
+                timestamp = std::stoull(line.substr(0u, separator));
+            }
+            catch (...)
+            {
+                continue;
+            }
+
+            std::string raw = line.substr(separator + 1u);
+            std::string note;
+            if (raw.size() >= 2u && raw.front() == '"' && raw.back() == '"')
+            {
+                for (size_t index = 1u; index + 1u < raw.size(); ++index)
+                {
+                    if (raw[index] == '"' &&
+                        index + 1u < raw.size() - 1u &&
+                        raw[index + 1u] == '"')
+                    {
+                        note.push_back('"');
+                        ++index;
+                    }
+                    else
+                    {
+                        note.push_back(raw[index]);
+                    }
+                }
+            }
+            else
+            {
+                note = std::move(raw);
+            }
+            m_recording_markers.push_back(
+                RecordingMarker{ timestamp, to_hstring(note) });
+        }
+        std::sort(
+            m_recording_markers.begin(),
+            m_recording_markers.end(),
+            [](auto const& left, auto const& right)
+            {
+                return left.timestamp_ns < right.timestamp_ns;
+            });
+    }
+
+    void MainWindow::RefreshRecordingMarkers()
+    {
+        if (!RecordingMarkerListView())
+        {
+            return;
+        }
+        RecordingMarkerListView().Items().Clear();
+        for (auto const& marker : m_recording_markers)
+        {
+            StackPanel panel;
+            panel.Spacing(2.0);
+            TextBlock time;
+            time.Text(format_duration(marker.timestamp_ns));
+            time.FontFamily(FontFamily{ L"Consolas" });
+            time.Foreground(
+                Application::Current().Resources().Lookup(
+                    box_value(hstring{ L"MeasurementAccentBrush" })).as<Brush>());
+            panel.Children().Append(time);
+            TextBlock note;
+            note.Text(marker.note);
+            note.TextWrapping(TextWrapping::Wrap);
+            panel.Children().Append(note);
+
+            ListViewItem row;
+            row.Content(panel);
+            row.Tag(box_value(marker.timestamp_ns));
+            row.HorizontalContentAlignment(HorizontalAlignment::Stretch);
+            RecordingMarkerListView().Items().Append(row);
+        }
+    }
+
+    void MainWindow::RecordingMarkerList_ItemClick(
+        IInspectable const&,
+        ItemClickEventArgs const& args)
+    {
+        if (!m_replay_loaded)
+        {
+            return;
+        }
+        auto const item = args.ClickedItem().try_as<ListViewItem>();
+        if (!item || !item.Tag())
+        {
+            return;
+        }
+        m_replay_playing = false;
+        SeekReplay(unbox_value<uint64_t>(item.Tag()));
+        UpdateReplayUi();
+    }
+
+    void MainWindow::RecordingCapturesRefresh_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        RefreshRecordingCaptures();
+    }
+
+    void MainWindow::RefreshRecordingCaptures()
+    {
+        if (!RecordingCaptureListView())
+        {
+            return;
+        }
+        RecordingCaptureListView().Items().Clear();
+        std::filesystem::path const folder =
+            m_replay_loaded
+                ? m_session_replay.Info().session_path
+                : m_recording_selected_path;
+        std::error_code error;
+        if (folder.empty() || !std::filesystem::is_directory(folder, error))
+        {
+            RecordingCaptureCountText().Text(L"No recording selected");
+            return;
+        }
+
+        std::vector<std::filesystem::directory_entry> files;
+        std::filesystem::directory_iterator iterator{ folder, error };
+        std::filesystem::directory_iterator const end;
+        while (!error && iterator != end)
+        {
+            auto const entry = *iterator;
+            iterator.increment(error);
+            if (entry.is_regular_file())
+            {
+                files.push_back(entry);
+            }
+        }
+        std::sort(
+            files.begin(),
+            files.end(),
+            [](auto const& left, auto const& right)
+            {
+                return left.path().filename().wstring() <
+                    right.path().filename().wstring();
+            });
+
+        for (auto const& entry : files)
+        {
+            std::wstring const name = entry.path().filename().wstring();
+            std::wstring extension = entry.path().extension().wstring();
+            std::transform(
+                extension.begin(),
+                extension.end(),
+                extension.begin(),
+                [](wchar_t value)
+                {
+                    return static_cast<wchar_t>(std::towlower(value));
+                });
+            std::wstring kind{ L"Session file" };
+            if (name == L"session.json")
+            {
+                kind = L"Manifest";
+            }
+            else if (name.starts_with(L"data-"))
+            {
+                kind = L"Measurement chunk";
+            }
+            else if (name == L"annotations.csv")
+            {
+                kind = L"Operator annotations";
+            }
+            else if (extension == L".iq" || extension == L".bin")
+            {
+                kind = L"IQ capture";
+            }
+            else if (extension == L".png" || extension == L".jpg")
+            {
+                kind = L"Screenshot";
+            }
+            else if (extension == L".csv")
+            {
+                kind = L"CSV export";
+            }
+
+            uintmax_t const size = entry.file_size(error);
+            error.clear();
+            StackPanel panel;
+            panel.Spacing(2.0);
+            TextBlock title;
+            title.Text(hstring{ name });
+            panel.Children().Append(title);
+            TextBlock detail;
+            wchar_t detail_buffer[128]{};
+            swprintf_s(
+                detail_buffer,
+                L"%ls · %.1f kB",
+                kind.c_str(),
+                static_cast<double>(size) / 1024.0);
+            detail.Text(detail_buffer);
+            detail.FontSize(11.0);
+            detail.Foreground(
+                Application::Current().Resources().Lookup(
+                    box_value(hstring{ L"MutedTextBrush" })).as<Brush>());
+            panel.Children().Append(detail);
+            RecordingCaptureListView().Items().Append(panel);
+        }
+        RecordingCaptureCountText().Text(
+            to_hstring(files.size()) +
+            (files.size() == 1u ? L" file" : L" files") +
+            L" in " +
+            hstring{ folder.filename().wstring() });
+    }
+
+    void MainWindow::RecordingCompare_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        if (!m_replay_loaded)
+        {
+            RecordingCompareDetailsText().Text(
+                L"Open the baseline recording before comparing sessions.");
+            return;
+        }
+        auto const selected =
+            RecordingCompareSessionComboBox().SelectedItem()
+                .try_as<ComboBoxItem>();
+        if (!selected || !selected.Tag())
+        {
+            RecordingCompareDetailsText().Text(
+                L"Select another recording to compare.");
+            return;
+        }
+
+        dab::measurement::MeasurementSessionReplayInfo other;
+        std::string error;
+        if (!dab::measurement::MeasurementSessionReplay::ReadSessionInfo(
+                std::filesystem::path{
+                    unbox_value<hstring>(selected.Tag()).c_str()
+                },
+                other,
+                error))
+        {
+            RecordingCompareDetailsText().Text(
+                L"Unable to read comparison manifest · " +
+                to_hstring(error));
+            return;
+        }
+
+        auto const& active = m_session_replay.Info();
+        RecordingCompareTitleText().Text(
+            hstring{ active.session_path.filename().wstring() } +
+            L" vs " +
+            hstring{ other.session_path.filename().wstring() });
+        wchar_t details[320]{};
+        swprintf_s(
+            details,
+            L"%ls · %.3f MHz · %ls  |  %ls · %.3f MHz · %ls",
+            to_hstring(active.channel.empty() ? "—" : active.channel).c_str(),
+            static_cast<double>(active.frequency_hz) / 1000000.0,
+            to_hstring(active.service.empty() ? "No service" : active.service).c_str(),
+            to_hstring(other.channel.empty() ? "—" : other.channel).c_str(),
+            static_cast<double>(other.frequency_hz) / 1000000.0,
+            to_hstring(other.service.empty() ? "No service" : other.service).c_str());
+        RecordingCompareDetailsText().Text(details);
+
+        auto const signed_text =
+            [](int64_t value, wchar_t const* suffix)
+            {
+                wchar_t buffer[80]{};
+                swprintf_s(
+                    buffer,
+                    L"%+lld%ls",
+                    static_cast<long long>(value),
+                    suffix);
+                return hstring{ buffer };
+            };
+        double const duration_delta =
+            static_cast<double>(
+                static_cast<int64_t>(other.duration_ns) -
+                static_cast<int64_t>(active.duration_ns)) /
+            1000000000.0;
+        wchar_t duration_text[80]{};
+        swprintf_s(duration_text, L"%+.1f s", duration_delta);
+        RecordingCompareDurationText().Text(duration_text);
+        RecordingCompareRecordsText().Text(
+            signed_text(
+                static_cast<int64_t>(other.record_count) -
+                    static_cast<int64_t>(active.record_count),
+                L""));
+        double const size_delta =
+            static_cast<double>(
+                static_cast<int64_t>(other.bytes_written) -
+                static_cast<int64_t>(active.bytes_written)) /
+            (1024.0 * 1024.0);
+        wchar_t size_text[80]{};
+        swprintf_s(size_text, L"%+.1f MB", size_delta);
+        RecordingCompareSizeText().Text(size_text);
+        RecordingCompareDroppedText().Text(
+            signed_text(
+                static_cast<int64_t>(other.dropped_records) -
+                    static_cast<int64_t>(active.dropped_records),
+                L""));
+    }
+
+    winrt::fire_and_forget MainWindow::RecordingExportTimeline_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        auto lifetime = get_strong();
+        if (!m_replay_loaded || m_recording_timeline.empty())
+        {
+            RecordingExportStatusBar().Severity(InfoBarSeverity::Warning);
+            RecordingExportStatusBar().Title(L"Nothing to export");
+            RecordingExportStatusBar().Message(
+                L"Open a recording with measurement snapshots first.");
+            RecordingExportStatusBar().IsOpen(true);
+            co_return;
+        }
+
+        try
+        {
+            using namespace Windows::Storage;
+            std::wstring csv{
+                L"record_type,timestamp_ns,elapsed_s,power,power_unit,"
+                L"mer_db,cn_db,cfo_hz,msc_ber,clipping_percent,locked,"
+                L"dropped_blocks,note\r\n"
+            };
+            for (auto const& point : m_recording_timeline)
+            {
+                csv += L"measurement,";
+                csv += std::to_wstring(point.timestamp_ns);
+                csv += L",";
+                csv += csv_float(
+                    true,
+                    static_cast<float>(
+                        static_cast<double>(point.timestamp_ns) /
+                        1000000000.0),
+                    6);
+                csv += L",";
+                csv += csv_float(point.power_valid, point.power, 3);
+                csv += L",";
+                csv += point.power_valid
+                    ? (point.power_calibrated ? L"dBm" : L"dBFS")
+                    : L"";
+                csv += L",";
+                csv += csv_float(point.mer_valid, point.mer_db, 3);
+                csv += L",";
+                csv += csv_float(point.cn_valid, point.cn_db, 3);
+                csv += L",";
+                csv += csv_float(point.cfo_valid, point.cfo_hz, 3);
+                csv += L",";
+                csv += csv_float(point.msc_ber_valid, point.msc_ber, 8);
+                csv += L",";
+                csv += csv_float(
+                    point.clipping_valid,
+                    point.clipping_percent,
+                    5);
+                csv += L",";
+                csv += point.locked ? L"1" : L"0";
+                csv += L",";
+                csv += std::to_wstring(point.dropped_blocks);
+                csv += L",\r\n";
+            }
+            for (auto const& marker : m_recording_markers)
+            {
+                csv += L"marker,";
+                csv += std::to_wstring(marker.timestamp_ns);
+                csv += L",";
+                csv += csv_float(
+                    true,
+                    static_cast<float>(
+                        static_cast<double>(marker.timestamp_ns) /
+                        1000000000.0),
+                    6);
+                csv += L",,,,,,,,,,,";
+                csv += csv_field(marker.note.c_str());
+                csv += L"\r\n";
+            }
+
+            auto const file = co_await DownloadsFolder::CreateFileAsync(
+                L"DAB_Replay_Timeline_" +
+                    filename_timestamp() +
+                    L".csv",
+                CreationCollisionOption::GenerateUniqueName);
+            co_await FileIO::WriteTextAsync(file, hstring{ csv });
+            RecordingExportStatusBar().Severity(InfoBarSeverity::Success);
+            RecordingExportStatusBar().Title(L"Timeline exported");
+            RecordingExportStatusBar().Message(file.Path());
+            RecordingExportStatusBar().IsOpen(true);
+            AddTimelineEvent(L"Replay timeline exported to " + file.Path());
+        }
+        catch (hresult_error const& error)
+        {
+            RecordingExportStatusBar().Severity(InfoBarSeverity::Error);
+            RecordingExportStatusBar().Title(L"Export failed");
+            RecordingExportStatusBar().Message(error.message());
+            RecordingExportStatusBar().IsOpen(true);
+        }
+    }
+
+    void MainWindow::RecordingCopySummary_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        if (!m_replay_loaded)
+        {
+            RecordingExportStatusBar().Severity(InfoBarSeverity::Warning);
+            RecordingExportStatusBar().Title(L"No active recording");
+            RecordingExportStatusBar().Message(
+                L"Open a recording before copying its summary.");
+            RecordingExportStatusBar().IsOpen(true);
+            return;
+        }
+        try
+        {
+            auto const& info = m_session_replay.Info();
+            std::wstring summary{
+                L"DAB Measurement Recording\r\nSession: "
+            };
+            summary += info.session_path.filename().wstring();
+            summary += L"\r\nState: ";
+            summary += to_hstring(info.state).c_str();
+            summary += L"\r\nContext: ";
+            summary += to_hstring(info.context).c_str();
+            summary += L"\r\nDevice: ";
+            summary += to_hstring(info.device).c_str();
+            summary += L"\r\nChannel / frequency: ";
+            summary += to_hstring(info.channel).c_str();
+            summary += L" / ";
+            summary += std::to_wstring(info.frequency_hz);
+            summary += L" Hz\r\nEnsemble / service: ";
+            summary += to_hstring(info.ensemble).c_str();
+            summary += L" / ";
+            summary += to_hstring(info.service).c_str();
+            summary += L"\r\nDuration: ";
+            summary += format_duration(info.duration_ns).c_str();
+            summary += L"\r\nRecords: ";
+            summary += std::to_wstring(info.record_count);
+            summary += L" (";
+            summary += std::to_wstring(info.snapshot_records);
+            summary += L" snapshots, ";
+            summary += std::to_wstring(info.measurement_records);
+            summary += L" measurement frames, ";
+            summary += std::to_wstring(info.catalog_records);
+            summary += L" catalogues, ";
+            summary += std::to_wstring(info.event_records);
+            summary += L" events)\r\nChunks: ";
+            summary += std::to_wstring(info.chunk_count);
+            summary += L"\r\nBytes: ";
+            summary += std::to_wstring(info.bytes_written);
+            summary += L"\r\nRecorder drops: ";
+            summary += std::to_wstring(info.dropped_records);
+            summary += L"\r\nIntegrity: CRC validated\r\n";
+
+            using namespace Windows::ApplicationModel::DataTransfer;
+            DataPackage package;
+            package.SetText(hstring{ summary });
+            Clipboard::SetContent(package);
+            Clipboard::Flush();
+            RecordingExportStatusBar().Severity(InfoBarSeverity::Success);
+            RecordingExportStatusBar().Title(L"Summary copied");
+            RecordingExportStatusBar().Message(
+                L"The validated session summary is on the clipboard.");
+            RecordingExportStatusBar().IsOpen(true);
+        }
+        catch (hresult_error const& error)
+        {
+            RecordingExportStatusBar().Severity(InfoBarSeverity::Error);
+            RecordingExportStatusBar().Title(L"Copy failed");
+            RecordingExportStatusBar().Message(error.message());
+            RecordingExportStatusBar().IsOpen(true);
+        }
+    }
+
+    void MainWindow::UpdateRecordingWorkspace()
+    {
+        if (!RecordingWorkspaceContextText())
+        {
+            return;
+        }
+        if (m_replay_importing)
+        {
+            RecordingWorkspaceContextText().Text(
+                L"Validating manifest, chunks, schemas and record CRCs");
+            RecordingWorkspaceModeText().Text(L"IMPORTING");
+            RecordingWorkspaceIntegrityText().Text(L"VALIDATING CRC");
+            return;
+        }
+        if (!m_replay_loaded)
+        {
+            RecordingWorkspaceContextText().Text(L"No recording loaded");
+            RecordingWorkspaceModeText().Text(L"IDLE");
+            RecordingWorkspaceIntegrityText().Text(L"NO SESSION");
+            RenderRecordingTimeline();
+            RefreshRecordingEvents();
+            RefreshRecordingMarkers();
+            RefreshRecordingCaptures();
+            UpdateRecordingSelectedSession();
+            return;
+        }
+
+        auto const& info = m_session_replay.Info();
+        wchar_t frequency[48]{};
+        swprintf_s(
+            frequency,
+            L"%.3f MHz",
+            static_cast<double>(info.frequency_hz) / 1000000.0);
+        RecordingWorkspaceContextText().Text(
+            hstring{ info.session_path.filename().wstring() } +
+            L" · " +
+            to_hstring(info.channel.empty() ? "—" : info.channel) +
+            L" · " +
+            frequency +
+            L" · " +
+            to_hstring(info.ensemble.empty() ? "No ensemble" : info.ensemble) +
+            L" · " +
+            to_hstring(info.service.empty() ? "No service" : info.service));
+        RecordingWorkspaceIntegrityText().Text(
+            info.dropped_records == 0u
+                ? L"CRC VALIDATED"
+                : L"VALIDATED · " +
+                    to_hstring(info.dropped_records) +
+                    L" DROPPED");
+        UpdateRecordingTimelineCursor();
+        UpdateRecordingSelectedSession();
+        RenderRecordingTimeline();
+        RefreshRecordingEvents();
+        RefreshRecordingMarkers();
+        RefreshRecordingCaptures();
     }
 
     void MainWindow::MeasurementRfPage_Click(
@@ -3058,6 +4406,10 @@ namespace winrt::DabMeasurementWinUI::implementation
         {
             DabWorkspace().Width(workspace_width);
         }
+        if (RecordingReplayWorkspace())
+        {
+            RecordingReplayWorkspace().Width(workspace_width);
+        }
         if (RfOverviewContent())
         {
             RfOverviewContent().Width((std::max)(480.0, workspace_width - 36.0));
@@ -4400,6 +5752,7 @@ namespace winrt::DabMeasurementWinUI::implementation
         ChannelComboBox().IsEnabled(false);
         FrequencyTextBox().IsEnabled(false);
         GainNumberBox().IsEnabled(false);
+        UpdateRecordingTimelineCursor();
     }
 
     void MainWindow::MarkerButton_Click(IInspectable const&, RoutedEventArgs const&)
@@ -4956,6 +6309,8 @@ namespace winrt::DabMeasurementWinUI::implementation
             m_active_workspace == WorkspaceKind::rf_measurements);
         ViewDabWorkspaceMenuItem().IsChecked(
             m_active_workspace == WorkspaceKind::dab_measurements);
+        ViewRecordingWorkspaceMenuItem().IsChecked(
+            m_active_workspace == WorkspaceKind::recording_replay);
         ViewAnalysisPanelMaximizedMenuItem().IsChecked(m_cir_panel_maximized);
         ViewToolbarMenuItem().IsChecked(m_toolbar_visible);
         ViewStatusBarMenuItem().IsChecked(m_status_bar_visible);
@@ -4971,6 +6326,8 @@ namespace winrt::DabMeasurementWinUI::implementation
         bool const receiver_active = workspace == WorkspaceKind::receiver;
         bool const rf_active = workspace == WorkspaceKind::rf_measurements;
         bool const dab_active = workspace == WorkspaceKind::dab_measurements;
+        bool const recording_active =
+            workspace == WorkspaceKind::recording_replay;
         bool const changed = m_active_workspace != workspace;
         m_active_workspace = workspace;
         m_rf_workspace_active = rf_active;
@@ -4978,12 +6335,18 @@ namespace winrt::DabMeasurementWinUI::implementation
         ReceiverTimelinePanel().Visibility(receiver_active ? Visibility::Visible : Visibility::Collapsed);
         RfWorkspace().Visibility(rf_active ? Visibility::Visible : Visibility::Collapsed);
         DabWorkspace().Visibility(dab_active ? Visibility::Visible : Visibility::Collapsed);
+        RecordingReplayWorkspace().Visibility(
+            recording_active ? Visibility::Visible : Visibility::Collapsed);
         ReceiverNavIndicator().Visibility(receiver_active ? Visibility::Visible : Visibility::Collapsed);
         RfNavIndicator().Visibility(rf_active ? Visibility::Visible : Visibility::Collapsed);
         DabNavIndicator().Visibility(dab_active ? Visibility::Visible : Visibility::Collapsed);
+        RecordingNavIndicator().Visibility(
+            recording_active ? Visibility::Visible : Visibility::Collapsed);
         ReceiverNavigationButton().Opacity(receiver_active ? 1.0 : 0.70);
         RfNavigationButton().Opacity(rf_active ? 1.0 : 0.70);
         DabNavigationButton().Opacity(dab_active ? 1.0 : 0.70);
+        RecordingNavigationButton().Opacity(
+            recording_active ? 1.0 : 0.70);
         RfToolbarButton().Opacity(rf_active ? 1.0 : 0.82);
         DabToolbarButton().Opacity(dab_active ? 1.0 : 0.82);
         ApplyWorkspaceWidth(RootLayout().ActualWidth());
@@ -4995,6 +6358,10 @@ namespace winrt::DabMeasurementWinUI::implementation
         {
             UpdateDabContext();
         }
+        else if (recording_active)
+        {
+            UpdateRecordingWorkspace();
+        }
         if (changed)
         {
             hstring message{ L"Opened Receiver workspace" };
@@ -5005,6 +6372,10 @@ namespace winrt::DabMeasurementWinUI::implementation
             else if (dab_active)
             {
                 message = L"Opened DAB Measurements workspace";
+            }
+            else if (recording_active)
+            {
+                message = L"Opened Recording & Replay workspace";
             }
             AddTimelineEvent(message);
         }

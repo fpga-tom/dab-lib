@@ -67,6 +67,18 @@ namespace winrt::DabMeasurementWinUI::implementation
         void ReceiverWorkspace_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void RfMeasurements_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void DabMeasurements_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void RecordingReplay_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void RecordingRefresh_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void RecordingSessionList_SelectionChanged(IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
+        winrt::fire_and_forget RecordingOpenSelected_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        winrt::fire_and_forget RecordingOpenFolder_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void RecordingTimelineCanvas_PointerPressed(IInspectable const&, Microsoft::UI::Xaml::Input::PointerRoutedEventArgs const&);
+        void RecordingAddMarker_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void RecordingMarkerList_ItemClick(IInspectable const&, Microsoft::UI::Xaml::Controls::ItemClickEventArgs const&);
+        void RecordingCapturesRefresh_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void RecordingCompare_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        winrt::fire_and_forget RecordingExportTimeline_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void RecordingCopySummary_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void DabOverviewKpi_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void FicMetricCard_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void FicTimelineResume_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -146,17 +158,30 @@ namespace winrt::DabMeasurementWinUI::implementation
             receiver,
             rf_measurements,
             dab_measurements,
+            recording_replay,
         };
 
         void OnTimerTick(IInspectable const&, IInspectable const&);
         void ResetFileSession(bool closed);
         void CloseReplaySession();
+        winrt::Windows::Foundation::IAsyncAction OpenRecordingPathAsync(
+            std::filesystem::path selected_path);
         void AdvanceReplay();
         void SeekReplay(uint64_t timestamp_ns);
         bool ApplyReplayRecord(
             dab::measurement::MeasurementSessionReplayRecord const& record,
             bool include_event);
         void UpdateReplayUi();
+        void RefreshRecordingCatalogue();
+        void UpdateRecordingSelectedSession();
+        void UpdateRecordingWorkspace();
+        void RenderRecordingTimeline();
+        void UpdateRecordingTimelineCursor();
+        void RefreshRecordingEvents();
+        void RefreshRecordingMarkers();
+        void RefreshRecordingCaptures();
+        bool SaveRecordingMarkers();
+        void LoadRecordingMarkers();
         void StopMeasurementRecording(winrt::hstring const& reason);
         void UpdateRecordingUi();
         winrt::fire_and_forget ShowHelpDialog(
@@ -305,6 +330,19 @@ namespace winrt::DabMeasurementWinUI::implementation
         double m_replay_speed{ 1.0 };
         uint64_t m_replay_position_ns{ 0u };
         std::chrono::steady_clock::time_point m_replay_last_tick{};
+        std::vector<dab::measurement::MeasurementSessionReplayInfo>
+            m_recording_catalog;
+        std::vector<dab::measurement::MeasurementSessionTimelinePoint>
+            m_recording_timeline;
+        std::vector<dab::measurement::MeasurementSessionReplayEvent>
+            m_recording_events;
+        std::filesystem::path m_recording_selected_path;
+        struct RecordingMarker
+        {
+            uint64_t timestamp_ns;
+            winrt::hstring note;
+        };
+        std::vector<RecordingMarker> m_recording_markers;
         bool m_receiver_agc_enabled{ false };
         int32_t m_receiver_ppm_correction{ 0 };
         bool m_receiver_bias_tee_enabled{ false };

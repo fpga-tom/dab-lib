@@ -133,6 +133,36 @@ test_measurement_session_recorder_writes_crc_checked_records(void)
     TEST_ASSERT(replay.Info().event_records == 1u);
     TEST_ASSERT(replay.Info().frequency_hz == 220352000u);
 
+    dab::measurement::MeasurementSessionReplayInfo inspected;
+    TEST_ASSERT(
+        dab::measurement::MeasurementSessionReplay::ReadSessionInfo(
+            status.session_path,
+            inspected,
+            error));
+    TEST_ASSERT(inspected.record_count == 5u);
+    TEST_ASSERT(inspected.driver == "sdrplay");
+    TEST_ASSERT(inspected.serial == "B000123");
+    TEST_ASSERT(inspected.frequency_hz == 220352000u);
+
+    std::vector<dab::measurement::MeasurementSessionTimelinePoint>
+        timeline;
+    std::vector<dab::measurement::MeasurementSessionReplayEvent>
+        replay_events;
+    TEST_ASSERT(replay.BuildTimeline(
+        128u,
+        timeline,
+        replay_events,
+        error));
+    TEST_ASSERT(timeline.size() == 1u);
+    TEST_ASSERT(timeline[0].power_valid == false);
+    TEST_ASSERT(timeline[0].mer_valid);
+    TEST_ASSERT(
+        timeline[0].mer_db > 18.4f &&
+        timeline[0].mer_db < 18.6f);
+    TEST_ASSERT(replay_events.size() == 1u);
+    TEST_ASSERT(replay_events[0].event_type == 7u);
+    TEST_ASSERT(replay_events[0].message == "operator marker");
+
     std::vector<dab::measurement::MeasurementSessionReplayRecord> records;
     TEST_ASSERT(replay.ReadUntil(replay.Info().duration_ns,
                                  records,

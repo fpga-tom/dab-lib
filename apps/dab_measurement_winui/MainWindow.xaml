@@ -272,6 +272,8 @@
                                     Tag="events"
                                     Click="MeasurementDabPage_Click" />
                 </MenuFlyoutSubItem>
+                <MenuFlyoutItem Text="Recording &amp; Replay workspace"
+                                Click="RecordingReplay_Click" />
                 <MenuFlyoutSeparator />
                 <MenuFlyoutSubItem Text="Capture">
                     <MenuFlyoutItem Text="Measurement snapshot"
@@ -318,6 +320,9 @@
                     <ToggleMenuFlyoutItem x:Name="ViewDabWorkspaceMenuItem"
                                           Text="DAB Measurements"
                                           Click="DabMeasurements_Click" />
+                    <ToggleMenuFlyoutItem x:Name="ViewRecordingWorkspaceMenuItem"
+                                          Text="Recording &amp; Replay"
+                                          Click="RecordingReplay_Click" />
                 </MenuFlyoutSubItem>
                 <MenuFlyoutSubItem Text="Receiver plots">
                     <MenuFlyoutItem Text="Spectrum and waterfall"
@@ -704,6 +709,27 @@
                         <StackPanel Grid.Column="1" Spacing="0">
                             <TextBlock Text="DAB" />
                             <TextBlock Text="Measurements" FontSize="10" />
+                        </StackPanel>
+                    </Grid>
+                </Button>
+                <Button x:Name="RecordingNavigationButton"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Stretch"
+                        Click="RecordingReplay_Click">
+                    <Grid ColumnSpacing="9">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Ellipse x:Name="RecordingNavIndicator"
+                                 Width="8"
+                                 Height="8"
+                                 Fill="{StaticResource MeasurementAccentBrush}"
+                                 Visibility="Collapsed"
+                                 VerticalAlignment="Center" />
+                        <StackPanel Grid.Column="1" Spacing="0">
+                            <TextBlock Text="Recording" />
+                            <TextBlock Text="&amp; Replay" FontSize="10" />
                         </StackPanel>
                     </Grid>
                 </Button>
@@ -4602,6 +4628,514 @@
                                       HorizontalContentAlignment="Stretch" />
                         </Border>
                     </Grid>
+                </TabViewItem>
+            </TabView>
+        </Grid>
+
+        <Grid x:Name="RecordingReplayWorkspace"
+              Grid.Row="2"
+              Grid.RowSpan="2"
+              Margin="140,10,10,10"
+              HorizontalAlignment="Left"
+              Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <Border Grid.Row="0"
+                    Style="{StaticResource PanelCardStyle}"
+                    Padding="18,13"
+                    Margin="0,0,0,10">
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Spacing="3">
+                        <TextBlock Text="RECORDING &amp; REPLAY"
+                                   FontSize="24"
+                                   FontWeight="SemiBold" />
+                        <TextBlock x:Name="RecordingWorkspaceContextText"
+                                   Text="No recording loaded"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1"
+                                Orientation="Horizontal"
+                                Spacing="8"
+                                VerticalAlignment="Center">
+                        <Border Padding="10,4"
+                                CornerRadius="12"
+                                Background="#2935D0BA">
+                            <TextBlock x:Name="RecordingWorkspaceModeText"
+                                       Text="IDLE"
+                                       Foreground="{StaticResource MeasurementAccentBrush}"
+                                       FontSize="11"
+                                       FontWeight="SemiBold" />
+                        </Border>
+                        <Border Padding="10,4"
+                                CornerRadius="12"
+                                Background="{StaticResource PanelRaisedBrush}">
+                            <TextBlock x:Name="RecordingWorkspaceIntegrityText"
+                                       Text="NO SESSION"
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       FontSize="11"
+                                       FontWeight="SemiBold" />
+                        </Border>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <TabView x:Name="RecordingReplayTabView"
+                     Grid.Row="1"
+                     IsAddTabButtonVisible="False"
+                     CanDragTabs="False"
+                     CanReorderTabs="False">
+                <TabViewItem Header="Sessions" IsClosable="False">
+                    <Grid Padding="12" ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="2*" MinWidth="300" />
+                            <ColumnDefinition Width="3*" MinWidth="420" />
+                        </Grid.ColumnDefinitions>
+
+                        <Border Grid.Column="0"
+                                Style="{StaticResource PanelCardStyle}"
+                                Padding="12">
+                            <Grid RowSpacing="9">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <Grid ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="RECORDING CATALOGUE"
+                                                   Style="{StaticResource SectionTitleStyle}" />
+                                        <TextBlock x:Name="RecordingCatalogueCountText"
+                                                   Text="0 sessions"
+                                                   Foreground="{StaticResource MutedTextBrush}"
+                                                   FontSize="11" />
+                                    </StackPanel>
+                                    <Button Grid.Column="1"
+                                            Content="Refresh"
+                                            Click="RecordingRefresh_Click" />
+                                </Grid>
+                                <ListView Grid.Row="1"
+                                          x:Name="RecordingSessionListView"
+                                          SelectionMode="Single"
+                                          HorizontalContentAlignment="Stretch"
+                                          SelectionChanged="RecordingSessionList_SelectionChanged" />
+                                <Grid Grid.Row="2" ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Button Content="Open selected"
+                                            HorizontalAlignment="Stretch"
+                                            Click="RecordingOpenSelected_Click" />
+                                    <Button Grid.Column="1"
+                                            Content="Open folder"
+                                            HorizontalAlignment="Stretch"
+                                            Click="RecordingOpenFolder_Click" />
+                                </Grid>
+                            </Grid>
+                        </Border>
+
+                        <ScrollViewer Grid.Column="1">
+                            <StackPanel Spacing="12">
+                                <Border Style="{StaticResource PanelCardStyle}" Padding="16">
+                                    <StackPanel Spacing="5">
+                                        <TextBlock Text="SELECTED SESSION"
+                                                   Style="{StaticResource SectionTitleStyle}" />
+                                        <TextBlock x:Name="RecordingSelectedNameText"
+                                                   Text="Select a recording"
+                                                   FontSize="20"
+                                                   FontWeight="SemiBold" />
+                                        <TextBlock x:Name="RecordingSelectedContextText"
+                                                   Text="Channel, ensemble and service will appear here"
+                                                   Foreground="{StaticResource MutedTextBrush}"
+                                                   TextWrapping="Wrap" />
+                                        <InfoBar x:Name="RecordingSelectedIntegrityBar"
+                                                 Margin="0,7,0,0"
+                                                 IsOpen="True"
+                                                 IsClosable="False"
+                                                 Severity="Informational"
+                                                 Title="Not validated"
+                                                 Message="Open the recording to validate all chunks and record CRCs." />
+                                    </StackPanel>
+                                </Border>
+
+                                <Grid ColumnSpacing="10" RowSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Style="{StaticResource PanelCardStyle}" Padding="13">
+                                        <StackPanel>
+                                            <TextBlock Text="DURATION" Style="{StaticResource SectionTitleStyle}" />
+                                            <TextBlock x:Name="RecordingSelectedDurationText" Text="--:--:--" Style="{StaticResource KpiValueStyle}" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Grid.Column="1" Style="{StaticResource PanelCardStyle}" Padding="13">
+                                        <StackPanel>
+                                            <TextBlock Text="RECORDS" Style="{StaticResource SectionTitleStyle}" />
+                                            <TextBlock x:Name="RecordingSelectedRecordsText" Text="0" Style="{StaticResource KpiValueStyle}" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Grid.Column="2" Style="{StaticResource PanelCardStyle}" Padding="13">
+                                        <StackPanel>
+                                            <TextBlock Text="SIZE" Style="{StaticResource SectionTitleStyle}" />
+                                            <TextBlock x:Name="RecordingSelectedSizeText" Text="0 MB" Style="{StaticResource KpiValueStyle}" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Grid.Column="3" Style="{StaticResource PanelCardStyle}" Padding="13">
+                                        <StackPanel>
+                                            <TextBlock Text="DROPPED" Style="{StaticResource SectionTitleStyle}" />
+                                            <TextBlock x:Name="RecordingSelectedDroppedText" Text="0" Style="{StaticResource KpiValueStyle}" />
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+
+                                <Border Style="{StaticResource PanelCardStyle}" Padding="16">
+                                    <Grid RowSpacing="8" ColumnSpacing="16">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <TextBlock Text="Device" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Column="1" x:Name="RecordingSelectedDeviceText" Text="-" />
+                                        <TextBlock Grid.Column="2" Text="Sample rate" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Column="3" x:Name="RecordingSelectedSampleRateText" Text="-" FontFamily="Consolas" />
+                                        <TextBlock Grid.Row="1" Text="Snapshots" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="1" Grid.Column="1" x:Name="RecordingSelectedSnapshotsText" Text="0" FontFamily="Consolas" />
+                                        <TextBlock Grid.Row="1" Grid.Column="2" Text="Measurement frames" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="1" Grid.Column="3" x:Name="RecordingSelectedMeasurementsText" Text="0" FontFamily="Consolas" />
+                                        <TextBlock Grid.Row="2" Text="Catalogues" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="2" Grid.Column="1" x:Name="RecordingSelectedCatalogsText" Text="0" FontFamily="Consolas" />
+                                        <TextBlock Grid.Row="2" Grid.Column="2" Text="Events" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="2" Grid.Column="3" x:Name="RecordingSelectedEventsText" Text="0" FontFamily="Consolas" />
+                                        <TextBlock Grid.Row="3" Text="Chunks" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="3" Grid.Column="1" x:Name="RecordingSelectedChunksText" Text="0" FontFamily="Consolas" />
+                                        <TextBlock Grid.Row="3" Grid.Column="2" Text="State" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Grid.Row="3" Grid.Column="3" x:Name="RecordingSelectedStateText" Text="-" />
+                                    </Grid>
+                                </Border>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+                </TabViewItem>
+
+                <TabViewItem Header="Timeline" IsClosable="False">
+                    <Grid Padding="12" ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" MinWidth="560" />
+                            <ColumnDefinition Width="340" MinWidth="260" />
+                        </Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" Style="{StaticResource PanelCardStyle}" Padding="14">
+                            <Grid RowSpacing="8">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <Grid ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="UNIFIED SESSION TIMELINE" Style="{StaticResource SectionTitleStyle}" />
+                                        <TextBlock Text="Click the plot to seek. Metrics are independently scaled by lane."
+                                                   Foreground="{StaticResource MutedTextBrush}"
+                                                   FontSize="11" />
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="1"
+                                               x:Name="RecordingTimelineCursorText"
+                                               Text="00:00:00"
+                                               FontFamily="Consolas"
+                                               VerticalAlignment="Center" />
+                                </Grid>
+                                <Viewbox Grid.Row="1" Stretch="Fill">
+                                    <Canvas x:Name="RecordingTimelineCanvas"
+                                            Width="1000"
+                                            Height="300"
+                                            Background="#FF07111D"
+                                            PointerPressed="RecordingTimelineCanvas_PointerPressed">
+                                        <Line X1="0" Y1="58" X2="1000" Y2="58" Stroke="{StaticResource PanelStrokeBrush}" />
+                                        <Line X1="0" Y1="114" X2="1000" Y2="114" Stroke="{StaticResource PanelStrokeBrush}" />
+                                        <Line X1="0" Y1="170" X2="1000" Y2="170" Stroke="{StaticResource PanelStrokeBrush}" />
+                                        <Line X1="0" Y1="226" X2="1000" Y2="226" Stroke="{StaticResource PanelStrokeBrush}" />
+                                        <Polyline x:Name="RecordingPowerTrace" Stroke="{StaticResource SpectrumBrush}" StrokeThickness="2" />
+                                        <Polyline x:Name="RecordingMerTrace" Stroke="{StaticResource MeasurementAccentBrush}" StrokeThickness="2" />
+                                        <Polyline x:Name="RecordingCfoTrace" Stroke="#FFFFB454" StrokeThickness="2" />
+                                        <Polyline x:Name="RecordingBerTrace" Stroke="#FFB59CFF" StrokeThickness="2" />
+                                        <Polyline x:Name="RecordingLockTrace" Stroke="#FF54D39A" StrokeThickness="4" />
+                                        <Line x:Name="RecordingTimelineCursor"
+                                              X1="0" Y1="0" X2="0" Y2="300"
+                                              Stroke="White"
+                                              StrokeThickness="1.5"
+                                              StrokeDashArray="4,3" />
+                                        <TextBlock Canvas.Left="8" Canvas.Top="5" Text="POWER" Foreground="{StaticResource SpectrumBrush}" FontSize="10" />
+                                        <TextBlock Canvas.Left="8" Canvas.Top="61" Text="MER" Foreground="{StaticResource MeasurementAccentBrush}" FontSize="10" />
+                                        <TextBlock Canvas.Left="8" Canvas.Top="117" Text="CFO" Foreground="#FFFFB454" FontSize="10" />
+                                        <TextBlock Canvas.Left="8" Canvas.Top="173" Text="MSC BER" Foreground="#FFB59CFF" FontSize="10" />
+                                        <TextBlock Canvas.Left="8" Canvas.Top="229" Text="LOCK" Foreground="#FF54D39A" FontSize="10" />
+                                    </Canvas>
+                                </Viewbox>
+                                <Grid Grid.Row="2" ColumnSpacing="16">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock x:Name="RecordingPowerScaleText" Text="Power: -" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                    <TextBlock Grid.Column="1" x:Name="RecordingMerScaleText" Text="MER: -" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                    <TextBlock Grid.Column="2" x:Name="RecordingCfoScaleText" Text="CFO: -" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                                </Grid>
+                            </Grid>
+                        </Border>
+                        <Border Grid.Column="1" Style="{StaticResource PanelCardStyle}" Padding="12">
+                            <Grid RowSpacing="8">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="RECORDED EVENTS" Style="{StaticResource SectionTitleStyle}" />
+                                    <TextBlock x:Name="RecordingEventCountText"
+                                               Text="0 events"
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               FontSize="11" />
+                                </StackPanel>
+                                <ListView Grid.Row="1"
+                                          x:Name="RecordingEventListView"
+                                          SelectionMode="None"
+                                          HorizontalContentAlignment="Stretch" />
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </TabViewItem>
+
+                <TabViewItem Header="Markers" IsClosable="False">
+                    <Grid Padding="12" RowSpacing="12">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Border Style="{StaticResource PanelCardStyle}" Padding="14">
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Marker at current replay position"
+                                           VerticalAlignment="Center" />
+                                <TextBox Grid.Column="1"
+                                         x:Name="RecordingMarkerTextBox"
+                                         PlaceholderText="Operator note" />
+                                <Button Grid.Column="2"
+                                        Content="Add marker"
+                                        Click="RecordingAddMarker_Click" />
+                            </Grid>
+                        </Border>
+                        <Border Grid.Row="1" Style="{StaticResource PanelCardStyle}" Padding="12">
+                            <Grid RowSpacing="8">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="SESSION ANNOTATIONS" Style="{StaticResource SectionTitleStyle}" />
+                                    <TextBlock Text="Markers are stored in annotations.csv beside the recording."
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               FontSize="11" />
+                                </StackPanel>
+                                <ListView Grid.Row="1"
+                                          x:Name="RecordingMarkerListView"
+                                          IsItemClickEnabled="True"
+                                          ItemClick="RecordingMarkerList_ItemClick"
+                                          SelectionMode="Single"
+                                          HorizontalContentAlignment="Stretch" />
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </TabViewItem>
+
+                <TabViewItem Header="Captures" IsClosable="False">
+                    <Grid Padding="12" RowSpacing="10">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="ASSOCIATED FILES" Style="{StaticResource SectionTitleStyle}" />
+                                <TextBlock x:Name="RecordingCaptureCountText"
+                                           Text="No recording loaded"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           FontSize="11" />
+                            </StackPanel>
+                            <Button Grid.Column="1"
+                                    Content="Refresh"
+                                    Click="RecordingCapturesRefresh_Click" />
+                            <Button Grid.Column="2"
+                                    Content="Open session folder"
+                                    Click="RecordingOpenFolder_Click" />
+                        </Grid>
+                        <Border Grid.Row="1" Style="{StaticResource PanelCardStyle}" Padding="10">
+                            <ListView x:Name="RecordingCaptureListView"
+                                      SelectionMode="None"
+                                      HorizontalContentAlignment="Stretch" />
+                        </Border>
+                    </Grid>
+                </TabViewItem>
+
+                <TabViewItem Header="Compare" IsClosable="False">
+                    <Grid Padding="12" RowSpacing="12">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Border Style="{StaticResource PanelCardStyle}" Padding="14">
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Compare active session with"
+                                           VerticalAlignment="Center" />
+                                <ComboBox Grid.Column="1"
+                                          x:Name="RecordingCompareSessionComboBox"
+                                          HorizontalAlignment="Stretch"
+                                          PlaceholderText="Select another recording" />
+                                <Button Grid.Column="2"
+                                        Content="Compare"
+                                        Click="RecordingCompare_Click" />
+                            </Grid>
+                        </Border>
+                        <Border Grid.Row="1" Style="{StaticResource PanelCardStyle}" Padding="18">
+                            <StackPanel Spacing="10">
+                                <TextBlock x:Name="RecordingCompareTitleText"
+                                           Text="No comparison selected"
+                                           FontSize="20"
+                                           FontWeight="SemiBold" />
+                                <TextBlock x:Name="RecordingCompareDetailsText"
+                                           Text="Load a recording, select another session, then compare their acquisition context and completeness."
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           TextWrapping="Wrap" />
+                                <Grid ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Style="{StaticResource PanelCardStyle}" Padding="13">
+                                        <StackPanel>
+                                            <TextBlock Text="DURATION DELTA" Style="{StaticResource SectionTitleStyle}" />
+                                            <TextBlock x:Name="RecordingCompareDurationText" Text="-" Style="{StaticResource KpiValueStyle}" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Grid.Column="1" Style="{StaticResource PanelCardStyle}" Padding="13">
+                                        <StackPanel>
+                                            <TextBlock Text="RECORD DELTA" Style="{StaticResource SectionTitleStyle}" />
+                                            <TextBlock x:Name="RecordingCompareRecordsText" Text="-" Style="{StaticResource KpiValueStyle}" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Grid.Column="2" Style="{StaticResource PanelCardStyle}" Padding="13">
+                                        <StackPanel>
+                                            <TextBlock Text="SIZE DELTA" Style="{StaticResource SectionTitleStyle}" />
+                                            <TextBlock x:Name="RecordingCompareSizeText" Text="-" Style="{StaticResource KpiValueStyle}" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Grid.Column="3" Style="{StaticResource PanelCardStyle}" Padding="13">
+                                        <StackPanel>
+                                            <TextBlock Text="DROPPED DELTA" Style="{StaticResource SectionTitleStyle}" />
+                                            <TextBlock x:Name="RecordingCompareDroppedText" Text="-" Style="{StaticResource KpiValueStyle}" />
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                </TabViewItem>
+
+                <TabViewItem Header="Export" IsClosable="False">
+                    <ScrollViewer Padding="12">
+                        <StackPanel Spacing="12">
+                            <Border Style="{StaticResource PanelCardStyle}" Padding="18">
+                                <StackPanel Spacing="8">
+                                    <TextBlock Text="EXPORT ACTIVE RECORDING" FontSize="20" FontWeight="SemiBold" />
+                                    <TextBlock Text="Exports are generated from CRC-validated replay data and operator annotations."
+                                               Foreground="{StaticResource MutedTextBrush}" />
+                                </StackPanel>
+                            </Border>
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Style="{StaticResource PanelCardStyle}" Padding="16">
+                                    <StackPanel Spacing="10">
+                                        <TextBlock Text="Timeline CSV" FontSize="17" FontWeight="SemiBold" />
+                                        <TextBlock Text="Power, MER, C/N, CFO, MSC BER, clipping, lock state and drops. Up to 2048 display points."
+                                                   Foreground="{StaticResource MutedTextBrush}"
+                                                   TextWrapping="Wrap" />
+                                        <Button Content="Export timeline CSV"
+                                                Click="RecordingExportTimeline_Click" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Grid.Column="1" Style="{StaticResource PanelCardStyle}" Padding="16">
+                                    <StackPanel Spacing="10">
+                                        <TextBlock Text="Session summary" FontSize="17" FontWeight="SemiBold" />
+                                        <TextBlock Text="Copy acquisition context, integrity, record counts and replay duration to the clipboard."
+                                                   Foreground="{StaticResource MutedTextBrush}"
+                                                   TextWrapping="Wrap" />
+                                        <Button Content="Copy summary"
+                                                Click="RecordingCopySummary_Click" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Grid.Column="2" Style="{StaticResource PanelCardStyle}" Padding="16">
+                                    <StackPanel Spacing="10">
+                                        <TextBlock Text="Source files" FontSize="17" FontWeight="SemiBold" />
+                                        <TextBlock Text="Open the session directory containing its manifest, chunks, captures and annotations."
+                                                   Foreground="{StaticResource MutedTextBrush}"
+                                                   TextWrapping="Wrap" />
+                                        <Button Content="Open session folder"
+                                                Click="RecordingOpenFolder_Click" />
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+                            <InfoBar x:Name="RecordingExportStatusBar"
+                                     IsOpen="False"
+                                     IsClosable="True"
+                                     Severity="Success"
+                                     Title="Export complete" />
+                        </StackPanel>
+                    </ScrollViewer>
                 </TabViewItem>
             </TabView>
         </Grid>

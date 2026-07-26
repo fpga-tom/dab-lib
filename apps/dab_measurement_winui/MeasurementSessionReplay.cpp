@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iterator>
 #include <limits>
+#include <cmath>
 #include <optional>
 #include <sstream>
 
@@ -287,6 +288,113 @@ namespace
 
 namespace dab::measurement
 {
+    bool MeasurementSessionReplay::ReadSessionInfo(
+        std::filesystem::path const& selected_path,
+        MeasurementSessionReplayInfo& info,
+        std::string& error)
+    {
+        info = {};
+        error.clear();
+        try
+        {
+            std::error_code filesystem_error;
+            std::filesystem::path session_path = selected_path;
+            if (std::filesystem::is_regular_file(session_path,
+                                                 filesystem_error))
+            {
+                session_path = session_path.parent_path();
+            }
+            if (filesystem_error ||
+                !std::filesystem::is_directory(session_path,
+                                               filesystem_error))
+            {
+                error = "The selected recording folder does not exist";
+                return false;
+            }
+            std::ifstream manifest_input{
+                session_path / "session.json",
+                std::ios::binary
+            };
+            if (!manifest_input)
+            {
+                error = "The selected folder does not contain session.json";
+                return false;
+            }
+            std::string const manifest{
+                std::istreambuf_iterator<char>{ manifest_input },
+                std::istreambuf_iterator<char>{}
+            };
+            if (json_string(manifest, "format").value_or("") != "DABMSR")
+            {
+                error = "The selected folder is not a DAB measurement recording";
+                return false;
+            }
+            auto const version = json_unsigned(manifest, "format_version");
+            if (!version ||
+                *version != measurement_session_format_version)
+            {
+                error = "Unsupported measurement recording format version";
+                return false;
+            }
+
+            info.session_path = std::move(session_path);
+            info.state = json_string(manifest, "state").value_or("unknown");
+            info.context = json_string(manifest, "context").value_or("");
+            info.device = json_string(manifest, "device").value_or("");
+            info.driver = json_string(manifest, "driver").value_or("");
+            info.serial = json_string(manifest, "serial").value_or("");
+            info.channel = json_string(manifest, "channel").value_or("");
+            info.ensemble =
+                json_string(manifest, "ensemble").value_or("");
+            info.service = json_string(manifest, "service").value_or("");
+            info.frequency_hz =
+                json_unsigned(manifest, "frequency_hz").value_or(0u);
+            info.sample_rate_hz = static_cast<uint32_t>(
+                (std::min)(json_unsigned(manifest, "sample_rate_hz")
+                               .value_or(0u),
+                           static_cast<uint64_t>(
+                               (std::numeric_limits<uint32_t>::max)())));
+            info.started_unix_ns =
+                json_unsigned(manifest, "started_unix_ns").value_or(0u);
+            info.duration_ns =
+                json_unsigned(manifest, "elapsed_ns").value_or(0u);
+            info.bytes_written =
+                json_unsigned(manifest, "bytes_written").value_or(0u);
+            info.dropped_records =
+                json_unsigned(manifest, "dropped_records").value_or(0u);
+            info.snapshot_records =
+                json_unsigned(manifest, "snapshot_records").value_or(0u);
+            info.measurement_records =
+                json_unsigned(manifest, "measurement_records").value_or(0u);
+            info.catalog_records =
+                json_unsigned(manifest, "catalog_records").value_or(0u);
+            info.event_records =
+                json_unsigned(manifest, "event_records").value_or(0u);
+            info.chunk_count = static_cast<uint32_t>(
+                (std::min)(json_unsigned(manifest, "chunks").value_or(0u),
+                           static_cast<uint64_t>(
+                               (std::numeric_limits<uint32_t>::max)())));
+            info.record_count =
+                info.snapshot_records +
+                info.measurement_records +
+                info.catalog_records +
+                info.event_records +
+                1u;
+            return true;
+        }
+        catch (std::exception const& exception)
+        {
+            error = std::string{ "Could not inspect recording: " } +
+                exception.what();
+        }
+        catch (...)
+        {
+            error = "Could not inspect recording";
+        }
+        info = {};
+        return false;
+    }
+
     bool MeasurementSessionReplay::Open(
         std::filesystem::path const& selected_path,
         std::string& error)
@@ -351,6 +459,12 @@ namespace dab::measurement
                                .value_or(0u),
                            static_cast<uint64_t>(
                                (std::numeric_limits<uint32_t>::max)())));
+            m_info.started_unix_ns =
+                json_unsigned(manifest, "started_unix_ns").value_or(0u);
+            m_info.bytes_written =
+                json_unsigned(manifest, "bytes_written").value_or(0u);
+            m_info.dropped_records =
+                json_unsigned(manifest, "dropped_records").value_or(0u);
             uint64_t const manifest_duration =
                 json_unsigned(manifest, "elapsed_ns").value_or(0u);
             bool const capture_elapsed_timestamps =
@@ -615,6 +729,173 @@ namespace dab::measurement
     MeasurementSessionReplay::Info() const noexcept
     {
         return m_info;
+    }
+
+    bool MeasurementSessionReplay::BuildTimeline(
+        size_t maximum_points,
+        std::vector<MeasurementSessionTimelinePoint>& timeline,
+        std::vector<MeasurementSessionReplayEvent>& events,
+        std::string& error) const
+    {
+        timeline.clear();
+        events.clear();
+        error.clear();
+        if (!m_open)
+        {
+            error = "No recording is open";
+            return false;
+        }
+        maximum_points = (std::max)(maximum_points, size_t{ 2u });
+        size_t const snapshot_count =
+            static_cast<size_t>(m_info.snapshot_records);
+        size_t const stride = (std::max)(
+            size_t{ 1u },
+            (snapshot_count + maximum_points - 1u) / maximum_points);
+        size_t snapshot_index = 0u;
+        std::vector<std::pair<uint64_t, float>> mer_samples;
+        mer_samples.reserve(static_cast<size_t>(
+            m_info.measurement_records));
+
+        for (size_t index = 0u; index < m_index.size(); ++index)
+        {
+            auto const type = m_index[index].type;
+            if (type == MeasurementSessionRecordType::measurement)
+            {
+                MeasurementSessionReplayRecord record;
+                if (!ReadRecord(index, record, error))
+                {
+                    return false;
+                }
+                MeasurementFrame frame;
+                if (!DecodeMeasurement(record, frame, error))
+                {
+                    return false;
+                }
+                double sum = 0.0;
+                uint32_t count = 0u;
+                for (uint32_t carrier = 0u;
+                     carrier < frame.carrier_mer_count;
+                     ++carrier)
+                {
+                    float const value = frame.carrier_mer_db[carrier];
+                    if (std::isfinite(value))
+                    {
+                        sum += value;
+                        ++count;
+                    }
+                }
+                if (count != 0u)
+                {
+                    mer_samples.emplace_back(
+                        record.timestamp_ns,
+                        static_cast<float>(sum / count));
+                }
+                continue;
+            }
+            if (type == MeasurementSessionRecordType::event)
+            {
+                if (events.size() >= 2000u)
+                {
+                    continue;
+                }
+                MeasurementSessionReplayRecord record;
+                if (!ReadRecord(index, record, error))
+                {
+                    return false;
+                }
+                MeasurementSessionReplayEvent event;
+                event.timestamp_ns = record.timestamp_ns;
+                if (!DecodeEvent(record,
+                                 event.event_type,
+                                 event.message,
+                                 error))
+                {
+                    return false;
+                }
+                events.push_back(std::move(event));
+                continue;
+            }
+            if (type != MeasurementSessionRecordType::snapshot)
+            {
+                continue;
+            }
+
+            bool const retain =
+                (snapshot_index % stride) == 0u ||
+                snapshot_index + 1u == snapshot_count;
+            ++snapshot_index;
+            if (!retain)
+            {
+                continue;
+            }
+            MeasurementSessionReplayRecord record;
+            if (!ReadRecord(index, record, error))
+            {
+                return false;
+            }
+            dab_receive_snapshot_t snapshot{};
+            if (!DecodeSnapshot(record, snapshot, error))
+            {
+                return false;
+            }
+
+            MeasurementSessionTimelinePoint point;
+            point.timestamp_ns = record.timestamp_ns;
+            point.power_valid =
+                snapshot.calibrated_power_valid != 0 ||
+                snapshot.adc_level_valid != 0;
+            point.power_calibrated =
+                snapshot.calibrated_power_valid != 0;
+            point.power = point.power_calibrated
+                ? snapshot.calibrated_power_dbm
+                : snapshot.adc_level_dbfs;
+            point.cn_valid = snapshot.cn_valid != 0;
+            point.cn_db = snapshot.cn_db;
+            point.cfo_valid = snapshot.cfo_valid != 0;
+            point.cfo_hz = snapshot.cfo_hz;
+            point.msc_ber_valid = snapshot.msc_ber_valid != 0;
+            point.msc_ber = snapshot.msc_ber;
+            point.clipping_valid =
+                snapshot.adc_window_sample_count != 0u;
+            point.clipping_percent =
+                snapshot.adc_clipping_percent;
+            point.dropped_blocks = snapshot.dropped_blocks;
+            point.locked = snapshot.locked != 0;
+            timeline.push_back(point);
+        }
+
+        for (auto& point : timeline)
+        {
+            if (mer_samples.empty())
+            {
+                break;
+            }
+            auto iterator = std::lower_bound(
+                mer_samples.begin(),
+                mer_samples.end(),
+                point.timestamp_ns,
+                [](auto const& sample, uint64_t timestamp)
+                {
+                    return sample.first < timestamp;
+                });
+            auto selected = iterator;
+            if (iterator == mer_samples.end())
+            {
+                selected = std::prev(iterator);
+            }
+            else if (iterator != mer_samples.begin())
+            {
+                auto const previous = std::prev(iterator);
+                if (point.timestamp_ns - previous->first <=
+                    iterator->first - point.timestamp_ns)
+                {
+                    selected = previous;
+                }
+            }
+            point.mer_valid = true;
+            point.mer_db = selected->second;
+        }
+        return true;
     }
 
     bool MeasurementSessionReplay::Seek(

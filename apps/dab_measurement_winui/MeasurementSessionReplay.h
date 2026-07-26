@@ -26,13 +26,43 @@ namespace dab::measurement
         std::string service;
         uint64_t frequency_hz{ 0u };
         uint32_t sample_rate_hz{ 0u };
+        uint64_t started_unix_ns{ 0u };
         uint64_t duration_ns{ 0u };
+        uint64_t bytes_written{ 0u };
+        uint64_t dropped_records{ 0u };
         uint64_t record_count{ 0u };
         uint64_t snapshot_records{ 0u };
         uint64_t measurement_records{ 0u };
         uint64_t catalog_records{ 0u };
         uint64_t event_records{ 0u };
         uint32_t chunk_count{ 0u };
+    };
+
+    struct MeasurementSessionTimelinePoint
+    {
+        uint64_t timestamp_ns{ 0u };
+        float power{ 0.0f };
+        float mer_db{ 0.0f };
+        float cn_db{ 0.0f };
+        float cfo_hz{ 0.0f };
+        float msc_ber{ 0.0f };
+        float clipping_percent{ 0.0f };
+        uint32_t dropped_blocks{ 0u };
+        bool power_valid{ false };
+        bool power_calibrated{ false };
+        bool mer_valid{ false };
+        bool cn_valid{ false };
+        bool cfo_valid{ false };
+        bool msc_ber_valid{ false };
+        bool clipping_valid{ false };
+        bool locked{ false };
+    };
+
+    struct MeasurementSessionReplayEvent
+    {
+        uint64_t timestamp_ns{ 0u };
+        uint32_t event_type{ 0u };
+        std::string message;
     };
 
     struct MeasurementSessionReplayRecord
@@ -54,6 +84,16 @@ namespace dab::measurement
 
         [[nodiscard]] bool IsOpen() const noexcept;
         [[nodiscard]] MeasurementSessionReplayInfo const& Info() const noexcept;
+
+        static bool ReadSessionInfo(
+            std::filesystem::path const& selected_path,
+            MeasurementSessionReplayInfo& info,
+            std::string& error);
+        bool BuildTimeline(
+            size_t maximum_points,
+            std::vector<MeasurementSessionTimelinePoint>& timeline,
+            std::vector<MeasurementSessionReplayEvent>& events,
+            std::string& error) const;
 
         bool Seek(uint64_t timestamp_ns,
                   std::vector<MeasurementSessionReplayRecord>& state,
