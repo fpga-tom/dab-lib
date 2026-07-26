@@ -730,28 +730,50 @@
                                     <TextBlock x:Name="SampleRateText" Text="2.048 MS/s" Foreground="{StaticResource MeasurementAccentBrush}" FontSize="10" />
                                 </Border>
                             </StackPanel>
-                            <TextBlock Grid.Column="1" Text="RBW 1 kHz" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
+                            <TextBlock Grid.Column="1" x:Name="ReceiverSpectrumRbwText" Text="RBW 1.000 kHz" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                             <TextBlock Grid.Column="2" x:Name="SampleCounterText" Text="frame 000000" VerticalAlignment="Center" FontFamily="Consolas" Foreground="{StaticResource MutedTextBrush}" FontSize="11" />
                         </Grid>
 
                         <Border Grid.Row="1" Margin="10,0,10,4" Background="#FF07101B" CornerRadius="4" BorderBrush="#FF203249" BorderThickness="1">
                             <Viewbox Stretch="Fill">
                                 <Canvas Width="900" Height="260">
-                                    <Line X1="0" Y1="52" X2="900" Y2="52" Stroke="#253D556E" StrokeThickness="1" />
-                                    <Line X1="0" Y1="104" X2="900" Y2="104" Stroke="#253D556E" StrokeThickness="1" />
-                                    <Line X1="0" Y1="156" X2="900" Y2="156" Stroke="#253D556E" StrokeThickness="1" />
-                                    <Line X1="0" Y1="208" X2="900" Y2="208" Stroke="#253D556E" StrokeThickness="1" />
-                                    <Line X1="180" Y1="0" X2="180" Y2="260" Stroke="#253D556E" StrokeThickness="1" />
-                                    <Line X1="360" Y1="0" X2="360" Y2="260" Stroke="#253D556E" StrokeThickness="1" />
-                                    <Line X1="540" Y1="0" X2="540" Y2="260" Stroke="#253D556E" StrokeThickness="1" />
-                                    <Line X1="720" Y1="0" X2="720" Y2="260" Stroke="#253D556E" StrokeThickness="1" />
-                                    <Rectangle Canvas.Left="110" Canvas.Top="14" Width="680" Height="226" Fill="#0B35D0BA" Stroke="#4035D0BA" StrokeThickness="1" />
+                                    <Rectangle Canvas.Left="58" Canvas.Top="16" Width="826" Height="210" Fill="#FF07101B" Stroke="#334B6178" StrokeThickness="1" />
+                                    <Rectangle Canvas.Left="161" Canvas.Top="16" Width="620" Height="210" Fill="#0B35D0BA" Stroke="#4035D0BA" StrokeThickness="1" />
+
+                                    <Line X1="58" Y1="16" X2="884" Y2="16" Stroke="#334B6178" StrokeThickness="1" />
+                                    <Line X1="58" Y1="58" X2="884" Y2="58" Stroke="#253D556E" StrokeThickness="1" />
+                                    <Line X1="58" Y1="100" X2="884" Y2="100" Stroke="#253D556E" StrokeThickness="1" />
+                                    <Line X1="58" Y1="142" X2="884" Y2="142" Stroke="#253D556E" StrokeThickness="1" />
+                                    <Line X1="58" Y1="184" X2="884" Y2="184" Stroke="#253D556E" StrokeThickness="1" />
+                                    <Line X1="58" Y1="226" X2="884" Y2="226" Stroke="#334B6178" StrokeThickness="1" />
+
+                                    <Line X1="58" Y1="16" X2="58" Y2="226" Stroke="#334B6178" StrokeThickness="1" />
+                                    <Line X1="264.5" Y1="16" X2="264.5" Y2="226" Stroke="#253D556E" StrokeThickness="1" />
+                                    <Line X1="471" Y1="16" X2="471" Y2="226" Stroke="#3A5A718A" StrokeThickness="1" />
+                                    <Line X1="677.5" Y1="16" X2="677.5" Y2="226" Stroke="#253D556E" StrokeThickness="1" />
+                                    <Line X1="884" Y1="16" X2="884" Y2="226" Stroke="#334B6178" StrokeThickness="1" />
+
+                                    <TextBlock Canvas.Left="5" Canvas.Top="0" Text="dBFS" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                    <TextBlock Canvas.Left="14" Canvas.Top="9" Width="38" Text="-20" TextAlignment="Right" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                    <TextBlock Canvas.Left="14" Canvas.Top="51" Width="38" Text="-40" TextAlignment="Right" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                    <TextBlock Canvas.Left="14" Canvas.Top="93" Width="38" Text="-60" TextAlignment="Right" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                    <TextBlock Canvas.Left="14" Canvas.Top="135" Width="38" Text="-80" TextAlignment="Right" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                    <TextBlock Canvas.Left="8" Canvas.Top="177" Width="44" Text="-100" TextAlignment="Right" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+                                    <TextBlock Canvas.Left="8" Canvas.Top="219" Width="44" Text="-120" TextAlignment="Right" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
+
+                                    <TextBlock x:Name="ReceiverSpectrumFrequency0Text" Canvas.Left="18" Canvas.Top="229" Width="80" Text="212.336" TextAlignment="Center" FontFamily="Consolas" FontSize="9" Foreground="{StaticResource MutedTextBrush}" />
+                                    <TextBlock x:Name="ReceiverSpectrumFrequency1Text" Canvas.Left="224.5" Canvas.Top="229" Width="80" Text="212.848" TextAlignment="Center" FontFamily="Consolas" FontSize="9" Foreground="{StaticResource MutedTextBrush}" />
+                                    <TextBlock x:Name="ReceiverSpectrumFrequency2Text" Canvas.Left="431" Canvas.Top="229" Width="80" Text="213.360" TextAlignment="Center" FontFamily="Consolas" FontSize="9" Foreground="{StaticResource MutedTextBrush}" />
+                                    <TextBlock x:Name="ReceiverSpectrumFrequency3Text" Canvas.Left="637.5" Canvas.Top="229" Width="80" Text="213.872" TextAlignment="Center" FontFamily="Consolas" FontSize="9" Foreground="{StaticResource MutedTextBrush}" />
+                                    <TextBlock x:Name="ReceiverSpectrumFrequency4Text" Canvas.Left="820" Canvas.Top="229" Width="80" Text="214.384" TextAlignment="Center" FontFamily="Consolas" FontSize="9" Foreground="{StaticResource MutedTextBrush}" />
+                                    <TextBlock Canvas.Left="414" Canvas.Top="244" Width="114" Text="Frequency (MHz)" TextAlignment="Center" FontSize="9" Foreground="{StaticResource MutedTextBrush}" />
+
                                     <Polyline x:Name="SpectrumTrace"
                                               Stroke="{StaticResource SpectrumBrush}"
                                               StrokeThickness="2"
-                                              Points="0,240 900,240" />
-                                    <Line X1="450" Y1="8" X2="450" Y2="250" Stroke="{StaticResource WarningBrush}" StrokeThickness="1" StrokeDashArray="4,4" />
-                                    <TextBlock Canvas.Left="458" Canvas.Top="12" x:Name="SpectrumFrequencyText" Text="213.360 MHz" Foreground="{StaticResource WarningBrush}" FontFamily="Consolas" FontSize="11" />
+                                              Points="58,226 884,226" />
+                                    <Line X1="471" Y1="16" X2="471" Y2="226" Stroke="{StaticResource WarningBrush}" StrokeThickness="1" StrokeDashArray="4,4" />
+                                    <TextBlock Canvas.Left="479" Canvas.Top="20" x:Name="SpectrumFrequencyText" Text="213.360 MHz" Foreground="{StaticResource WarningBrush}" FontFamily="Consolas" FontSize="11" />
                                 </Canvas>
                             </Viewbox>
                         </Border>

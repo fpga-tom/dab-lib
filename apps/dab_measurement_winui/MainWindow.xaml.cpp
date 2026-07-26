@@ -526,6 +526,20 @@ namespace winrt::DabMeasurementWinUI::implementation
         m_receiver_menu_ready = true;
         UpdateReceiverMenuState();
         UpdateViewMenuState();
+        auto const selected_channel =
+            ChannelComboBox().SelectedItem().try_as<ComboBoxItem>();
+        if (selected_channel)
+        {
+            double const center_mhz = std::wcstod(
+                unbox_value<hstring>(selected_channel.Tag()).c_str(),
+                nullptr);
+            if (std::isfinite(center_mhz) && center_mhz > 0.0)
+            {
+                UpdateReceiverSpectrumFrequencyScale(
+                    center_mhz * 1000000.0 - 1024000.0,
+                    center_mhz * 1000000.0 + 1024000.0);
+            }
+        }
     }
 
     void MainWindow::ResetFileSession(bool closed)
@@ -1150,6 +1164,18 @@ namespace winrt::DabMeasurementWinUI::implementation
         if (auto status_channel = StatusChannelText())
         {
             status_channel.Text(channel);
+        }
+        if (m_receiver_menu_ready)
+        {
+            double const center_mhz = std::wcstod(
+                unbox_value<hstring>(selected_channel.Tag()).c_str(),
+                nullptr);
+            if (std::isfinite(center_mhz) && center_mhz > 0.0)
+            {
+                UpdateReceiverSpectrumFrequencyScale(
+                    center_mhz * 1000000.0 - 1024000.0,
+                    center_mhz * 1000000.0 + 1024000.0);
+            }
         }
         m_selected_service_id = 0u;
         UpdateRfContext();
@@ -10036,6 +10062,37 @@ namespace winrt::DabMeasurementWinUI::implementation
         }
     }
 
+    void MainWindow::UpdateReceiverSpectrumFrequencyScale(
+        double start_hz,
+        double stop_hz)
+    {
+        if (!std::isfinite(start_hz) ||
+            !std::isfinite(stop_hz) ||
+            stop_hz <= start_hz)
+        {
+            return;
+        }
+
+        std::array<TextBlock, 5u> const labels{
+            ReceiverSpectrumFrequency0Text(),
+            ReceiverSpectrumFrequency1Text(),
+            ReceiverSpectrumFrequency2Text(),
+            ReceiverSpectrumFrequency3Text(),
+            ReceiverSpectrumFrequency4Text()
+        };
+        for (size_t index = 0u; index < labels.size(); ++index)
+        {
+            double const fraction =
+                static_cast<double>(index) /
+                static_cast<double>(labels.size() - 1u);
+            double const frequency_mhz =
+                (start_hz + fraction * (stop_hz - start_hz)) / 1000000.0;
+            wchar_t text[32]{};
+            swprintf_s(text, L"%.3f", frequency_mhz);
+            labels[index].Text(text);
+        }
+    }
+
     void MainWindow::UpdatePlots(dab::measurement::MeasurementFrame const& frame)
     {
         if (m_metrics_stale)
@@ -10054,8 +10111,54 @@ namespace winrt::DabMeasurementWinUI::implementation
         if (frame.spectrum_bin_count != 0u)
         {
             UpdateRfSpectrum(frame);
+            double const spectrum_bin_hz = frame.spectrum_bin_hz > 0.0f
+                ? static_cast<double>(frame.spectrum_bin_hz)
+                : (frame.sample_rate_hz > 0u
+                    ? static_cast<double>(frame.sample_rate_hz) /
+                        static_cast<double>(frame.spectrum_bin_count)
+                    : 1000.0);
+            double const spectrum_start_hz =
+                static_cast<double>(frame.frequency_hz) +
+                static_cast<double>(frame.spectrum_start_hz);
+            double const spectrum_stop_hz =
+                spectrum_start_hz +
+                spectrum_bin_hz *
+                    static_cast<double>(frame.spectrum_bin_count - 1u);
+            UpdateReceiverSpectrumFrequencyScale(
+                spectrum_start_hz,
+                spectrum_stop_hz);
+
+            wchar_t rbw_text[48]{};
+            swprintf_s(
+                rbw_text,
+                L"RBW %.3f kHz",
+                spectrum_bin_hz / 1000.0);
+            ReceiverSpectrumRbwText().Text(rbw_text);
+            if (frame.sample_rate_hz > 0u)
+            {
+                wchar_t sample_rate_text[48]{};
+                swprintf_s(
+                    sample_rate_text,
+                    L"%.3f MS/s",
+                    static_cast<double>(frame.sample_rate_hz) / 1000000.0);
+                SampleRateText().Text(sample_rate_text);
+            }
+            if (frame.frequency_hz > 0u)
+            {
+                wchar_t center_text[48]{};
+                swprintf_s(
+                    center_text,
+                    L"%.3f MHz",
+                    static_cast<double>(frame.frequency_hz) / 1000000.0);
+                SpectrumFrequencyText().Text(center_text);
+            }
+
             PointCollection spectrum_points;
             constexpr uint32_t display_points = 181u;
+            constexpr float plot_left = 58.0f;
+            constexpr float plot_top = 16.0f;
+            constexpr float plot_width = 826.0f;
+            constexpr float plot_height = 210.0f;
             for (uint32_t point = 0u; point < display_points; ++point)
             {
                 uint32_t const begin = (point * frame.spectrum_bin_count) / display_points;
@@ -10066,9 +10169,13 @@ namespace winrt::DabMeasurementWinUI::implementation
                 {
                     level = (std::max)(level, frame.spectrum_dbfs[bin]);
                 }
-                float const x = 900.0f * static_cast<float>(point) /
+                float const x = plot_left +
+                                plot_width * static_cast<float>(point) /
                                 static_cast<float>(display_points - 1u);
-                float const y = std::clamp(240.0f - ((level + 120.0f) * 1.85f), 12.0f, 245.0f);
+                float const clamped_level =
+                    std::clamp(level, -120.0f, -20.0f);
+                float const y = plot_top +
+                    ((-20.0f - clamped_level) / 100.0f) * plot_height;
                 spectrum_points.Append(Point{ x, y });
             }
             SpectrumTrace().Points(spectrum_points);

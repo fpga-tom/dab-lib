@@ -208,6 +208,7 @@ namespace winrt::DabMeasurementWinUI::implementation
         void StartPendingServiceRestart();
         void ClearCatalogView();
         void UpdatePlots(dab::measurement::MeasurementFrame const& frame);
+        void UpdateReceiverSpectrumFrequencyScale(double start_hz, double stop_hz);
         void UpdateCirPlot(dab::measurement::MeasurementFrame const& frame);
         void UpdateRfChannel(dab::measurement::MeasurementFrame const& frame);
         void UpdateRfChannelResponse(dab::measurement::MeasurementFrame const& frame);
