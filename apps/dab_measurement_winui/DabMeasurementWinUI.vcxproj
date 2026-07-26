@@ -93,9 +93,11 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <Manifest Include="app.manifest" />
+    <ResourceCompile Include="DabMeasurementWinUI.rc" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h" />
+    <ClInclude Include="resource.h" />
     <ClInclude Include="App.xaml.h">
       <DependentUpon>App.xaml</DependentUpon>
     </ClInclude>
@@ -143,10 +145,20 @@
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260508005" />
     <PackageReference Include="Microsoft.Windows.CppWinRT" Version="2.0.250303.1" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="Assets\DabMeasurementIcon.png" />
+    <None Include="Assets\DabMeasurementIcon.ico" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Target Name="CopyAudioRuntime" AfterTargets="Build">
     <Copy SourceFiles="$(ProjectDir)..\..\libs\portaudio_x64.dll;$(ProjectDir)..\..\libs\libfaad2_dll.dll"
           DestinationFolder="$(OutDir)"
+          SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="CopyApplicationAssets" AfterTargets="Build">
+    <MakeDir Directories="$(OutDir)Assets" />
+    <Copy SourceFiles="$(ProjectDir)Assets\DabMeasurementIcon.ico"
+          DestinationFolder="$(OutDir)Assets"
           SkipUnchangedFiles="true" />
   </Target>
   <ImportGroup Label="ExtensionTargets" />

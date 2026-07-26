@@ -26,6 +26,29 @@ using namespace Microsoft::UI::Xaml::Shapes;
 
 namespace
 {
+    std::wstring application_icon_path()
+    {
+        std::wstring module_path(32768u, L'\0');
+        DWORD const length = GetModuleFileNameW(
+            nullptr,
+            module_path.data(),
+            static_cast<DWORD>(module_path.size()));
+        if (length == 0u || length >= module_path.size())
+        {
+            return {};
+        }
+
+        module_path.resize(length);
+        size_t const separator = module_path.find_last_of(L"\\/");
+        if (separator == std::wstring::npos)
+        {
+            return {};
+        }
+        module_path.resize(separator + 1u);
+        module_path += L"Assets\\DabMeasurementIcon.ico";
+        return module_path;
+    }
+
     hstring format_float(float value, wchar_t const* suffix, int precision = 1)
     {
         wchar_t buffer[64]{};
@@ -523,6 +546,21 @@ namespace winrt::DabMeasurementWinUI::implementation
         IInspectable const&,
         RoutedEventArgs const&)
     {
+        auto const icon_path = application_icon_path();
+        if (!icon_path.empty() &&
+            GetFileAttributesW(icon_path.c_str()) != INVALID_FILE_ATTRIBUTES)
+        {
+            try
+            {
+                AppWindow().SetIcon(hstring{ icon_path });
+            }
+            catch (hresult_error const&)
+            {
+                // The executable still carries the icon resource. A runtime icon
+                // assignment failure must never prevent the receiver UI loading.
+            }
+        }
+
         m_receiver_menu_ready = true;
         UpdateReceiverMenuState();
         UpdateViewMenuState();
