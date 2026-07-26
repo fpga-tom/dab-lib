@@ -278,6 +278,7 @@ static int receive_emit_snapshot(const dab_receive_config_t *config,
                                  uint32_t selected_sid) {
     dab_receive_snapshot_t snapshot;
     dab_sdr_stream_diagnostics_t diagnostics = {0};
+    dab_sdrplay_gain_diagnostics_t gain_diagnostics = {0};
     dab_msc_dabplus_debug_t msc_audio = {0};
     const dab_msc_dabplus_debug_t *msc_audio_ptr = 0;
 
@@ -325,11 +326,49 @@ static int receive_emit_snapshot(const dab_receive_config_t *config,
     snapshot.device_gain_valid = 1;
     snapshot.device_gain_db = stream_config->gain_db;
     snapshot.agc_enabled = config->agc_enabled != 0;
+    snapshot.device_bandwidth_hz = stream_config->bandwidth_hz;
+    snapshot.calibration_status = DAB_RF_CALIBRATION_NO_PROFILE;
+    if (driver != 0) {
+        snprintf(snapshot.device_driver,
+                 sizeof(snapshot.device_driver),
+                 "%s",
+                 driver);
+    }
     if (driver != 0 && strcmp(driver, "sdrplay") == 0 && sdrplay_config != 0) {
+        snapshot.device_if_mode = (uint8_t)sdrplay_config->if_mode;
+        snapshot.device_antenna = (uint8_t)sdrplay_config->antenna;
         snapshot.lna_state_valid = 1;
         snapshot.lna_state = sdrplay_config->lna_state;
         snapshot.if_gain_reduction_valid = 1;
         snapshot.if_gain_reduction_db = stream_config->gain_db;
+        if (dab_sdrplay_stream_get_gain_diagnostics(stream,
+                                                    &gain_diagnostics) ==
+            DAB_SDR_STATUS_OK) {
+            snapshot.applied_gain_valid =
+                gain_diagnostics.valid && gain_diagnostics.applied;
+            snapshot.applied_system_gain_valid =
+                gain_diagnostics.system_gain_valid;
+            snapshot.applied_system_gain_db = gain_diagnostics.system_gain_db;
+            snapshot.gain_applied_sample_index =
+                gain_diagnostics.applied_sample_index;
+            snapshot.gain_change_generation =
+                gain_diagnostics.change_generation;
+            snapshot.lna_state = gain_diagnostics.lna_state;
+            snapshot.if_gain_reduction_db =
+                gain_diagnostics.gain_reduction_db;
+            snapshot.device_hardware_version =
+                gain_diagnostics.hardware_version;
+            snapshot.device_api_version = gain_diagnostics.api_version;
+            snprintf(snapshot.device_serial,
+                     sizeof(snapshot.device_serial),
+                     "%s",
+                     gain_diagnostics.serial);
+            if (gain_diagnostics.system_gain_valid) {
+                snapshot.device_gain_valid = 1;
+                snapshot.device_gain_db =
+                    (int)lroundf(gain_diagnostics.system_gain_db);
+            }
+        }
     }
     if (dab_sdr_stream_get_diagnostics(stream, &diagnostics) ==
         DAB_SDR_STATUS_OK) {

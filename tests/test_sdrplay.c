@@ -3,12 +3,15 @@
 
 #include "test_support.h"
 
+#include <string.h>
+
 void test_sdrplay_device_specific_config_propagates_to_samples(void) {
     dab_sdr_open_params_t params = {"sdrplay", NULL, NULL};
     dab_sdr_device_t *device = 0;
     dab_sdr_stream_t *stream = 0;
     dab_stream_config_t stream_config;
     dab_sdrplay_config_t device_config;
+    dab_sdrplay_gain_diagnostics_t gain_diagnostics;
     dab_sdr_block_view_t block;
 
     TEST_ASSERT(dab_sdr_device_open(&params, &device) == DAB_SDR_STATUS_OK);
@@ -36,6 +39,15 @@ void test_sdrplay_device_specific_config_propagates_to_samples(void) {
 
     TEST_ASSERT(block.iq_interleaved[0] == 56);
     TEST_ASSERT(block.iq_interleaved[1] == 0);
+    TEST_ASSERT(dab_sdrplay_stream_get_gain_diagnostics(
+                    stream,
+                    &gain_diagnostics) == DAB_SDR_STATUS_OK);
+    TEST_ASSERT(gain_diagnostics.valid != 0);
+    TEST_ASSERT(gain_diagnostics.applied != 0);
+    TEST_ASSERT(gain_diagnostics.agc_enabled == 0);
+    TEST_ASSERT(gain_diagnostics.gain_reduction_db == 30);
+    TEST_ASSERT(gain_diagnostics.lna_state == 2u);
+    TEST_ASSERT(strcmp(gain_diagnostics.serial, "stub-0001") == 0);
 
     TEST_ASSERT(stream->vtbl->stop(stream) == DAB_SDR_STATUS_OK);
     dab_sdr_stream_close(stream);

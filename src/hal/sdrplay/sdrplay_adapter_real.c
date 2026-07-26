@@ -1,5 +1,6 @@
 #include "sdrplay_adapter.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,6 +30,50 @@ typedef struct {
 } dab_sdrplay_real_adapter_t;
 
 static dab_sdr_status_t dab_sdrplay_real_stop(dab_sdrplay_adapter_t *base);
+
+static void dab_sdrplay_real_publish_gain(
+    dab_sdrplay_real_adapter_t *adapter,
+    uint64_t applied_sample_index,
+    int increment_generation) {
+    dab_sdrplay_gain_diagnostics_t diagnostics;
+    dab_sdrplay_gain_diagnostics_t previous;
+    dab_sdrplay_rx_channel_params_t *rx;
+
+    if (adapter == 0 || adapter->device_params == 0 ||
+        adapter->device_params->rxChannelA == 0) {
+        return;
+    }
+
+    memset(&diagnostics, 0, sizeof(diagnostics));
+    memset(&previous, 0, sizeof(previous));
+    (void)dab_sdrplay_adapter_get_gain_diagnostics(&adapter->base, &previous);
+    rx = adapter->device_params->rxChannelA;
+
+    diagnostics.valid = 1;
+    diagnostics.applied = 1;
+    diagnostics.agc_enabled =
+        adapter->base.device_config.gain_mode == DAB_SDRPLAY_GAIN_MODE_AUTO;
+    diagnostics.gain_reduction_db = rx->tunerParams.gain.gRdB;
+    diagnostics.lna_state = rx->tunerParams.gain.LNAstate;
+    diagnostics.system_gain_db = rx->tunerParams.gain.gainVals.curr;
+    diagnostics.system_gain_valid =
+        isfinite(diagnostics.system_gain_db) &&
+        isfinite(rx->tunerParams.gain.gainVals.min) &&
+        isfinite(rx->tunerParams.gain.gainVals.max) &&
+        (rx->tunerParams.gain.gainVals.min != 0.0f ||
+         rx->tunerParams.gain.gainVals.max != 0.0f ||
+         diagnostics.system_gain_db != 0.0f);
+    diagnostics.applied_sample_index = applied_sample_index;
+    diagnostics.change_generation = previous.change_generation +
+        (increment_generation != 0 || previous.change_generation == 0u ? 1u : 0u);
+    diagnostics.hardware_version = adapter->selected_device.hwVer;
+    diagnostics.api_version = adapter->api_version_value;
+    snprintf(diagnostics.serial,
+             sizeof(diagnostics.serial),
+             "%s",
+             adapter->selected_device.SerNo);
+    dab_sdrplay_adapter_publish_gain_diagnostics(&adapter->base, &diagnostics);
+}
 
 static int dab_sdrplay_debug_enabled(void) {
     const char *value = getenv("DAB_SDRPLAY_DEBUG");
@@ -180,6 +225,9 @@ static void dab_sdrplay_real_stream_a_cb(short *xi,
         adapter->last_first_sample_num = first_sample_num;
         sample_index += adapter->sample_index_wrap_base;
 
+        if (params != 0 && params->grChanged != 0) {
+            dab_sdrplay_real_publish_gain(adapter, sample_index, 1);
+        }
         adapter->callback(xi,
                           xq,
                           num_samples,
@@ -252,6 +300,7 @@ static dab_sdr_status_t dab_sdrplay_real_init_stream(dab_sdrplay_real_adapter_t 
     }
     dab_sdrplay_debug("Init ok");
     adapter->initialized = 1;
+    dab_sdrplay_real_publish_gain(adapter, 0u, 1);
     if (dab_sdrplay_startup_update_enabled()) {
         dab_sdrplay_debug("Update");
         return dab_sdrplay_apply_updates(adapter);
@@ -341,6 +390,7 @@ static void dab_sdrplay_real_destroy(dab_sdrplay_adapter_t *base) {
         (void)dab_sdrplay_real_stop(base);
     }
     dab_sdrplay_api_unload(&adapter->api);
+    dab_sdrplay_adapter_destroy_base(base);
     free(adapter);
 }
 
@@ -365,8 +415,12 @@ dab_sdrplay_adapter_t *dab_sdrplay_real_adapter_create(const dab_stream_config_t
     }
 
     adapter->base.vtbl = &DAB_SDRPLAY_REAL_VTBL;
-    adapter->base.config = *config;
-    adapter->base.device_config = *device_config;
+    if (dab_sdrplay_adapter_init_base(&adapter->base,
+                                      config,
+                                      device_config) != 0) {
+        free(adapter);
+        return 0;
+    }
     adapter->base.uses_real_api = 1;
     adapter->api = *api;
     return &adapter->base;

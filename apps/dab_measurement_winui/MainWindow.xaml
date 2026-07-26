@@ -300,8 +300,7 @@
                                     ToolTipService.ToolTip="Measurement profiles are not implemented yet" />
                 </MenuFlyoutSubItem>
                 <MenuFlyoutItem Text="RF calibration profile..."
-                                IsEnabled="False"
-                                ToolTipService.ToolTip="RF calibration profile management is not implemented yet" />
+                                Click="ToolsRfCalibration_Click" />
             </MenuBarItem>
             <MenuBarItem Title="View">
                 <MenuFlyoutSubItem Text="Workspace">
@@ -412,6 +411,9 @@
                                     Tag="dabplus:5"
                                     Click="MeasurementDabPage_Click" />
                 </MenuFlyoutSubItem>
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem Text="RF calibration..."
+                                Click="ToolsRfCalibration_Click" />
                 <MenuFlyoutSeparator />
                 <MenuFlyoutItem Text="Capture last triggered IQ"
                                 Click="MeasurementCaptureIq_Click" />
@@ -1084,9 +1086,16 @@
                         <Border Padding="10,4" CornerRadius="12" Background="#2935D0BA">
                             <TextBlock x:Name="RfLiveBadgeText" Text="IDLE" Foreground="{StaticResource MeasurementAccentBrush}" FontSize="11" FontWeight="SemiBold" />
                         </Border>
-                        <Border Padding="10,4" CornerRadius="12" Background="#29FFC857">
-                            <TextBlock x:Name="RfCalibrationBadgeText" Text="UNCALIBRATED" Foreground="{StaticResource WarningBrush}" FontSize="11" FontWeight="SemiBold" />
-                        </Border>
+                        <Button x:Name="RfCalibrationBadgeButton"
+                                Padding="0"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                Click="ToolsRfCalibration_Click"
+                                ToolTipService.ToolTip="Open RF calibration">
+                            <Border Padding="10,4" CornerRadius="12" Background="#29FFC857">
+                                <TextBlock x:Name="RfCalibrationBadgeText" Text="UNCALIBRATED" Foreground="{StaticResource WarningBrush}" FontSize="11" FontWeight="SemiBold" />
+                            </Border>
+                        </Button>
                     </StackPanel>
                 </Grid>
             </Border>
@@ -2661,6 +2670,191 @@
                                                    FontSize="10"
                                                    TextWrapping="Wrap" />
                                     </StackPanel>
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabViewItem>
+                <TabViewItem Header="Calibration" IsClosable="False">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  Padding="12">
+                        <StackPanel Spacing="12">
+                            <Border Style="{StaticResource PanelCardStyle}" Padding="16,13">
+                                <Grid ColumnSpacing="18">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="RF CALIBRATION" FontSize="20" FontWeight="SemiBold" />
+                                        <TextBlock x:Name="CalibrationProfileStatusText"
+                                                   Text="No active profile"
+                                                   Foreground="{StaticResource WarningBrush}" />
+                                        <TextBlock x:Name="CalibrationProfilePathText"
+                                                   Text="Profile storage not initialized"
+                                                   Foreground="{StaticResource MutedTextBrush}"
+                                                   FontSize="10"
+                                                   TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1"
+                                                Orientation="Horizontal"
+                                                Spacing="8"
+                                                VerticalAlignment="Center">
+                                        <Button Content="Open profile folder"
+                                                Click="CalibrationOpenFolder_Click" />
+                                        <Button Content="Clear profile"
+                                                Click="CalibrationClearProfile_Click" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
+                            <Grid ColumnSpacing="10" RowSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0" Style="{StaticResource RfMetricCardStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="RAW ADC LEVEL" Style="{StaticResource RfMetricLabelStyle}" />
+                                        <TextBlock x:Name="CalibrationCurrentRawText" Text="&#x2014; dBFS" Style="{StaticResource RfMetricValueStyle}" />
+                                        <TextBlock Text="Complex RMS, DC removed" Foreground="{StaticResource MutedTextBrush}" FontSize="10" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Grid.Column="1" Style="{StaticResource RfMetricCardStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="CONNECTOR POWER" Style="{StaticResource RfMetricLabelStyle}" />
+                                        <TextBlock x:Name="CalibrationCurrentPowerText" Text="Not calibrated" Style="{StaticResource RfMetricValueStyle}" />
+                                        <TextBlock Text="At the SDR input connector" Foreground="{StaticResource MutedTextBrush}" FontSize="10" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Grid.Column="2" Style="{StaticResource RfMetricCardStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="CORRECTION" Style="{StaticResource RfMetricLabelStyle}" />
+                                        <TextBlock x:Name="CalibrationCorrectionText" Text="&#x2014; dB" Style="{StaticResource RfMetricValueStyle}" />
+                                        <TextBlock Text="Applied to ADC dBFS" Foreground="{StaticResource MutedTextBrush}" FontSize="10" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Grid.Column="3" Style="{StaticResource RfMetricCardStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="UNCERTAINTY" Style="{StaticResource RfMetricLabelStyle}" />
+                                        <TextBlock x:Name="CalibrationUncertaintyText" Text="&#x2014; dB" Style="{StaticResource RfMetricValueStyle}" />
+                                        <TextBlock Text="Profile value; not a guarantee" Foreground="{StaticResource MutedTextBrush}" FontSize="10" />
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="3*" />
+                                    <ColumnDefinition Width="2*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0" Style="{StaticResource PanelCardStyle}" Padding="16,13">
+                                    <StackPanel Spacing="11">
+                                        <TextBlock Text="Capture calibration point" FontSize="17" FontWeight="SemiBold" />
+                                        <TextBlock Text="Connect a known RF source to the SDR input. Enter the power present at the connector, including cable and attenuator corrections."
+                                                   Foreground="{StaticResource MutedTextBrush}"
+                                                   TextWrapping="Wrap" />
+                                        <InfoBar x:Name="CalibrationMessageBar"
+                                                 IsOpen="True"
+                                                 IsClosable="False"
+                                                 Severity="Informational"
+                                                 Title="Waiting for a stable manual-gain measurement" />
+                                        <TextBox x:Name="CalibrationProfileNameTextBox"
+                                                 Header="PROFILE NAME"
+                                                 Text="Band III local calibration" />
+                                        <Grid ColumnSpacing="10">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <NumberBox x:Name="CalibrationReferencePowerBox"
+                                                       Header="REFERENCE AT CONNECTOR (dBm)"
+                                                       Value="-60"
+                                                       Minimum="-140"
+                                                       Maximum="10"
+                                                       SmallChange="1"
+                                                       SpinButtonPlacementMode="Compact" />
+                                            <NumberBox Grid.Column="1"
+                                                       x:Name="CalibrationPointUncertaintyBox"
+                                                       Header="UNCERTAINTY (±dB)"
+                                                       Value="1"
+                                                       Minimum="0.1"
+                                                       Maximum="20"
+                                                       SmallChange="0.1"
+                                                       SpinButtonPlacementMode="Compact" />
+                                        </Grid>
+                                        <TextBlock x:Name="CalibrationConditionText"
+                                                   Text="Start the receiver with SDRplay and AGC disabled."
+                                                   Foreground="{StaticResource MutedTextBrush}"
+                                                   FontFamily="Consolas"
+                                                   TextWrapping="Wrap" />
+                                        <Button x:Name="CalibrationCaptureButton"
+                                                Content="Capture and activate point"
+                                                HorizontalAlignment="Left"
+                                                Click="CalibrationCapturePoint_Click"
+                                                IsEnabled="False" />
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Grid.Column="1" Style="{StaticResource PanelCardStyle}" Padding="16,13">
+                                    <StackPanel Spacing="9">
+                                        <TextBlock Text="Current operating point" FontSize="17" FontWeight="SemiBold" />
+                                        <TextBlock x:Name="CalibrationDeviceText"
+                                                   Text="Device identity not reported"
+                                                   FontFamily="Consolas"
+                                                   TextWrapping="Wrap" />
+                                        <TextBlock x:Name="CalibrationSettingsText"
+                                                   Text="Frequency and gain state unavailable"
+                                                   FontFamily="Consolas"
+                                                   TextWrapping="Wrap" />
+                                        <TextBlock Text="Validity rules" Style="{StaticResource SectionTitleStyle}" Margin="0,7,0,0" />
+                                        <TextBlock Text="• SDRplay device and serial must match&#x0a;• AGC must remain disabled&#x0a;• Sample rate, bandwidth, IF and antenna must match&#x0a;• Frequency and applied gain state must be covered"
+                                                   Foreground="{StaticResource MutedTextBrush}"
+                                                   TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+
+                            <Border Style="{StaticResource PanelCardStyle}" Padding="16,13">
+                                <Grid RowSpacing="8">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="210" />
+                                    </Grid.RowDefinitions>
+                                    <Grid>
+                                        <TextBlock Text="Calibration points" FontSize="17" FontWeight="SemiBold" />
+                                        <TextBlock x:Name="CalibrationProfilePointCountText"
+                                                   Text="0 points"
+                                                   HorizontalAlignment="Right"
+                                                   Foreground="{StaticResource MutedTextBrush}" />
+                                    </Grid>
+                                    <Grid Grid.Row="1" Margin="12,0" ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="120" />
+                                            <ColumnDefinition Width="90" />
+                                            <ColumnDefinition Width="110" />
+                                            <ColumnDefinition Width="130" />
+                                            <ColumnDefinition Width="130" />
+                                            <ColumnDefinition Width="120" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="FREQUENCY" Style="{StaticResource SectionTitleStyle}" />
+                                        <TextBlock Grid.Column="1" Text="LNA" Style="{StaticResource SectionTitleStyle}" />
+                                        <TextBlock Grid.Column="2" Text="GR" Style="{StaticResource SectionTitleStyle}" />
+                                        <TextBlock Grid.Column="3" Text="REFERENCE" Style="{StaticResource SectionTitleStyle}" />
+                                        <TextBlock Grid.Column="4" Text="MEASURED" Style="{StaticResource SectionTitleStyle}" />
+                                        <TextBlock Grid.Column="5" Text="CORRECTION" Style="{StaticResource SectionTitleStyle}" />
+                                        <TextBlock Grid.Column="6" Text="UNCERTAINTY" Style="{StaticResource SectionTitleStyle}" />
+                                    </Grid>
+                                    <ListView Grid.Row="2"
+                                              x:Name="CalibrationPointsList"
+                                              SelectionMode="None"
+                                              IsItemClickEnabled="False"
+                                              HorizontalContentAlignment="Stretch" />
                                 </Grid>
                             </Border>
                         </StackPanel>

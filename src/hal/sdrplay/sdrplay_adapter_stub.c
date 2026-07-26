@@ -95,6 +95,7 @@ static dab_sdr_status_t dab_sdrplay_stub_start(dab_sdrplay_adapter_t *base,
                                                dab_sdrplay_samples_cb_t callback,
                                                void *user) {
     dab_sdrplay_stub_adapter_t *adapter = (dab_sdrplay_stub_adapter_t *)base;
+    dab_sdrplay_gain_diagnostics_t gain_diagnostics;
 
     if (adapter == NULL || callback == NULL) {
         return DAB_SDR_STATUS_INVALID_ARGUMENT;
@@ -105,6 +106,16 @@ static dab_sdr_status_t dab_sdrplay_stub_start(dab_sdrplay_adapter_t *base,
 
     adapter->callback = callback;
     adapter->user = user;
+    memset(&gain_diagnostics, 0, sizeof(gain_diagnostics));
+    gain_diagnostics.valid = 1;
+    gain_diagnostics.applied = 1;
+    gain_diagnostics.agc_enabled =
+        base->device_config.gain_mode == DAB_SDRPLAY_GAIN_MODE_AUTO;
+    gain_diagnostics.gain_reduction_db = base->config.gain_db;
+    gain_diagnostics.lna_state = base->device_config.lna_state;
+    gain_diagnostics.change_generation = 1u;
+    memcpy(gain_diagnostics.serial, "stub-0001", sizeof("stub-0001"));
+    dab_sdrplay_adapter_publish_gain_diagnostics(base, &gain_diagnostics);
     adapter->stop_requested = 0;
     adapter->running = 1;
     if (dab_thread_create(&adapter->thread, dab_sdrplay_stub_thread, adapter, "sdrplay-stub") != 0) {
@@ -144,6 +155,7 @@ static void dab_sdrplay_stub_destroy(dab_sdrplay_adapter_t *base) {
     if (adapter->running) {
         (void)dab_sdrplay_stub_stop(base);
     }
+    dab_sdrplay_adapter_destroy_base(base);
     free(adapter);
 }
 
@@ -167,7 +179,11 @@ dab_sdrplay_adapter_t *dab_sdrplay_stub_adapter_create(const dab_stream_config_t
     }
 
     adapter->base.vtbl = &DAB_SDRPLAY_STUB_VTBL;
-    adapter->base.config = *config;
-    adapter->base.device_config = *device_config;
+    if (dab_sdrplay_adapter_init_base(&adapter->base,
+                                      config,
+                                      device_config) != 0) {
+        free(adapter);
+        return NULL;
+    }
     return &adapter->base;
 }

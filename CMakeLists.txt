@@ -258,6 +258,7 @@ add_library(dab STATIC
     src/os/os_thread.c
     src/os/os_time.c
     src/measurement/measurement_alarm.c
+    src/measurement/rf_calibration.c
     src/receive/receive.c
     src/receive/receiver_session.c
     src/scan/scan.c
@@ -579,6 +580,7 @@ if(DAB_BUILD_TESTS)
         tests/test_hal.c
         tests/test_msc.c
         tests/test_measurement_alarm.c
+        tests/test_rf_calibration.c
         tests/test_null_detect.c
         tests/test_ofdm.c
         tests/test_os_shared_lib.c

@@ -47,6 +47,10 @@ namespace winrt::DabMeasurementWinUI::implementation
         void ViewResetLayout_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         winrt::fire_and_forget ToolsOpenCaptureFolder_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void ToolsCopyDiagnosticSummary_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void ToolsRfCalibration_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void CalibrationCapturePoint_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void CalibrationClearProfile_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        winrt::fire_and_forget CalibrationOpenFolder_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void HelpQuickStart_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void HelpShortcuts_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void HelpTerminology_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -151,6 +155,13 @@ namespace winrt::DabMeasurementWinUI::implementation
         void ApplySnapshot(dab_receive_snapshot_t const& snapshot);
         void ApplyRfSnapshot(dab_receive_snapshot_t const& snapshot);
         void UpdateRfInputHistogram(dab_receive_snapshot_t const& snapshot);
+        void LoadCalibrationProfile();
+        bool SaveCalibrationProfile();
+        void UpdateCalibrationUi(dab_receive_snapshot_t const* snapshot = nullptr);
+        void RefreshCalibrationPointList();
+        bool CalibrationWindowStatistics(float& mean_dbfs,
+                                         float& standard_deviation_db,
+                                         size_t& sample_count) const;
         void ApplyRfSyncSnapshot(dab_receive_snapshot_t const& snapshot);
         void AppendRfSyncHistory(dab_receive_snapshot_t const& snapshot);
         void UpdateRfSyncHistoryVisuals();
@@ -269,6 +280,10 @@ namespace winrt::DabMeasurementWinUI::implementation
         bool m_receiver_agc_enabled{ false };
         int32_t m_receiver_ppm_correction{ 0 };
         bool m_receiver_bias_tee_enabled{ false };
+        dab_rf_calibration_profile_t m_calibration_profile{};
+        bool m_calibration_profile_loaded{ false };
+        dab_receive_snapshot_t m_latest_rf_snapshot{};
+        bool m_have_latest_rf_snapshot{ false };
         bool m_toolbar_visible{ true };
         bool m_status_bar_visible{ true };
         bool m_full_screen{ false };

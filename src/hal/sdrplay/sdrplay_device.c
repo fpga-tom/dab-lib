@@ -313,6 +313,21 @@ uint32_t dab_sdrplay_stream_dropped_blocks(const dab_sdr_stream_t *stream) {
     return impl->dropped_blocks;
 }
 
+dab_sdr_status_t dab_sdrplay_stream_get_gain_diagnostics(
+    dab_sdr_stream_t *stream,
+    dab_sdrplay_gain_diagnostics_t *diagnostics) {
+    dab_sdrplay_stream_t *impl = (dab_sdrplay_stream_t *)stream;
+
+    if (impl == NULL || diagnostics == NULL) {
+        return DAB_SDR_STATUS_INVALID_ARGUMENT;
+    }
+    if (impl->adapter == NULL) {
+        memset(diagnostics, 0, sizeof(*diagnostics));
+        return DAB_SDR_STATUS_ERROR;
+    }
+    return dab_sdrplay_adapter_get_gain_diagnostics(impl->adapter, diagnostics);
+}
+
 static int dab_sdrplay_validate_stream_config(const dab_stream_config_t *config, const dab_sdr_capabilities_t *caps) {
     if (config == NULL || caps == NULL) {
         return 0;

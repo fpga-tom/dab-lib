@@ -31,8 +31,28 @@ typedef struct {
     int ppm_correction;
 } dab_sdrplay_config_t;
 
+#define DAB_SDRPLAY_SERIAL_CAPACITY 64
+
+typedef struct {
+    int valid;
+    int applied;
+    int agc_enabled;
+    int gain_reduction_db;
+    uint8_t lna_state;
+    int system_gain_valid;
+    float system_gain_db;
+    uint64_t applied_sample_index;
+    uint32_t change_generation;
+    uint8_t hardware_version;
+    float api_version;
+    char serial[DAB_SDRPLAY_SERIAL_CAPACITY];
+} dab_sdrplay_gain_diagnostics_t;
+
 void dab_sdrplay_default_config(dab_sdrplay_config_t *config);
 dab_sdr_status_t dab_sdrplay_configure_device(dab_sdr_device_t *device, const dab_sdrplay_config_t *config);
 uint32_t dab_sdrplay_stream_dropped_blocks(const dab_sdr_stream_t *stream);
+dab_sdr_status_t dab_sdrplay_stream_get_gain_diagnostics(
+    dab_sdr_stream_t *stream,
+    dab_sdrplay_gain_diagnostics_t *diagnostics);
 
 #endif

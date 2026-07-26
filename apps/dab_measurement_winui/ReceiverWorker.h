@@ -69,6 +69,9 @@ namespace dab::measurement
         [[nodiscard]] ReceiverState State() const noexcept;
         [[nodiscard]] bool IsActive() const noexcept;
         [[nodiscard]] bool AudioOutputActive() const noexcept;
+        void SetCalibrationProfile(
+            dab_rf_calibration_profile_t const& profile) noexcept;
+        void ClearCalibrationProfile() noexcept;
         bool TryReadStatus(uint64_t after_version,
                            ReceiverStatus& status,
                            uint64_t& version) const;
@@ -150,6 +153,7 @@ namespace dab::measurement
         void RecordAudioAccessUnit(AudioCommand const& command,
                                    dab_receive_audio_au_result_t result) noexcept;
         void ApplyAudioMeasurements(dab_receive_snapshot_t& snapshot) noexcept;
+        void ApplyCalibration(dab_receive_snapshot_t& snapshot) noexcept;
         void AccumulateRecoveredSession() noexcept;
         void PublishStatus(ReceiverState state,
                            std::string message,
@@ -182,6 +186,9 @@ namespace dab::measurement
         std::atomic<bool> m_audio_output_active{ false };
         std::mutex m_audio_measurement_mutex;
         AudioMeasurementState m_audio_measurements{};
+        std::mutex m_calibration_mutex;
+        dab_rf_calibration_profile_t m_calibration_profile{};
+        bool m_calibration_profile_valid{ false };
         uint32_t m_recovery_attempt_count{ 0u };
         uint64_t m_snapshot_sequence_offset{ 0u };
         uint64_t m_measurement_sequence_offset{ 0u };

@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "dab/rf_calibration.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -147,14 +149,30 @@ typedef struct {
     uint32_t adc_q_histogram[DAB_RECEIVE_ADC_HISTOGRAM_BIN_COUNT];
     int calibrated_power_valid;
     float calibrated_power_dbm;
+    float calibrated_power_uncertainty_db;
+    float calibration_correction_db;
+    dab_rf_calibration_status_t calibration_status;
+    char calibration_profile_id[DAB_RF_CALIBRATION_ID_CAPACITY];
 
     int device_gain_valid;
     int device_gain_db;
+    int applied_gain_valid;
+    int applied_system_gain_valid;
+    float applied_system_gain_db;
+    uint64_t gain_applied_sample_index;
+    uint32_t gain_change_generation;
     int lna_state_valid;
     uint8_t lna_state;
     int if_gain_reduction_valid;
     int if_gain_reduction_db;
     int agc_enabled;
+    char device_driver[DAB_RF_CALIBRATION_DRIVER_CAPACITY];
+    char device_serial[DAB_RF_CALIBRATION_SERIAL_CAPACITY];
+    uint8_t device_hardware_version;
+    float device_api_version;
+    uint32_t device_bandwidth_hz;
+    uint8_t device_if_mode;
+    uint8_t device_antenna;
     int device_temperature_valid;
     float device_temperature_c;
     uint32_t input_queue_depth;

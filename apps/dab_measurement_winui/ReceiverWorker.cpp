@@ -152,6 +152,24 @@ namespace dab::measurement
         return m_audio_output_active.load(std::memory_order_acquire);
     }
 
+    void ReceiverWorker::SetCalibrationProfile(
+        dab_rf_calibration_profile_t const& profile) noexcept
+    {
+        std::scoped_lock lock{ m_calibration_mutex };
+        m_calibration_profile = profile;
+        m_calibration_profile_valid =
+            profile.version == DAB_RF_CALIBRATION_PROFILE_VERSION &&
+            profile.point_count != 0u &&
+            profile.point_count <= DAB_RF_CALIBRATION_MAX_POINTS;
+    }
+
+    void ReceiverWorker::ClearCalibrationProfile() noexcept
+    {
+        std::scoped_lock lock{ m_calibration_mutex };
+        m_calibration_profile = {};
+        m_calibration_profile_valid = false;
+    }
+
     bool ReceiverWorker::TryReadStatus(uint64_t after_version,
                                        ReceiverStatus& status,
                                        uint64_t& version) const
@@ -324,8 +342,67 @@ namespace dab::measurement
                 worker->m_msc_generation_offset;
         }
         worker->ApplyAudioMeasurements(adjusted);
+        worker->ApplyCalibration(adjusted);
         worker->m_mailbox.Publish(adjusted);
         return 0;
+    }
+
+    void ReceiverWorker::ApplyCalibration(
+        dab_receive_snapshot_t& snapshot) noexcept
+    {
+        dab_rf_calibration_context_t context{};
+        dab_rf_calibration_result_t result{};
+        dab_rf_calibration_profile_t profile{};
+        bool have_profile = false;
+
+        {
+            std::scoped_lock lock{ m_calibration_mutex };
+            have_profile = m_calibration_profile_valid;
+            if (have_profile)
+            {
+                profile = m_calibration_profile;
+            }
+        }
+
+        snapshot.calibrated_power_valid = 0;
+        snapshot.calibrated_power_dbm = 0.0f;
+        snapshot.calibrated_power_uncertainty_db = 0.0f;
+        snapshot.calibration_correction_db = 0.0f;
+        snapshot.calibration_status = DAB_RF_CALIBRATION_NO_PROFILE;
+        snapshot.calibration_profile_id[0] = '\0';
+        if (!have_profile || snapshot.adc_level_valid == 0)
+        {
+            return;
+        }
+
+        context.driver = snapshot.device_driver;
+        context.device_serial = snapshot.device_serial;
+        context.hardware_version = snapshot.device_hardware_version;
+        context.frequency_hz = snapshot.frequency_hz;
+        context.sample_rate_hz = snapshot.sample_rate_hz;
+        context.bandwidth_hz = snapshot.device_bandwidth_hz;
+        context.if_mode = snapshot.device_if_mode;
+        context.antenna = snapshot.device_antenna;
+        context.agc_enabled = snapshot.agc_enabled;
+        context.applied_gain_valid = snapshot.applied_gain_valid;
+        context.lna_state = snapshot.lna_state;
+        context.gain_reduction_db = snapshot.if_gain_reduction_db;
+        snapshot.calibration_status = dab_rf_calibration_apply(
+            &profile,
+            &context,
+            snapshot.adc_level_dbfs,
+            &result);
+        std::snprintf(snapshot.calibration_profile_id,
+                      sizeof(snapshot.calibration_profile_id),
+                      "%s",
+                      result.profile_id);
+        if (result.valid)
+        {
+            snapshot.calibrated_power_valid = 1;
+            snapshot.calibrated_power_dbm = result.calibrated_power_dbm;
+            snapshot.calibrated_power_uncertainty_db = result.uncertainty_db;
+            snapshot.calibration_correction_db = result.correction_db;
+        }
     }
 
     int ReceiverWorker::MeasurementCallback(dab_receive_measurement_frame_t const* frame,

@@ -1,8 +1,10 @@
 #include "pch.h"
+#include "CalibrationProfileStore.h"
 #include "MainWindow.xaml.h"
 
 #include <cstring>
 #include <cwctype>
+#include <filesystem>
 #include <limits>
 #include <winrt/Windows.System.h>
 
@@ -562,6 +564,7 @@ namespace winrt::DabMeasurementWinUI::implementation
         }
 
         m_receiver_menu_ready = true;
+        LoadCalibrationProfile();
         UpdateReceiverMenuState();
         UpdateViewMenuState();
         auto const selected_channel =
@@ -609,10 +612,13 @@ namespace winrt::DabMeasurementWinUI::implementation
         m_rf_history_write = 0u;
         m_rf_history_count = 0u;
         m_latest_mer_valid = false;
+        m_have_latest_rf_snapshot = false;
+        m_latest_rf_snapshot = {};
         m_rf_was_locked = false;
         m_rf_lock_started_ns = 0u;
         UpdateRfHistoryVisuals();
         ResetRfHistorySession();
+        UpdateCalibrationUi();
         m_fic_mailbox_history_version = m_mailbox_version;
 
         TimelineList().Items().Clear();
@@ -678,6 +684,26 @@ namespace winrt::DabMeasurementWinUI::implementation
             text += snapshot.adc_level_valid != 0
                 ? std::to_wstring(snapshot.adc_level_dbfs) + L" dBFS"
                 : L"unavailable";
+            text += L"\r\nConnector power: ";
+            if (snapshot.calibrated_power_valid != 0)
+            {
+                text += std::to_wstring(snapshot.calibrated_power_dbm);
+                text += L" dBm ±";
+                text += std::to_wstring(
+                    snapshot.calibrated_power_uncertainty_db);
+                text += L" dB";
+            }
+            else
+            {
+                text += L"unavailable (";
+                text += to_hstring(dab_rf_calibration_status_text(
+                    snapshot.calibration_status)).c_str();
+                text += L")";
+            }
+            text += L"\r\nCalibration profile: ";
+            text += snapshot.calibration_profile_id[0] != '\0'
+                ? to_hstring(snapshot.calibration_profile_id).c_str()
+                : L"none";
             text += L"\r\nC/N: ";
             text += snapshot.cn_valid != 0
                 ? std::to_wstring(snapshot.cn_db) + L" dB"
@@ -751,7 +777,10 @@ namespace winrt::DabMeasurementWinUI::implementation
             auto const& s = m_msc_latest_snapshot;
             std::wstring csv =
                 L"timestamp_utc,context,sequence,frequency_hz,sample_rate_hz,"
-                L"locked,adc_rms_dbfs,adc_peak_dbfs,cn_db,snr_db,cfo_hz,"
+                L"locked,adc_rms_dbfs,adc_peak_dbfs,calibrated_power_dbm,"
+                L"calibration_uncertainty_db,calibration_status,"
+                L"calibration_profile_id,device_serial,lna_state,"
+                L"gain_reduction_db,applied_system_gain_db,cn_db,snr_db,cfo_hz,"
                 L"fic_valid_fibs,fic_fig_errors,msc_ber,dabplus_attempts,"
                 L"dabplus_failures,firecode_errors,rs_corrected_bytes,"
                 L"rs_uncorrectable,au_crc_errors,au_crc_checks,aac_errors,"
@@ -765,6 +794,18 @@ namespace winrt::DabMeasurementWinUI::implementation
                 (s.locked != 0 ? L"1" : L"0") + L"," +
                 csv_float(s.adc_level_valid != 0, s.adc_level_dbfs) + L"," +
                 csv_float(s.adc_level_valid != 0, s.adc_peak_dbfs) + L"," +
+                csv_float(s.calibrated_power_valid != 0,
+                          s.calibrated_power_dbm) + L"," +
+                csv_float(s.calibrated_power_valid != 0,
+                          s.calibrated_power_uncertainty_db) + L"," +
+                csv_field(to_hstring(dab_rf_calibration_status_text(
+                    s.calibration_status)).c_str()) + L"," +
+                csv_field(to_hstring(s.calibration_profile_id).c_str()) + L"," +
+                csv_field(to_hstring(s.device_serial).c_str()) + L"," +
+                std::to_wstring(s.lna_state) + L"," +
+                std::to_wstring(s.if_gain_reduction_db) + L"," +
+                csv_float(s.applied_system_gain_valid != 0,
+                          s.applied_system_gain_db) + L"," +
                 csv_float(s.cn_valid != 0, s.cn_db) + L"," +
                 csv_float(s.snr_valid != 0, s.snr_db) + L"," +
                 csv_float(s.cfo_valid != 0, s.cfo_hz) + L"," +
@@ -1497,6 +1538,517 @@ namespace winrt::DabMeasurementWinUI::implementation
             AddTimelineEvent(
                 L"Unable to open the triggered-IQ capture folder: " +
                 error.message());
+        }
+    }
+
+    void MainWindow::ToolsRfCalibration_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        ShowWorkspace(WorkspaceKind::rf_measurements);
+        RfTabView().SelectedIndex(7);
+        UpdateCalibrationUi(m_have_latest_rf_snapshot
+            ? &m_latest_rf_snapshot
+            : nullptr);
+    }
+
+    void MainWindow::LoadCalibrationProfile()
+    {
+        std::wstring message;
+        dab_rf_calibration_profile_init(&m_calibration_profile);
+        m_calibration_profile_loaded =
+            dab::measurement::CalibrationProfileStore::Load(
+                m_calibration_profile,
+                message);
+        if (m_calibration_profile_loaded)
+        {
+            m_receiver.SetCalibrationProfile(m_calibration_profile);
+        }
+        else
+        {
+            m_receiver.ClearCalibrationProfile();
+        }
+        CalibrationProfilePathText().Text(hstring{
+            dab::measurement::CalibrationProfileStore::ProfilePath().wstring()
+        });
+        CalibrationProfileNameTextBox().Text(
+            m_calibration_profile.name[0] != '\0'
+                ? to_hstring(m_calibration_profile.name)
+                : hstring{ L"Band III local calibration" });
+        RefreshCalibrationPointList();
+        UpdateCalibrationUi();
+        if (!message.empty())
+        {
+            AddTimelineEvent(hstring{ message });
+        }
+    }
+
+    bool MainWindow::SaveCalibrationProfile()
+    {
+        std::wstring message;
+        if (!dab::measurement::CalibrationProfileStore::Save(
+                m_calibration_profile,
+                message))
+        {
+            CalibrationMessageBar().Severity(InfoBarSeverity::Error);
+            CalibrationMessageBar().Title(hstring{ message });
+            CalibrationMessageBar().IsOpen(true);
+            AddTimelineEvent(hstring{ message });
+            return false;
+        }
+        m_calibration_profile_loaded = true;
+        m_receiver.SetCalibrationProfile(m_calibration_profile);
+        RefreshCalibrationPointList();
+        AddTimelineEvent(hstring{ message });
+        return true;
+    }
+
+    bool MainWindow::CalibrationWindowStatistics(
+        float& mean_dbfs,
+        float& standard_deviation_db,
+        size_t& sample_count) const
+    {
+        size_t const wanted = (std::min)(m_rf_history_count, size_t{ 8u });
+        double sum = 0.0;
+        double sum_squared = 0.0;
+        sample_count = 0u;
+        for (size_t offset = 0u; offset < wanted; ++offset)
+        {
+            size_t const index =
+                (m_rf_history_write + rf_history_capacity - 1u - offset) %
+                rf_history_capacity;
+            float const value = m_rf_power_history[index];
+            if (!std::isfinite(value))
+            {
+                continue;
+            }
+            sum += value;
+            sum_squared += static_cast<double>(value) * value;
+            ++sample_count;
+        }
+        if (sample_count == 0u)
+        {
+            mean_dbfs = 0.0f;
+            standard_deviation_db = 0.0f;
+            return false;
+        }
+        double const mean = sum / static_cast<double>(sample_count);
+        double const variance = (std::max)(
+            0.0,
+            sum_squared / static_cast<double>(sample_count) - mean * mean);
+        mean_dbfs = static_cast<float>(mean);
+        standard_deviation_db = static_cast<float>(std::sqrt(variance));
+        return true;
+    }
+
+    void MainWindow::RefreshCalibrationPointList()
+    {
+        if (!CalibrationPointsList())
+        {
+            return;
+        }
+        CalibrationPointsList().Items().Clear();
+        for (uint32_t index = 0u;
+             index < m_calibration_profile.point_count;
+             ++index)
+        {
+            auto const& point = m_calibration_profile.points[index];
+            Grid row;
+            row.ColumnSpacing(8.0);
+            std::array<double, 7u> const widths{
+                120.0, 90.0, 110.0, 130.0, 130.0, 120.0, 120.0
+            };
+            for (double width : widths)
+            {
+                ColumnDefinition column;
+                column.Width(GridLengthHelper::FromPixels(width));
+                row.ColumnDefinitions().Append(column);
+            }
+
+            wchar_t values[7][48]{};
+            swprintf_s(values[0], L"%.3f MHz",
+                       static_cast<double>(point.frequency_hz) / 1000000.0);
+            swprintf_s(values[1], L"State %u", point.lna_state);
+            swprintf_s(values[2], L"%d dB", point.gain_reduction_db);
+            swprintf_s(values[3], L"%.2f dBm",
+                       static_cast<double>(point.reference_power_dbm));
+            swprintf_s(values[4], L"%.2f dBFS",
+                       static_cast<double>(point.measured_power_dbfs));
+            swprintf_s(values[5], L"%+.2f dB",
+                       static_cast<double>(point.correction_db));
+            swprintf_s(values[6], L"\u00b1%.2f dB",
+                       static_cast<double>(point.uncertainty_db));
+            for (int32_t column = 0; column < 7; ++column)
+            {
+                TextBlock text;
+                text.Text(values[column]);
+                text.FontFamily(FontFamily{ L"Consolas" });
+                Grid::SetColumn(text, column);
+                row.Children().Append(text);
+            }
+
+            ListViewItem item;
+            item.HorizontalContentAlignment(HorizontalAlignment::Stretch);
+            item.Content(row);
+            CalibrationPointsList().Items().Append(item);
+        }
+        CalibrationProfilePointCountText().Text(
+            to_hstring(m_calibration_profile.point_count) +
+            (m_calibration_profile.point_count == 1u
+                ? hstring{ L" point" }
+                : hstring{ L" points" }));
+    }
+
+    void MainWindow::UpdateCalibrationUi(
+        dab_receive_snapshot_t const* snapshot)
+    {
+        if (!CalibrationProfileStatusText())
+        {
+            return;
+        }
+        if (snapshot != nullptr)
+        {
+            m_latest_rf_snapshot = *snapshot;
+            m_have_latest_rf_snapshot = true;
+        }
+        auto const* current = m_have_latest_rf_snapshot
+            ? &m_latest_rf_snapshot
+            : nullptr;
+
+        CalibrationProfilePathText().Text(hstring{
+            dab::measurement::CalibrationProfileStore::ProfilePath().wstring()
+        });
+        if (current != nullptr)
+        {
+            CalibrationCurrentRawText().Text(current->adc_level_valid
+                ? format_float(current->adc_level_dbfs, L" dBFS", 2)
+                : hstring{ L"\u2014 dBFS" });
+            CalibrationCurrentPowerText().Text(
+                current->calibrated_power_valid
+                    ? format_float(current->calibrated_power_dbm,
+                                   L" dBm",
+                                   2)
+                    : hstring{ L"Not calibrated" });
+            CalibrationCorrectionText().Text(
+                current->calibrated_power_valid
+                    ? format_signed_float(current->calibration_correction_db,
+                                          L" dB",
+                                          2)
+                    : hstring{ L"\u2014 dB" });
+            CalibrationUncertaintyText().Text(
+                current->calibrated_power_valid
+                    ? hstring{ L"\u00b1" } +
+                        format_float(current->calibrated_power_uncertainty_db,
+                                     L" dB",
+                                     2)
+                    : hstring{ L"\u2014 dB" });
+
+            hstring serial = current->device_serial[0] != '\0'
+                ? to_hstring(current->device_serial)
+                : hstring{ L"not reported" };
+            wchar_t device[160]{};
+            swprintf_s(device,
+                       L"%hs \u00b7 Serial %ls \u00b7 HW %u \u00b7 API %.2f",
+                       current->device_driver,
+                       serial.c_str(),
+                       current->device_hardware_version,
+                       static_cast<double>(current->device_api_version));
+            CalibrationDeviceText().Text(device);
+
+            wchar_t settings[220]{};
+            swprintf_s(settings,
+                       L"%.3f MHz \u00b7 %.3f MS/s \u00b7 BW %.3f MHz\r\n"
+                       L"LNA state %u \u00b7 applied GR %d dB \u00b7 generation %u",
+                       static_cast<double>(current->frequency_hz) / 1000000.0,
+                       static_cast<double>(current->sample_rate_hz) / 1000000.0,
+                       static_cast<double>(current->device_bandwidth_hz) / 1000000.0,
+                       current->lna_state,
+                       current->if_gain_reduction_db,
+                       current->gain_change_generation);
+            CalibrationSettingsText().Text(settings);
+        }
+        else
+        {
+            CalibrationCurrentRawText().Text(L"\u2014 dBFS");
+            CalibrationCurrentPowerText().Text(L"Not calibrated");
+            CalibrationCorrectionText().Text(L"\u2014 dB");
+            CalibrationUncertaintyText().Text(L"\u2014 dB");
+            CalibrationDeviceText().Text(L"Device identity not reported");
+            CalibrationSettingsText().Text(L"Frequency and gain state unavailable");
+        }
+
+        hstring badge{ L"UNCALIBRATED" };
+        hstring profile_status{ L"No active profile" };
+        auto status_brush = Application::Current().Resources().Lookup(
+            box_value(hstring{ L"WarningBrush" })).as<Brush>();
+        if (m_calibration_profile_loaded && current == nullptr)
+        {
+            badge = L"PROFILE ACTIVE";
+            profile_status = L"Profile active \u00b7 waiting for receiver telemetry";
+        }
+        else if (m_calibration_profile_loaded && current != nullptr &&
+                 current->calibrated_power_valid)
+        {
+            wchar_t calibrated_badge[64]{};
+            swprintf_s(calibrated_badge,
+                       L"\u25cf CALIBRATED \u00b1%.1f dB",
+                       static_cast<double>(
+                           current->calibrated_power_uncertainty_db));
+            badge = calibrated_badge;
+            profile_status =
+                to_hstring(m_calibration_profile.name) +
+                L" \u00b7 matched current operating point";
+            status_brush = Application::Current().Resources().Lookup(
+                box_value(hstring{ L"MeasurementAccentBrush" })).as<Brush>();
+        }
+        else if (m_calibration_profile_loaded && current != nullptr)
+        {
+            badge = L"PROFILE MISMATCH";
+            profile_status =
+                to_hstring(m_calibration_profile.name) +
+                L" \u00b7 " +
+                to_hstring(dab_rf_calibration_status_text(
+                    current->calibration_status));
+        }
+        RfCalibrationBadgeText().Text(badge);
+        RfCalibrationBadgeText().Foreground(status_brush);
+        StatusCalibrationText().Text(badge);
+        StatusCalibrationText().Foreground(status_brush);
+        CalibrationProfileStatusText().Text(profile_status);
+        CalibrationProfileStatusText().Foreground(status_brush);
+        RfConfigCalibrationText().Text(profile_status);
+        RfConfigCalibrationText().Foreground(status_brush);
+
+        float mean = 0.0f;
+        float deviation = 0.0f;
+        size_t count = 0u;
+        bool const stable = CalibrationWindowStatistics(mean,
+                                                        deviation,
+                                                        count) &&
+                            count >= 4u &&
+                            deviation <= 0.25f;
+        bool profile_compatible = true;
+        if (m_calibration_profile_loaded && current != nullptr)
+        {
+            profile_compatible =
+                std::strcmp(m_calibration_profile.driver,
+                            current->device_driver) == 0 &&
+                std::strcmp(m_calibration_profile.device_serial,
+                            current->device_serial) == 0 &&
+                m_calibration_profile.hardware_version ==
+                    current->device_hardware_version &&
+                m_calibration_profile.sample_rate_hz ==
+                    current->sample_rate_hz &&
+                m_calibration_profile.bandwidth_hz ==
+                    current->device_bandwidth_hz &&
+                m_calibration_profile.if_mode == current->device_if_mode &&
+                m_calibration_profile.antenna == current->device_antenna;
+        }
+        bool const can_capture =
+            current != nullptr &&
+            std::strcmp(current->device_driver, "sdrplay") == 0 &&
+            current->device_serial[0] != '\0' &&
+            current->adc_level_valid != 0 &&
+            current->applied_gain_valid != 0 &&
+            current->agc_enabled == 0 &&
+            current->adc_clipped_sample_count == 0u &&
+            stable &&
+            profile_compatible;
+        CalibrationCaptureButton().IsEnabled(can_capture);
+
+        wchar_t condition[256]{};
+        if (current == nullptr)
+        {
+            swprintf_s(condition, L"Start the receiver with SDRplay and AGC disabled.");
+        }
+        else if (current->agc_enabled != 0)
+        {
+            swprintf_s(condition, L"AGC is active. Disable AGC and restart before calibration.");
+        }
+        else if (current->applied_gain_valid == 0 ||
+                 current->device_serial[0] == '\0')
+        {
+            swprintf_s(condition, L"Waiting for applied SDRplay gain and device identity.");
+        }
+        else if (!profile_compatible)
+        {
+            swprintf_s(condition, L"The active profile belongs to different hardware or receiver settings. Clear it before creating a new profile.");
+        }
+        else if (current->adc_clipped_sample_count != 0u)
+        {
+            swprintf_s(condition, L"ADC clipping detected. Reduce the reference source level.");
+        }
+        else if (!stable)
+        {
+            swprintf_s(condition,
+                       L"Collecting a stable window: %zu/8 samples \u00b7 \u03c3 %.3f dB (limit 0.250 dB).",
+                       count,
+                       static_cast<double>(deviation));
+        }
+        else
+        {
+            swprintf_s(condition,
+                       L"Ready: mean %.3f dBFS \u00b7 \u03c3 %.3f dB \u00b7 manual gain confirmed.",
+                       static_cast<double>(mean),
+                       static_cast<double>(deviation));
+        }
+        CalibrationConditionText().Text(condition);
+        CalibrationMessageBar().Severity(
+            can_capture ? InfoBarSeverity::Success : InfoBarSeverity::Informational);
+        CalibrationMessageBar().Title(
+            can_capture
+                ? hstring{ L"Operating point is stable and ready to capture" }
+                : hstring{ condition });
+        CalibrationMessageBar().IsOpen(true);
+    }
+
+    void MainWindow::CalibrationCapturePoint_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        if (!m_have_latest_rf_snapshot)
+        {
+            return;
+        }
+        float mean_dbfs = 0.0f;
+        float deviation_db = 0.0f;
+        size_t sample_count = 0u;
+        if (!CalibrationWindowStatistics(mean_dbfs,
+                                         deviation_db,
+                                         sample_count) ||
+            sample_count < 4u ||
+            deviation_db > 0.25f)
+        {
+            UpdateCalibrationUi(&m_latest_rf_snapshot);
+            return;
+        }
+
+        double const reference = CalibrationReferencePowerBox().Value();
+        double const requested_uncertainty =
+            CalibrationPointUncertaintyBox().Value();
+        if (!std::isfinite(reference) ||
+            !std::isfinite(requested_uncertainty) ||
+            requested_uncertainty <= 0.0)
+        {
+            CalibrationMessageBar().Severity(InfoBarSeverity::Error);
+            CalibrationMessageBar().Title(
+                L"Enter a valid reference power and uncertainty");
+            return;
+        }
+
+        auto const& snapshot = m_latest_rf_snapshot;
+        if (!m_calibration_profile_loaded)
+        {
+            dab_rf_calibration_profile_init(&m_calibration_profile);
+            std::snprintf(m_calibration_profile.id,
+                          sizeof(m_calibration_profile.id),
+                          "rsp-band3-%s-v1",
+                          snapshot.device_serial);
+            std::string const name =
+                to_string(CalibrationProfileNameTextBox().Text());
+            std::snprintf(m_calibration_profile.name,
+                          sizeof(m_calibration_profile.name),
+                          "%s",
+                          name.empty() ? "Band III local calibration" : name.c_str());
+            std::snprintf(m_calibration_profile.driver,
+                          sizeof(m_calibration_profile.driver),
+                          "%s",
+                          snapshot.device_driver);
+            std::snprintf(m_calibration_profile.device_serial,
+                          sizeof(m_calibration_profile.device_serial),
+                          "%s",
+                          snapshot.device_serial);
+            m_calibration_profile.hardware_version =
+                snapshot.device_hardware_version;
+            m_calibration_profile.sample_rate_hz = snapshot.sample_rate_hz;
+            m_calibration_profile.bandwidth_hz =
+                snapshot.device_bandwidth_hz;
+            m_calibration_profile.if_mode = snapshot.device_if_mode;
+            m_calibration_profile.antenna = snapshot.device_antenna;
+            m_calibration_profile.default_uncertainty_db =
+                static_cast<float>(requested_uncertainty);
+        }
+
+        dab_rf_calibration_point_t point{};
+        point.frequency_hz = snapshot.frequency_hz;
+        point.lna_state = snapshot.lna_state;
+        point.gain_reduction_db = snapshot.if_gain_reduction_db;
+        point.reference_power_dbm = static_cast<float>(reference);
+        point.measured_power_dbfs = mean_dbfs;
+        point.uncertainty_db = (std::max)(
+            static_cast<float>(requested_uncertainty),
+            deviation_db);
+        if (dab_rf_calibration_profile_add_point(
+                &m_calibration_profile,
+                &point) != 0 ||
+            !SaveCalibrationProfile())
+        {
+            return;
+        }
+
+        CalibrationMessageBar().Severity(InfoBarSeverity::Success);
+        CalibrationMessageBar().Title(
+            L"Calibration point saved; the next receiver snapshot will use it");
+        CalibrationMessageBar().IsOpen(true);
+        AddTimelineEvent(
+            L"RF calibration point captured at " +
+            format_float(static_cast<float>(snapshot.frequency_hz) / 1000000.0f,
+                         L" MHz",
+                         3));
+    }
+
+    void MainWindow::CalibrationClearProfile_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        std::error_code error;
+        std::filesystem::remove(
+            dab::measurement::CalibrationProfileStore::ProfilePath(),
+            error);
+        dab_rf_calibration_profile_init(&m_calibration_profile);
+        m_calibration_profile_loaded = false;
+        m_receiver.ClearCalibrationProfile();
+        CalibrationProfileNameTextBox().Text(L"Band III local calibration");
+        RefreshCalibrationPointList();
+        UpdateCalibrationUi(m_have_latest_rf_snapshot
+            ? &m_latest_rf_snapshot
+            : nullptr);
+        CalibrationMessageBar().Severity(InfoBarSeverity::Informational);
+        CalibrationMessageBar().Title(L"RF calibration profile cleared");
+        AddTimelineEvent(L"RF calibration profile cleared");
+    }
+
+    winrt::fire_and_forget MainWindow::CalibrationOpenFolder_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        auto lifetime = get_strong();
+        auto const folder =
+            dab::measurement::CalibrationProfileStore::ProfilePath().parent_path();
+        std::error_code error;
+        std::filesystem::create_directories(folder, error);
+        if (error)
+        {
+            AddTimelineEvent(L"Unable to create the RF calibration profile folder");
+            co_return;
+        }
+        try
+        {
+            auto const storage_folder =
+                co_await Windows::Storage::StorageFolder::GetFolderFromPathAsync(
+                    folder.wstring());
+            bool const opened =
+                co_await Windows::System::Launcher::LaunchFolderAsync(
+                    storage_folder);
+            AddTimelineEvent(opened
+                ? hstring{ L"Opened RF calibration profile folder" }
+                : hstring{ L"Windows declined to open the RF calibration profile folder" });
+        }
+        catch (hresult_error const& error_message)
+        {
+            AddTimelineEvent(
+                L"Unable to open the RF calibration profile folder: " +
+                error_message.message());
         }
     }
 
@@ -3581,19 +4133,42 @@ namespace winrt::DabMeasurementWinUI::implementation
         {
             frequency = FrequencyTextBox().Text();
         }
-        RfContextText().Text(device + L" · Serial not reported · Channel " + channel + L" · " + frequency);
-
-        double gain = GainNumberBox().Value();
-        if (!std::isfinite(gain))
+        hstring serial{ L"not reported" };
+        if (m_have_latest_rf_snapshot &&
+            m_latest_rf_snapshot.device_serial[0] != '\0')
         {
-            gain = 40.0;
+            serial = to_hstring(m_latest_rf_snapshot.device_serial);
         }
-        wchar_t gain_text[32]{};
-        swprintf_s(gain_text, L"%.0f dB", gain);
-        RfConfigGainText().Text(gain_text);
-        RfConfigAgcText().Text(L"Disabled");
-        RfConfigAntennaText().Text(L"A");
-        RfConfigCalibrationText().Text(L"Not configured");
+        RfContextText().Text(device + L" · Serial " + serial +
+                            L" · Channel " + channel + L" · " + frequency);
+
+        if (m_have_latest_rf_snapshot &&
+            m_latest_rf_snapshot.applied_system_gain_valid != 0)
+        {
+            RfConfigGainText().Text(
+                format_float(m_latest_rf_snapshot.applied_system_gain_db,
+                             L" dB",
+                             1));
+        }
+        else
+        {
+            double gain = GainNumberBox().Value();
+            if (!std::isfinite(gain))
+            {
+                gain = 40.0;
+            }
+            wchar_t gain_text[32]{};
+            swprintf_s(gain_text, L"%.0f dB requested", gain);
+            RfConfigGainText().Text(gain_text);
+        }
+        RfConfigAgcText().Text(m_receiver_agc_enabled
+            ? L"Enabled"
+            : L"Disabled");
+        RfConfigAntennaText().Text(
+            m_have_latest_rf_snapshot &&
+            m_latest_rf_snapshot.device_antenna != 0u
+                ? hstring{ L"B" }
+                : hstring{ L"A" });
     }
 
     void MainWindow::UpdateDabContext()
@@ -6803,6 +7378,8 @@ namespace winrt::DabMeasurementWinUI::implementation
 
     void MainWindow::ApplyRfSnapshot(dab_receive_snapshot_t const& snapshot)
     {
+        m_latest_rf_snapshot = snapshot;
+        m_have_latest_rf_snapshot = true;
         UpdateRfContext();
         m_rf_null_locked = snapshot.locked != 0;
         if (m_rf_null_controls_ready)
@@ -6814,14 +7391,27 @@ namespace winrt::DabMeasurementWinUI::implementation
                     : L"WarningBrush" })).as<Brush>());
         }
         RfLiveBadgeText().Text(L"● LIVE");
-        StatusCalibrationText().Text(L"Uncalibrated");
 
-        RfPowerValueText().Text(snapshot.adc_level_valid
-            ? format_float(snapshot.adc_level_dbfs, L" dBFS")
-            : hstring{ L"— dBFS" });
-        RfSummaryPowerText().Text(snapshot.adc_level_valid
-            ? format_float(snapshot.adc_level_dbfs, L" dBFS")
-            : hstring{ L"— dBFS" });
+        RfPowerValueText().Text(snapshot.calibrated_power_valid != 0
+            ? format_float(snapshot.calibrated_power_dbm, L" dBm")
+            : snapshot.adc_level_valid
+                ? format_float(snapshot.adc_level_dbfs, L" dBFS")
+                : hstring{ L"—" });
+        RfSummaryPowerText().Text(snapshot.calibrated_power_valid != 0
+            ? format_float(snapshot.calibrated_power_dbm, L" dBm")
+            : snapshot.adc_level_valid
+                ? format_float(snapshot.adc_level_dbfs, L" dBFS")
+                : hstring{ L"—" });
+        RfPowerDetailText().Text(snapshot.calibrated_power_valid != 0
+            ? hstring{ L"Connector-referenced · " } +
+                to_hstring(snapshot.calibration_profile_id) +
+                L" · ±" +
+                format_float(snapshot.calibrated_power_uncertainty_db,
+                             L" dB",
+                             2)
+            : hstring{ L"ADC-referenced · " } +
+                to_hstring(dab_rf_calibration_status_text(
+                    snapshot.calibration_status)));
         RfAdcValueText().Text(snapshot.adc_level_valid
             ? format_float(snapshot.adc_level_dbfs, L" dBFS")
             : hstring{ L"— dBFS" });
@@ -6889,9 +7479,12 @@ namespace winrt::DabMeasurementWinUI::implementation
             ? format_signed_float(snapshot.adc_iq_correlation, L"", 4)
             : hstring{ L"—" });
 
-        RfInputGainText().Text(snapshot.device_gain_valid != 0
-            ? format_integer(snapshot.device_gain_db, L" dB")
-            : hstring{ L"Not reported" });
+        RfInputGainText().Text(snapshot.applied_system_gain_valid != 0
+            ? format_float(snapshot.applied_system_gain_db, L" dB", 1)
+            : snapshot.applied_gain_valid != 0
+                ? format_integer(snapshot.if_gain_reduction_db,
+                                 L" dB GR")
+                : hstring{ L"Not reported" });
         RfInputLnaText().Text(snapshot.lna_state_valid != 0
             ? hstring{ L"State " } + to_hstring(snapshot.lna_state)
             : hstring{ L"Not reported" });
@@ -6948,9 +7541,17 @@ namespace winrt::DabMeasurementWinUI::implementation
         {
             RfWarningsText().Text(L"ADC clipping detected in the latest PRS analysis window.");
         }
+        else if (snapshot.calibrated_power_valid != 0)
+        {
+            RfWarningsText().Text(L"No current RF warnings.");
+        }
         else
         {
-            RfWarningsText().Text(L"Input power is ADC-referenced (dBFS) until an RF calibration profile is configured.");
+            RfWarningsText().Text(
+                hstring{ L"Power remains ADC-referenced: " } +
+                to_hstring(dab_rf_calibration_status_text(
+                    snapshot.calibration_status)) +
+                L".");
         }
 
         uint64_t const timestamp_ns = snapshot.timestamp_ns != 0u
@@ -6990,6 +7591,7 @@ namespace winrt::DabMeasurementWinUI::implementation
                         snapshot.cn_valid ? snapshot.cn_db : missing);
         AppendRfLongHistory(snapshot);
         EvaluateRfAlarm(snapshot);
+        UpdateCalibrationUi(&snapshot);
     }
 
     void MainWindow::UpdateRfInputHistogram(dab_receive_snapshot_t const& snapshot)
