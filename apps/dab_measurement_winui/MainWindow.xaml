@@ -214,8 +214,94 @@
                                 Click="ReceiverDiagnostics_Click" />
             </MenuBarItem>
             <MenuBarItem Title="Measurement">
-                <MenuFlyoutItem Text="New measurement profile..." />
-                <MenuFlyoutItem Text="Alarm thresholds..." />
+                <MenuFlyoutSubItem Text="RF Measurements">
+                    <MenuFlyoutItem Text="Overview"
+                                    Tag="0"
+                                    Click="MeasurementRfPage_Click" />
+                    <MenuFlyoutItem Text="Spectrum"
+                                    Tag="1"
+                                    Click="MeasurementRfPage_Click" />
+                    <MenuFlyoutItem Text="RF input"
+                                    Tag="2"
+                                    Click="MeasurementRfPage_Click" />
+                    <MenuFlyoutItem Text="Null symbol scope"
+                                    Tag="3"
+                                    Click="MeasurementRfPage_Click" />
+                    <MenuFlyoutItem Text="Frequency and sync"
+                                    Tag="4"
+                                    Click="MeasurementRfPage_Click" />
+                    <MenuFlyoutItem Text="Channel and CIR"
+                                    Tag="5"
+                                    Click="MeasurementRfPage_Click" />
+                    <MenuFlyoutItem Text="History and alarms"
+                                    Tag="6"
+                                    Click="MeasurementRfPage_Click" />
+                </MenuFlyoutSubItem>
+                <MenuFlyoutSubItem Text="DAB Measurements">
+                    <MenuFlyoutItem Text="Overview"
+                                    Tag="overview"
+                                    Click="MeasurementDabPage_Click" />
+                    <MenuFlyoutSubItem Text="FIC">
+                        <MenuFlyoutItem Text="Overview" Tag="fic:0" Click="MeasurementDabPage_Click" />
+                        <MenuFlyoutItem Text="FIB timeline" Tag="fic:1" Click="MeasurementDabPage_Click" />
+                        <MenuFlyoutItem Text="FIG browser" Tag="fic:2" Click="MeasurementDabPage_Click" />
+                        <MenuFlyoutItem Text="Multiplex database" Tag="fic:3" Click="MeasurementDabPage_Click" />
+                        <MenuFlyoutItem Text="Raw inspector" Tag="fic:4" Click="MeasurementDabPage_Click" />
+                    </MenuFlyoutSubItem>
+                    <MenuFlyoutSubItem Text="MSC">
+                        <MenuFlyoutItem Text="Overview" Tag="msc:0" Click="MeasurementDabPage_Click" />
+                        <MenuFlyoutItem Text="Capacity map" Tag="msc:1" Click="MeasurementDabPage_Click" />
+                        <MenuFlyoutItem Text="Subchannels" Tag="msc:2" Click="MeasurementDabPage_Click" />
+                        <MenuFlyoutItem Text="Error timeline" Tag="msc:3" Click="MeasurementDabPage_Click" />
+                        <MenuFlyoutItem Text="Buffers" Tag="msc:4" Click="MeasurementDabPage_Click" />
+                        <MenuFlyoutItem Text="Raw data" Tag="msc:5" Click="MeasurementDabPage_Click" />
+                    </MenuFlyoutSubItem>
+                    <MenuFlyoutSubItem Text="DAB+">
+                        <MenuFlyoutItem Text="Overview" Tag="dabplus:0" Click="MeasurementDabPage_Click" />
+                        <MenuFlyoutItem Text="Superframes" Tag="dabplus:1" Click="MeasurementDabPage_Click" />
+                        <MenuFlyoutItem Text="Reed-Solomon" Tag="dabplus:2" Click="MeasurementDabPage_Click" />
+                        <MenuFlyoutItem Text="Audio units" Tag="dabplus:3" Click="MeasurementDabPage_Click" />
+                        <MenuFlyoutItem Text="Audio" Tag="dabplus:4" Click="MeasurementDabPage_Click" />
+                        <MenuFlyoutItem Text="PAD and metadata" Tag="dabplus:5" Click="MeasurementDabPage_Click" />
+                    </MenuFlyoutSubItem>
+                    <MenuFlyoutItem Text="Events"
+                                    Tag="events"
+                                    Click="MeasurementDabPage_Click" />
+                </MenuFlyoutSubItem>
+                <MenuFlyoutSeparator />
+                <MenuFlyoutSubItem Text="Capture">
+                    <MenuFlyoutItem Text="Measurement snapshot"
+                                    Click="FileSaveSnapshot_Click"
+                                    KeyboardAcceleratorTextOverride="Ctrl+S" />
+                    <MenuFlyoutItem Text="Last triggered IQ"
+                                    Click="MeasurementCaptureIq_Click" />
+                    <MenuFlyoutItem Text="Current workspace screenshot"
+                                    Click="FileSaveScreenshot_Click" />
+                </MenuFlyoutSubItem>
+                <MenuFlyoutItem Text="Add operator annotation"
+                                Click="MeasurementAddAnnotation_Click" />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutSubItem Text="Alarm configuration">
+                    <MenuFlyoutItem Text="RF history thresholds..."
+                                    Click="MeasurementAlarmThresholds_Click" />
+                    <MenuFlyoutItem Text="DAB decode thresholds..."
+                                    IsEnabled="False"
+                                    ToolTipService.ToolTip="DAB alarm threshold editing is not implemented yet" />
+                </MenuFlyoutSubItem>
+                <MenuFlyoutSubItem Text="Measurement profile">
+                    <MenuFlyoutItem Text="New profile..."
+                                    IsEnabled="False"
+                                    ToolTipService.ToolTip="Measurement profiles are not implemented yet" />
+                    <MenuFlyoutItem Text="Load profile..."
+                                    IsEnabled="False"
+                                    ToolTipService.ToolTip="Measurement profiles are not implemented yet" />
+                    <MenuFlyoutItem Text="Save current profile..."
+                                    IsEnabled="False"
+                                    ToolTipService.ToolTip="Measurement profiles are not implemented yet" />
+                </MenuFlyoutSubItem>
+                <MenuFlyoutItem Text="RF calibration profile..."
+                                IsEnabled="False"
+                                ToolTipService.ToolTip="RF calibration profile management is not implemented yet" />
             </MenuBarItem>
             <MenuBarItem Title="View">
                 <MenuFlyoutItem Text="Receiver workspace" Click="ReceiverWorkspace_Click" />

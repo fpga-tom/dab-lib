@@ -1170,6 +1170,106 @@ namespace winrt::DabMeasurementWinUI::implementation
         ShowWorkspace(WorkspaceKind::dab_measurements);
     }
 
+    void MainWindow::MeasurementRfPage_Click(
+        IInspectable const& sender,
+        RoutedEventArgs const&)
+    {
+        auto const item = sender.try_as<MenuFlyoutItem>();
+        if (!item || !item.Tag())
+        {
+            return;
+        }
+
+        std::wstring const value{ unbox_value<hstring>(item.Tag()).c_str() };
+        wchar_t* end = nullptr;
+        long const index = std::wcstol(value.c_str(), &end, 10);
+        if (end == value.c_str() || index < 0 || index >= 7)
+        {
+            return;
+        }
+
+        ShowWorkspace(WorkspaceKind::rf_measurements);
+        RfTabView().SelectedIndex(static_cast<int32_t>(index));
+    }
+
+    void MainWindow::MeasurementDabPage_Click(
+        IInspectable const& sender,
+        RoutedEventArgs const&)
+    {
+        auto const item = sender.try_as<MenuFlyoutItem>();
+        if (!item || !item.Tag())
+        {
+            return;
+        }
+
+        std::wstring const tag{ unbox_value<hstring>(item.Tag()).c_str() };
+        ShowWorkspace(WorkspaceKind::dab_measurements);
+        if (tag == L"overview")
+        {
+            DabTabView().SelectedIndex(0);
+            return;
+        }
+        if (tag == L"events")
+        {
+            DabTabView().SelectedIndex(4);
+            return;
+        }
+
+        size_t const separator = tag.find(L':');
+        if (separator == std::wstring::npos)
+        {
+            return;
+        }
+        wchar_t* end = nullptr;
+        long const page = std::wcstol(tag.c_str() + separator + 1u, &end, 10);
+        if (end == tag.c_str() + separator + 1u || page < 0)
+        {
+            return;
+        }
+
+        std::wstring_view const section{ tag.data(), separator };
+        if (section == L"fic" && page < 5)
+        {
+            DabTabView().SelectedIndex(1);
+            FicTabView().SelectedIndex(static_cast<int32_t>(page));
+        }
+        else if (section == L"msc" && page < 6)
+        {
+            DabTabView().SelectedIndex(2);
+            MscTabView().SelectedIndex(static_cast<int32_t>(page));
+        }
+        else if (section == L"dabplus" && page < 6)
+        {
+            DabTabView().SelectedIndex(3);
+            DabPlusMeasurementTabView().SelectedIndex(static_cast<int32_t>(page));
+        }
+    }
+
+    void MainWindow::MeasurementCaptureIq_Click(
+        IInspectable const& sender,
+        RoutedEventArgs const& args)
+    {
+        ShowWorkspace(WorkspaceKind::rf_measurements);
+        RfTabView().SelectedIndex(3);
+        RfNullCaptureIq_Click(sender, args);
+    }
+
+    void MainWindow::MeasurementAddAnnotation_Click(
+        IInspectable const& sender,
+        RoutedEventArgs const& args)
+    {
+        MarkerButton_Click(sender, args);
+    }
+
+    void MainWindow::MeasurementAlarmThresholds_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        ShowWorkspace(WorkspaceKind::rf_measurements);
+        RfTabView().SelectedIndex(6);
+        RfHistoryAlarmMeasurementComboBox().Focus(FocusState::Programmatic);
+    }
+
     void MainWindow::DabOverviewKpi_Click(IInspectable const& sender, RoutedEventArgs const&)
     {
         auto const button = sender.try_as<Button>();

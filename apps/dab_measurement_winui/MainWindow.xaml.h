@@ -34,6 +34,11 @@ namespace winrt::DabMeasurementWinUI::implementation
         void ReceiverBiasTee_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void ReceiverOpenServiceBrowser_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void ReceiverDiagnostics_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void MeasurementRfPage_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void MeasurementDabPage_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void MeasurementCaptureIq_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void MeasurementAddAnnotation_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void MeasurementAlarmThresholds_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void StartButton_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void ChannelComboBox_SelectionChanged(IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
         void ServicesListView_SelectionChanged(IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
