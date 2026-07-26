@@ -29,6 +29,25 @@ enum {
 };
 
 typedef struct {
+    uint8_t valid;
+    uint8_t decoder_backend;
+    uint8_t channels;
+    uint8_t output_active;
+    uint32_t sample_rate;
+    uint64_t pcm_frames_written;
+    uint64_t output_frames;
+    uint64_t muted_frames;
+    uint64_t underrun_events;
+    uint64_t longest_interruption_frames;
+    uint64_t clipped_samples;
+    uint64_t total_samples;
+    float left_rms_dbfs;
+    float right_rms_dbfs;
+    float left_peak_dbfs;
+    float right_peak_dbfs;
+} dab_audio_playback_diagnostics_t;
+
+typedef struct {
 #if defined(DAB_HAVE_FDK_AAC)
     HANDLE_AACDECODER decoder;
     INT_PCM pcm[8192];
@@ -67,6 +86,18 @@ typedef struct {
     uint32_t eq_pcm_frames;
     uint64_t eq_gain_version;
     dab_audio_spectrum_analyzer_t spectrum;
+    uint64_t diagnostic_pcm_frames_written;
+    uint64_t diagnostic_output_frames;
+    uint64_t diagnostic_muted_frames;
+    uint64_t diagnostic_underrun_events;
+    uint64_t diagnostic_longest_interruption_frames;
+    uint64_t diagnostic_clipped_samples;
+    uint64_t diagnostic_total_samples;
+    float diagnostic_left_rms_dbfs;
+    float diagnostic_right_rms_dbfs;
+    float diagnostic_left_peak_dbfs;
+    float diagnostic_right_peak_dbfs;
+    uint8_t diagnostic_level_valid;
 } dab_audio_playback_t;
 
 typedef void (*dab_audio_playback_spectrum_callback_t)(const float *bins,
@@ -79,6 +110,9 @@ void dab_audio_playback_set_spectrum_callback(dab_audio_playback_spectrum_callba
 void dab_audio_playback_set_equalizer_gains(const float *gains_db, uint32_t count);
 void dab_audio_playback_close(dab_audio_playback_t *audio);
 int dab_audio_playback_output_active(dab_audio_playback_t *audio);
+int dab_audio_playback_get_diagnostics(
+    dab_audio_playback_t *audio,
+    dab_audio_playback_diagnostics_t *diagnostics);
 int dab_audio_playback_set_format(dab_audio_playback_t *audio,
                                   uint32_t service_id,
                                   uint32_t sample_rate,

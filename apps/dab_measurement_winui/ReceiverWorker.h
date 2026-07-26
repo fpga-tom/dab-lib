@@ -92,6 +92,43 @@ namespace dab::measurement
             uint32_t asc_length{ 0u };
             std::vector<uint8_t> data;
             uint64_t generation{ 0u };
+            uint32_t audio_unit_index{ 0u };
+            uint32_t audio_unit_start{ 0u };
+            bool crc_valid{ false };
+        };
+
+        struct AudioMeasurementState
+        {
+            bool format_valid{ false };
+            uint8_t decoder_backend{ DAB_AUDIO_DECODER_NONE };
+            uint32_t sample_rate{ 0u };
+            uint32_t channels{ 0u };
+            uint64_t au_received{ 0u };
+            uint64_t au_crc_rejected{ 0u };
+            uint64_t au_decoded{ 0u };
+            uint64_t aac_errors{ 0u };
+            uint64_t output_errors{ 0u };
+            uint64_t queue_drops{ 0u };
+            bool level_valid{ false };
+            float left_rms_dbfs{ 0.0f };
+            float right_rms_dbfs{ 0.0f };
+            float left_peak_dbfs{ 0.0f };
+            float right_peak_dbfs{ 0.0f };
+            uint64_t clipped_samples{ 0u };
+            uint64_t total_samples{ 0u };
+            uint64_t output_frames{ 0u };
+            uint64_t muted_frames{ 0u };
+            uint64_t underrun_events{ 0u };
+            uint64_t longest_interruption_frames{ 0u };
+            uint64_t last_pcm_frames{ 0u };
+            uint64_t last_output_frames{ 0u };
+            uint64_t last_muted_frames{ 0u };
+            uint64_t last_underrun_events{ 0u };
+            uint64_t last_clipped_samples{ 0u };
+            uint64_t last_total_samples{ 0u };
+            uint64_t pad_access_units{ 0u };
+            uint64_t pad_parse_errors{ 0u };
+            std::deque<dab_receive_audio_au_history_entry_t> au_history;
         };
 
         static int CancelCallback(void* user) noexcept;
@@ -108,6 +145,11 @@ namespace dab::measurement
         void EnqueueAudioFormat(dab_receive_event_t const& event);
         void EnqueueAudioAccessUnit(dab_receive_event_t const& event);
         void EnqueueAudioReset() noexcept;
+        void ResetAudioMeasurements() noexcept;
+        void CaptureAudioPlaybackDiagnostics(bool reset_baseline) noexcept;
+        void RecordAudioAccessUnit(AudioCommand const& command,
+                                   dab_receive_audio_au_result_t result) noexcept;
+        void ApplyAudioMeasurements(dab_receive_snapshot_t& snapshot) noexcept;
         void AccumulateRecoveredSession() noexcept;
         void PublishStatus(ReceiverState state,
                            std::string message,
@@ -138,6 +180,8 @@ namespace dab::measurement
         std::deque<AudioCommand> m_audio_commands;
         bool m_audio_stop_requested{ false };
         std::atomic<bool> m_audio_output_active{ false };
+        std::mutex m_audio_measurement_mutex;
+        AudioMeasurementState m_audio_measurements{};
         uint32_t m_recovery_attempt_count{ 0u };
         uint64_t m_snapshot_sequence_offset{ 0u };
         uint64_t m_measurement_sequence_offset{ 0u };
@@ -158,7 +202,11 @@ namespace dab::measurement
         uint64_t m_msc_generation_offset{ 0u };
         uint64_t m_msc_decode_attempts_offset{ 0u };
         uint64_t m_msc_decode_failures_offset{ 0u };
+        uint64_t m_msc_firecode_checks_offset{ 0u };
+        uint64_t m_msc_firecode_errors_offset{ 0u };
         uint64_t m_msc_rs_corrected_offset{ 0u };
+        uint64_t m_msc_rs_corrected_superframes_offset{ 0u };
+        uint64_t m_msc_rs_uncorrectable_offset{ 0u };
         uint64_t m_msc_au_crc_errors_offset{ 0u };
         uint64_t m_msc_au_crc_checks_offset{ 0u };
         uint64_t m_msc_ber_error_bits_offset{ 0u };

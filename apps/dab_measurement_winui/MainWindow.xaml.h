@@ -40,6 +40,9 @@ namespace winrt::DabMeasurementWinUI::implementation
         void MscCompareCapacity_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         winrt::fire_and_forget MscExportCapacity_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void MscTimelineOverlay_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void DabPlusMetricCard_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void DabPlusSuperframeSelectionChanged(IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
+        void DabPlusAudioUnitSelectionChanged(IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
         void RootLayout_SizeChanged(IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
         void RfWorkspace_SizeChanged(IInspectable const&, Microsoft::UI::Xaml::SizeChangedEventArgs const&);
         void CirExpandButton_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
@@ -112,6 +115,13 @@ namespace winrt::DabMeasurementWinUI::implementation
         void UpdateRfContext();
         void UpdateDabContext();
         void ApplyDabSnapshot(dab_receive_snapshot_t const& snapshot);
+        void ApplyDabPlusSnapshot(dab_receive_snapshot_t const& snapshot);
+        void RefreshDabPlusSuperframes();
+        void UpdateDabPlusSelectedSuperframe();
+        void RefreshDabPlusAudioUnits();
+        void UpdateDabPlusSelectedAudioUnit();
+        void UpdateDabPlusRsVisuals();
+        void UpdateDabPlusAlarms();
         void UpdateDabPipeline(dab_receive_snapshot_t const& snapshot);
         void AppendDabOverviewHistory(dab_receive_snapshot_t const& snapshot);
         void UpdateDabOverviewHistoryVisuals();
@@ -234,6 +244,11 @@ namespace winrt::DabMeasurementWinUI::implementation
         uint64_t m_dab_catalog_changed_tick{ 0u };
         uint32_t m_dab_last_audio_crc_errors{ 0u };
         uint64_t m_dab_last_audio_crc_error_tick{ 0u };
+        dab_receive_snapshot_t m_dabplus_latest_snapshot{};
+        bool m_dabplus_have_snapshot{ false };
+        uint32_t m_dabplus_last_attempt{ 0u };
+        uint64_t m_dabplus_last_audio_generation{ 0u };
+        uint8_t m_dabplus_last_audio_index{ 0u };
         struct FicFibHistoryEntry
         {
             uint64_t timestamp_ns;

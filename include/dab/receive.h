@@ -34,6 +34,9 @@ typedef struct {
     const uint8_t *audio_data;
     uint32_t audio_length;
     uint64_t generation;
+    uint32_t audio_unit_index;
+    uint32_t audio_unit_start;
+    uint8_t audio_crc_valid;
 } dab_receive_event_t;
 
 typedef int (*dab_receive_callback_t)(const dab_receive_event_t *event, void *user);
@@ -47,7 +50,11 @@ enum {
     DAB_RECEIVE_FIC_FIG_STAT_CAPACITY = 64u,
     DAB_RECEIVE_FIC_FIG_RAW_CAPACITY = 32u,
     DAB_RECEIVE_MSC_CIFS_PER_FRAME = 4u,
-    DAB_RECEIVE_MSC_RAW_CAPACITY = 256u
+    DAB_RECEIVE_MSC_RAW_CAPACITY = 256u,
+    DAB_RECEIVE_DABPLUS_MAX_AUS = 6u,
+    DAB_RECEIVE_DABPLUS_HISTORY_CAPACITY = 128u,
+    DAB_RECEIVE_AUDIO_AU_HISTORY_CAPACITY = 128u,
+    DAB_RECEIVE_AUDIO_AU_PREVIEW_CAPACITY = 64u
 };
 
 typedef struct {
@@ -65,6 +72,50 @@ typedef struct {
     uint8_t raw[DAB_RECEIVE_FIC_FIG_RAW_CAPACITY];
     uint8_t previous_raw[DAB_RECEIVE_FIC_FIG_RAW_CAPACITY];
 } dab_receive_fic_fig_stat_t;
+
+typedef struct {
+    uint8_t valid;
+    uint8_t firecode_valid;
+    uint8_t rs_uncorrectable;
+    uint8_t superframe_valid;
+    uint8_t au_count;
+    uint8_t au_crc_valid_mask;
+    uint8_t dac_rate;
+    uint8_t sbr_flag;
+    uint8_t aac_channel_mode;
+    uint8_t ps_flag;
+    uint16_t rs_corrected_bytes;
+    uint16_t rs_uncorrectable_rows;
+    uint32_t attempt_number;
+    uint64_t generation;
+    uint64_t frame_start_sample;
+    uint32_t superframe_bytes;
+    uint32_t au_start[DAB_RECEIVE_DABPLUS_MAX_AUS];
+    uint32_t au_length[DAB_RECEIVE_DABPLUS_MAX_AUS];
+} dab_receive_dabplus_history_entry_t;
+
+typedef enum {
+    DAB_RECEIVE_AUDIO_AU_PENDING = 0,
+    DAB_RECEIVE_AUDIO_AU_DECODED = 1,
+    DAB_RECEIVE_AUDIO_AU_CRC_REJECTED = 2,
+    DAB_RECEIVE_AUDIO_AU_DECODE_ERROR = 3,
+    DAB_RECEIVE_AUDIO_AU_OUTPUT_ERROR = 4
+} dab_receive_audio_au_result_t;
+
+typedef struct {
+    uint8_t valid;
+    uint8_t au_index;
+    uint8_t crc_valid;
+    uint8_t decoder_result;
+    uint8_t pad_present;
+    uint8_t preview_length;
+    uint16_t reserved;
+    uint64_t generation;
+    uint64_t timestamp_ns;
+    uint32_t start_offset;
+    uint32_t length;
+    uint8_t preview[DAB_RECEIVE_AUDIO_AU_PREVIEW_CAPACITY];
+} dab_receive_audio_au_history_entry_t;
 
 typedef struct {
     uint64_t sequence;
@@ -199,14 +250,66 @@ typedef struct {
     uint64_t msc_superframe_generation;
     uint32_t msc_decode_attempts;
     uint32_t msc_decode_failures;
+    uint32_t msc_firecode_checks_total;
+    uint32_t msc_firecode_errors_total;
     uint32_t msc_rs_corrected_last_superframe;
     uint32_t msc_rs_corrected_total;
+    uint32_t msc_rs_corrected_superframes;
+    uint32_t msc_rs_uncorrectable_last_superframe;
+    uint32_t msc_rs_uncorrectable_total;
+    uint32_t msc_rs_corrected_max;
     uint32_t msc_au_crc_errors_last_superframe;
     uint32_t msc_au_crc_errors_total;
     uint32_t msc_au_crc_checks_total;
+    uint8_t msc_dabplus_dac_rate;
+    uint8_t msc_dabplus_sbr_flag;
+    uint8_t msc_dabplus_aac_channel_mode;
+    uint8_t msc_dabplus_ps_flag;
+    uint8_t msc_dabplus_mpeg_surround_config;
+    uint8_t msc_dabplus_au_count;
+    uint8_t msc_dabplus_au_crc_valid[DAB_RECEIVE_DABPLUS_MAX_AUS];
+    uint32_t msc_dabplus_au_start[DAB_RECEIVE_DABPLUS_MAX_AUS];
+    uint32_t msc_dabplus_au_length[DAB_RECEIVE_DABPLUS_MAX_AUS];
+    uint8_t msc_dabplus_au_preview_length[DAB_RECEIVE_DABPLUS_MAX_AUS];
+    uint8_t msc_dabplus_au_preview[DAB_RECEIVE_DABPLUS_MAX_AUS]
+                                  [DAB_RECEIVE_AUDIO_AU_PREVIEW_CAPACITY];
+    uint32_t msc_dabplus_history_count;
+    dab_receive_dabplus_history_entry_t
+        msc_dabplus_history[DAB_RECEIVE_DABPLUS_HISTORY_CAPACITY];
     int msc_last_decode_ok;
     uint32_t msc_runtime_reset_count;
     uint8_t msc_last_reconfig_reason;
+
+    int audio_format_valid;
+    int audio_output_active;
+    uint8_t audio_decoder_backend;
+    uint32_t audio_sample_rate_hz;
+    uint32_t audio_channels;
+    uint64_t audio_au_received;
+    uint64_t audio_au_crc_rejected;
+    uint64_t audio_au_decoded;
+    uint64_t audio_aac_errors;
+    uint64_t audio_output_errors;
+    uint64_t audio_queue_drops;
+    int audio_level_valid;
+    float audio_left_rms_dbfs;
+    float audio_right_rms_dbfs;
+    float audio_left_peak_dbfs;
+    float audio_right_peak_dbfs;
+    uint64_t audio_clipped_samples;
+    uint64_t audio_total_samples;
+    float audio_clipping_percent;
+    uint64_t audio_output_frames;
+    uint64_t audio_muted_frames;
+    uint64_t audio_underrun_events;
+    uint64_t audio_longest_interruption_frames;
+    float audio_availability_percent;
+    uint64_t pad_access_units;
+    uint64_t pad_parse_errors;
+    uint8_t pad_metadata_decoder_supported;
+    uint32_t audio_au_history_count;
+    dab_receive_audio_au_history_entry_t
+        audio_au_history[DAB_RECEIVE_AUDIO_AU_HISTORY_CAPACITY];
 } dab_receive_snapshot_t;
 
 typedef int (*dab_receive_snapshot_callback_t)(const dab_receive_snapshot_t *snapshot, void *user);

@@ -832,6 +832,48 @@ namespace winrt::DabMeasurementWinUI::implementation
         }
     }
 
+    void MainWindow::DabPlusMetricCard_Click(
+        IInspectable const& sender,
+        RoutedEventArgs const&)
+    {
+        auto const button = sender.try_as<Button>();
+        if (!button)
+        {
+            return;
+        }
+        hstring const tag = unbox_value_or<hstring>(button.Tag(), L"");
+        if (tag == L"Superframes")
+        {
+            DabPlusMeasurementTabView().SelectedIndex(1);
+        }
+        else if (tag == L"ReedSolomon")
+        {
+            DabPlusMeasurementTabView().SelectedIndex(2);
+        }
+        else if (tag == L"AudioUnits")
+        {
+            DabPlusMeasurementTabView().SelectedIndex(3);
+        }
+        else if (tag == L"Audio")
+        {
+            DabPlusMeasurementTabView().SelectedIndex(4);
+        }
+    }
+
+    void MainWindow::DabPlusSuperframeSelectionChanged(
+        IInspectable const&,
+        SelectionChangedEventArgs const&)
+    {
+        UpdateDabPlusSelectedSuperframe();
+    }
+
+    void MainWindow::DabPlusAudioUnitSelectionChanged(
+        IInspectable const&,
+        SelectionChangedEventArgs const&)
+    {
+        UpdateDabPlusSelectedAudioUnit();
+    }
+
     void MainWindow::MscCompareCapacity_Click(IInspectable const&,
                                                RoutedEventArgs const&)
     {
@@ -2397,6 +2439,13 @@ namespace winrt::DabMeasurementWinUI::implementation
 
         DabContextText().Text(channel + L" · " + frequency + L" · Ensemble: " +
                               ensemble + L" · Service: " + service_name);
+        if (DabPlusHeaderContextText())
+        {
+            DabPlusHeaderContextText().Text(
+                channel + L" · " + frequency + L" · Ensemble: " +
+                ensemble + L" · Service: " + service_name +
+                L" · Component: " + component_name);
+        }
         DabComponentContextText().Text(L"Component: " + component_detail);
         DabOverviewEnsembleText().Text(ensemble);
         DabOverviewServiceText().Text(service_name);
@@ -4546,8 +4595,629 @@ namespace winrt::DabMeasurementWinUI::implementation
         swprintf_s(reconfiguration, L"Reason mask 0x%02X", snapshot.msc_last_reconfig_reason);
         DabPlusReconfigText().Text(reconfiguration);
 
+        ApplyDabPlusSnapshot(snapshot);
         UpdateDabPipeline(snapshot);
         AppendDabOverviewHistory(snapshot);
+    }
+
+    void MainWindow::ApplyDabPlusSnapshot(
+        dab_receive_snapshot_t const& snapshot)
+    {
+        m_dabplus_latest_snapshot = snapshot;
+        m_dabplus_have_snapshot = true;
+
+        hstring context = DabContextText().Text();
+        if (snapshot.audio_format_valid != 0)
+        {
+            context = context + L" · " +
+                to_hstring(snapshot.audio_sample_rate_hz / 1000u) +
+                L" kHz · " +
+                (snapshot.audio_channels == 1u
+                    ? hstring{ L"Mono" }
+                    : hstring{ L"Stereo" });
+        }
+        DabPlusHeaderContextText().Text(context);
+        DabPlusLiveBadgeText().Text(m_metrics_stale ? L"STALE" : L"● LIVE");
+        DabPlusAudioBadgeText().Text(snapshot.audio_output_active != 0
+            ? L"● AUDIO VALID"
+            : (snapshot.msc_superframe_valid != 0
+                ? hstring{ L"AUDIO BUFFERING" }
+                : hstring{ L"AUDIO WAITING" }));
+
+        auto percent_text = [](uint64_t good, uint64_t total)
+        {
+            return total != 0u
+                ? format_float(
+                    100.0f * static_cast<float>(good) /
+                        static_cast<float>(total),
+                    L"% valid",
+                    2)
+                : hstring{ L"—" };
+        };
+
+        uint64_t const attempts = snapshot.msc_decode_attempts;
+        uint64_t invalid = snapshot.msc_decode_failures;
+        invalid += snapshot.msc_rs_uncorrectable_total;
+        invalid = (std::min)(invalid, attempts);
+        uint64_t const valid_superframes = attempts - invalid;
+        DabPlusSuperframeValidValueText().Text(
+            percent_text(valid_superframes, attempts));
+        DabPlusSuperframeValidDetailText().Text(attempts != 0u
+            ? to_hstring(valid_superframes) + L" / " +
+                to_hstring(attempts)
+            : hstring{ L"Awaiting frames" });
+
+        uint64_t const fire_checks = snapshot.msc_firecode_checks_total;
+        uint64_t const fire_errors = (std::min)(
+            static_cast<uint64_t>(snapshot.msc_firecode_errors_total),
+            fire_checks);
+        DabPlusFireCodeValueText().Text(
+            percent_text(fire_checks - fire_errors, fire_checks));
+        DabPlusFireCodeDetailText().Text(fire_checks != 0u
+            ? to_hstring(fire_errors) +
+                (fire_errors == 1u ? L" failure" : L" failures")
+            : hstring{ L"Awaiting checks" });
+
+        if (snapshot.msc_superframe_generation != 0u)
+        {
+            DabPlusRsMeanValueText().Text(format_float(
+                static_cast<float>(snapshot.msc_rs_corrected_total) /
+                    static_cast<float>(snapshot.msc_superframe_generation),
+                L" bytes/frame",
+                1));
+            DabPlusRsMeanDetailText().Text(
+                L"Peak " + to_hstring(snapshot.msc_rs_corrected_max) +
+                L" · latest " +
+                to_hstring(snapshot.msc_rs_corrected_last_superframe));
+        }
+        else
+        {
+            DabPlusRsMeanValueText().Text(L"—");
+            DabPlusRsMeanDetailText().Text(L"Awaiting frames");
+        }
+        DabPlusRsUncorrectableValueText().Text(
+            to_hstring(snapshot.msc_rs_uncorrectable_total));
+
+        uint64_t const au_checks = snapshot.msc_au_crc_checks_total;
+        uint64_t const au_errors = (std::min)(
+            static_cast<uint64_t>(snapshot.msc_au_crc_errors_total),
+            au_checks);
+        DabPlusAuCrcValueText().Text(
+            percent_text(au_checks - au_errors, au_checks));
+        DabPlusAuCrcDetailText().Text(au_checks != 0u
+            ? to_hstring(au_errors) + L" failures"
+            : hstring{ L"Awaiting units" });
+        DabPlusAacErrorValueText().Text(
+            to_hstring(snapshot.audio_aac_errors));
+        DabPlusAacErrorDetailText().Text(
+            snapshot.audio_aac_errors == 0u &&
+            snapshot.audio_au_decoded != 0u
+                ? hstring{ L"Decoder healthy" }
+                : to_hstring(snapshot.audio_au_decoded) +
+                    L" units decoded");
+
+        uint64_t muted_ms = 0u;
+        uint64_t longest_ms = 0u;
+        if (snapshot.audio_sample_rate_hz != 0u)
+        {
+            muted_ms = (snapshot.audio_muted_frames * 1000u) /
+                snapshot.audio_sample_rate_hz;
+            longest_ms =
+                (snapshot.audio_longest_interruption_frames * 1000u) /
+                snapshot.audio_sample_rate_hz;
+        }
+        DabPlusMuteValueText().Text(
+            to_hstring(muted_ms) + L" ms");
+        DabPlusMuteDetailText().Text(
+            L"Longest " + to_hstring(longest_ms) +
+            L" ms · concealment unavailable");
+        DabPlusAudioAvailabilityValueText().Text(
+            snapshot.audio_output_frames != 0u
+                ? format_float(snapshot.audio_availability_percent, L"%", 2)
+                : hstring{ L"—" });
+        DabPlusAudioAvailabilityDetailText().Text(
+            to_hstring(snapshot.audio_underrun_events) +
+            L" output underruns");
+
+        if (snapshot.audio_level_valid != 0)
+        {
+            DabPlusAudioLeftRmsText().Text(
+                L"Left RMS          " +
+                format_float(snapshot.audio_left_rms_dbfs, L" dBFS", 1));
+            DabPlusAudioRightRmsText().Text(
+                L"Right RMS         " +
+                format_float(snapshot.audio_right_rms_dbfs, L" dBFS", 1));
+            DabPlusAudioLeftPeakText().Text(
+                L"Left peak         " +
+                format_float(snapshot.audio_left_peak_dbfs, L" dBFS", 1));
+            DabPlusAudioRightPeakText().Text(
+                L"Right peak        " +
+                format_float(snapshot.audio_right_peak_dbfs, L" dBFS", 1));
+        }
+        else
+        {
+            DabPlusAudioLeftRmsText().Text(L"Left RMS          —");
+            DabPlusAudioRightRmsText().Text(L"Right RMS         —");
+            DabPlusAudioLeftPeakText().Text(L"Left peak         —");
+            DabPlusAudioRightPeakText().Text(L"Right peak        —");
+        }
+        DabPlusAudioClippingText().Text(
+            L"Audio clipping    " +
+            to_hstring(snapshot.audio_clipped_samples) + L" · " +
+            format_float(snapshot.audio_clipping_percent, L"%", 4));
+        DabPlusAudioValidText().Text(
+            L"Valid audio       " +
+            (snapshot.audio_output_frames != 0u
+                ? format_float(snapshot.audio_availability_percent, L"%", 2)
+                : hstring{ L"—" }));
+        DabPlusAudioMutedText().Text(
+            L"Muted audio       " + to_hstring(muted_ms) + L" ms");
+        DabPlusAudioLongestMuteText().Text(
+            L"Longest interruption " + to_hstring(longest_ms) + L" ms");
+        DabPlusAudioUnderrunsText().Text(
+            L"Output underruns  " +
+            to_hstring(snapshot.audio_underrun_events));
+        DabPlusAudioQueueDropsText().Text(
+            L"Queue drops       " +
+            to_hstring(snapshot.audio_queue_drops));
+
+        hstring const mode = snapshot.audio_channels == 1u
+            ? L"Mono"
+            : (snapshot.audio_channels == 2u
+                ? hstring{ L"Stereo" }
+                : hstring{ L"—" });
+        DabPlusAudioFormatText().Text(
+            L"Format " + to_hstring(snapshot.audio_sample_rate_hz) +
+            L" Hz · " + mode +
+            (snapshot.msc_dabplus_sbr_flag != 0u
+                ? hstring{ L" · SBR" }
+                : hstring{ L" · no SBR" }) +
+            (snapshot.msc_dabplus_ps_flag != 0u
+                ? hstring{ L" · PS" }
+                : hstring{}));
+        hstring decoder{ L"Not configured" };
+        if (snapshot.audio_decoder_backend == DAB_AUDIO_DECODER_FAAD)
+        {
+            decoder = L"FAAD2";
+        }
+        else if (snapshot.audio_decoder_backend == DAB_AUDIO_DECODER_FDK)
+        {
+            decoder = L"FDK-AAC";
+        }
+        DabPlusAudioDecoderText().Text(
+            L"Decoder " + decoder +
+            (snapshot.audio_output_active != 0
+                ? hstring{ L" · output active" }
+                : hstring{ L" · output inactive" }));
+        DabPlusAudioCountsText().Text(
+            L"Audio units " + to_hstring(snapshot.audio_au_received) +
+            L" · decoded " + to_hstring(snapshot.audio_au_decoded) +
+            L" · CRC rejected " +
+            to_hstring(snapshot.audio_au_crc_rejected) +
+            L" · AAC errors " + to_hstring(snapshot.audio_aac_errors) +
+            L" · output errors " +
+            to_hstring(snapshot.audio_output_errors));
+        DabPlusPadDetectedText().Text(
+            to_hstring(snapshot.pad_access_units) + L" detected");
+        DabPlusPadErrorsText().Text(
+            to_hstring(snapshot.pad_parse_errors));
+        DabPlusPadSupportText().Text(
+            snapshot.pad_metadata_decoder_supported != 0u
+                ? hstring{ L"Enabled" }
+                : hstring{ L"Not implemented in the measurement receiver" });
+
+        uint32_t latest_attempt = 0u;
+        if (snapshot.msc_dabplus_history_count != 0u)
+        {
+            latest_attempt = snapshot.msc_dabplus_history[
+                snapshot.msc_dabplus_history_count - 1u].attempt_number;
+        }
+        if (latest_attempt != m_dabplus_last_attempt ||
+            (latest_attempt == 0u &&
+             snapshot.msc_dabplus_history_count == 0u))
+        {
+            m_dabplus_last_attempt = latest_attempt;
+            RefreshDabPlusSuperframes();
+            UpdateDabPlusRsVisuals();
+        }
+
+        uint64_t latest_audio_generation = 0u;
+        uint8_t latest_audio_index = 0u;
+        if (snapshot.audio_au_history_count != 0u)
+        {
+            auto const& latest = snapshot.audio_au_history[
+                snapshot.audio_au_history_count - 1u];
+            latest_audio_generation = latest.generation;
+            latest_audio_index = latest.au_index;
+        }
+        if (latest_audio_generation != m_dabplus_last_audio_generation ||
+            latest_audio_index != m_dabplus_last_audio_index)
+        {
+            m_dabplus_last_audio_generation = latest_audio_generation;
+            m_dabplus_last_audio_index = latest_audio_index;
+            RefreshDabPlusAudioUnits();
+        }
+        UpdateDabPlusAlarms();
+    }
+
+    void MainWindow::RefreshDabPlusSuperframes()
+    {
+        DabPlusSuperframeList().Items().Clear();
+        DabPlusSuperframeTimelinePanel().Children().Clear();
+        if (!m_dabplus_have_snapshot)
+        {
+            return;
+        }
+        auto const& snapshot = m_dabplus_latest_snapshot;
+        uint32_t const first = snapshot.msc_dabplus_history_count > 100u
+            ? snapshot.msc_dabplus_history_count - 100u
+            : 0u;
+        Brush const valid_brush = Application::Current().Resources().Lookup(
+            box_value(hstring{ L"MeasurementAccentBrush" })).as<Brush>();
+        Brush const corrected_brush = Application::Current().Resources().Lookup(
+            box_value(hstring{ L"SpectrumBrush" })).as<Brush>();
+        Brush const warning_brush = Application::Current().Resources().Lookup(
+            box_value(hstring{ L"WarningBrush" })).as<Brush>();
+        for (uint32_t index = first;
+             index < snapshot.msc_dabplus_history_count;
+             ++index)
+        {
+            auto const& frame = snapshot.msc_dabplus_history[index];
+            uint32_t valid_aus = 0u;
+            for (uint32_t au = 0u; au < frame.au_count; ++au)
+            {
+                if ((frame.au_crc_valid_mask & (1u << au)) != 0u)
+                {
+                    valid_aus++;
+                }
+            }
+            hstring state = frame.superframe_valid != 0u
+                ? L"VALID"
+                : (frame.firecode_valid == 0u
+                    ? hstring{ L"FIRE ERROR" }
+                    : (frame.rs_uncorrectable != 0u
+                        ? hstring{ L"RS UNCORRECTABLE" }
+                        : hstring{ L"INVALID" }));
+            hstring row = L"#" + to_hstring(frame.generation) +
+                L"   " + state +
+                L"   RS " + to_hstring(frame.rs_corrected_bytes) +
+                L" bytes   AU " + to_hstring(valid_aus) + L"/" +
+                to_hstring(frame.au_count) +
+                L"   sample " + to_hstring(frame.frame_start_sample);
+            DabPlusSuperframeList().Items().Append(box_value(row));
+
+            Border marker;
+            marker.Width(7.0);
+            marker.Height(frame.superframe_valid != 0u ? 24.0 : 34.0);
+            marker.CornerRadius(CornerRadius{ 2.0 });
+            marker.Background(frame.superframe_valid == 0u
+                ? warning_brush
+                : (frame.rs_corrected_bytes != 0u
+                    ? corrected_brush
+                    : valid_brush));
+            DabPlusSuperframeTimelinePanel().Children().Append(marker);
+        }
+        if (snapshot.msc_dabplus_history_count != 0u)
+        {
+            DabPlusSuperframeList().SelectedIndex(
+                static_cast<int32_t>(
+                    snapshot.msc_dabplus_history_count - first - 1u));
+        }
+    }
+
+    void MainWindow::UpdateDabPlusSelectedSuperframe()
+    {
+        if (!m_dabplus_have_snapshot)
+        {
+            return;
+        }
+        auto const& snapshot = m_dabplus_latest_snapshot;
+        uint32_t const first = snapshot.msc_dabplus_history_count > 100u
+            ? snapshot.msc_dabplus_history_count - 100u
+            : 0u;
+        int32_t const selected = DabPlusSuperframeList().SelectedIndex();
+        if (selected < 0 ||
+            first + static_cast<uint32_t>(selected) >=
+                snapshot.msc_dabplus_history_count)
+        {
+            return;
+        }
+        auto const& frame = snapshot.msc_dabplus_history[
+            first + static_cast<uint32_t>(selected)];
+        uint32_t valid_aus = 0u;
+        for (uint32_t au = 0u; au < frame.au_count; ++au)
+        {
+            valid_aus +=
+                (frame.au_crc_valid_mask & (1u << au)) != 0u ? 1u : 0u;
+        }
+        DabPlusSelectedSuperframeText().Text(
+            L"#" + to_hstring(frame.generation) +
+            L" · attempt " + to_hstring(frame.attempt_number));
+        DabPlusSelectedFireRsText().Text(
+            (frame.firecode_valid != 0u ? hstring{ L"Fire valid" }
+                                        : hstring{ L"Fire failed" }) +
+            L" · " + to_hstring(frame.rs_corrected_bytes) +
+            L" corrected · " +
+            to_hstring(frame.rs_uncorrectable_rows) +
+            L" uncorrectable rows");
+        DabPlusSelectedAuText().Text(
+            to_hstring(valid_aus) + L" / " +
+            to_hstring(frame.au_count) + L" CRC valid");
+        DabPlusSelectedImpactText().Text(
+            frame.superframe_valid != 0u && valid_aus == frame.au_count
+                ? hstring{ L"None recorded" }
+                : hstring{ L"AU rejected or audio muted" });
+        DabPlusSelectedSampleText().Text(
+            to_hstring(frame.frame_start_sample));
+    }
+
+    void MainWindow::RefreshDabPlusAudioUnits()
+    {
+        DabPlusAudioUnitList().Items().Clear();
+        if (!m_dabplus_have_snapshot)
+        {
+            return;
+        }
+        auto const& snapshot = m_dabplus_latest_snapshot;
+        for (uint32_t index = 0u;
+             index < snapshot.audio_au_history_count;
+             ++index)
+        {
+            auto const& au = snapshot.audio_au_history[index];
+            hstring result{ L"Pending" };
+            switch (au.decoder_result)
+            {
+            case DAB_RECEIVE_AUDIO_AU_DECODED:
+                result = L"Decoded";
+                break;
+            case DAB_RECEIVE_AUDIO_AU_CRC_REJECTED:
+                result = L"CRC rejected";
+                break;
+            case DAB_RECEIVE_AUDIO_AU_DECODE_ERROR:
+                result = L"AAC error";
+                break;
+            case DAB_RECEIVE_AUDIO_AU_OUTPUT_ERROR:
+                result = L"Output error";
+                break;
+            default:
+                break;
+            }
+            DabPlusAudioUnitList().Items().Append(box_value(
+                L"SF " + to_hstring(au.generation) +
+                L" · AU " + to_hstring(au.au_index) +
+                L" · " + to_hstring(au.length) +
+                L" bytes · " + result +
+                (au.pad_present != 0u ? hstring{ L" · PAD" } : hstring{})));
+        }
+        if (snapshot.audio_au_history_count != 0u)
+        {
+            DabPlusAudioUnitList().SelectedIndex(
+                static_cast<int32_t>(
+                    snapshot.audio_au_history_count - 1u));
+        }
+    }
+
+    void MainWindow::UpdateDabPlusSelectedAudioUnit()
+    {
+        if (!m_dabplus_have_snapshot)
+        {
+            return;
+        }
+        int32_t const selected = DabPlusAudioUnitList().SelectedIndex();
+        auto const& snapshot = m_dabplus_latest_snapshot;
+        if (selected < 0 ||
+            static_cast<uint32_t>(selected) >=
+                snapshot.audio_au_history_count)
+        {
+            return;
+        }
+        auto const& au =
+            snapshot.audio_au_history[static_cast<uint32_t>(selected)];
+        hstring result{ L"Pending" };
+        switch (au.decoder_result)
+        {
+        case DAB_RECEIVE_AUDIO_AU_DECODED:
+            result = L"Valid";
+            break;
+        case DAB_RECEIVE_AUDIO_AU_CRC_REJECTED:
+            result = L"Not decoded (CRC rejected)";
+            break;
+        case DAB_RECEIVE_AUDIO_AU_DECODE_ERROR:
+            result = L"AAC decoder error";
+            break;
+        case DAB_RECEIVE_AUDIO_AU_OUTPUT_ERROR:
+            result = L"Audio output error";
+            break;
+        default:
+            break;
+        }
+        DabPlusAuDetailIdentityText().Text(
+            L"Superframe " + to_hstring(au.generation) +
+            L" · AU " + to_hstring(au.au_index) +
+            L" · " + to_hstring(au.length) + L" bytes");
+        DabPlusAuDetailOffsetsText().Text(
+            L"Start " + to_hstring(au.start_offset) +
+            L" · end " + to_hstring(au.start_offset + au.length));
+        DabPlusAuDetailCrcText().Text(
+            au.crc_valid != 0u ? L"CRC valid" : L"CRC error");
+        DabPlusAuDetailDecoderText().Text(
+            L"AAC decode: " + result);
+        DabPlusAuDetailFormatText().Text(
+            (snapshot.msc_dabplus_sbr_flag != 0u
+                ? hstring{ L"SBR enabled" }
+                : hstring{ L"SBR disabled" }) +
+            L" · " +
+            (snapshot.msc_dabplus_ps_flag != 0u
+                ? hstring{ L"PS enabled" }
+                : hstring{ L"PS disabled" }) +
+            L" · concealment not implemented");
+        DabPlusAuDetailRawText().Text(
+            au.preview_length != 0u
+                ? bytes_to_hex(au.preview, au.preview_length)
+                : hstring{ L"—" });
+    }
+
+    void MainWindow::UpdateDabPlusRsVisuals()
+    {
+        if (!m_dabplus_have_snapshot)
+        {
+            return;
+        }
+        auto const& snapshot = m_dabplus_latest_snapshot;
+        uint32_t buckets[5]{};
+        uint32_t uncorrectable = 0u;
+        PointCollection points;
+        double const width = DabPlusRsHistoryCanvas().ActualWidth() > 1.0
+            ? DabPlusRsHistoryCanvas().ActualWidth()
+            : 620.0;
+        double const height = 300.0;
+        uint32_t const count = snapshot.msc_dabplus_history_count;
+        uint32_t const first = count > 100u ? count - 100u : 0u;
+        uint32_t const visible = count - first;
+        uint32_t max_value = 1u;
+        for (uint32_t index = first; index < count; ++index)
+        {
+            max_value = (std::max)(
+                max_value,
+                static_cast<uint32_t>(
+                    snapshot.msc_dabplus_history[index].rs_corrected_bytes));
+        }
+        for (uint32_t index = first; index < count; ++index)
+        {
+            auto const& frame = snapshot.msc_dabplus_history[index];
+            uint32_t bucket = frame.rs_corrected_bytes == 0u ? 0u
+                : (frame.rs_corrected_bytes <= 2u ? 1u
+                : (frame.rs_corrected_bytes <= 5u ? 2u
+                : (frame.rs_corrected_bytes <= 10u ? 3u : 4u)));
+            buckets[bucket]++;
+            uncorrectable += frame.rs_uncorrectable != 0u ? 1u : 0u;
+            double const x = visible > 1u
+                ? width * static_cast<double>(index - first) /
+                    static_cast<double>(visible - 1u)
+                : 0.0;
+            double const y = height - 8.0 -
+                (height - 16.0) *
+                    static_cast<double>(frame.rs_corrected_bytes) /
+                    static_cast<double>(max_value);
+            points.Append(Point{
+                static_cast<float>(x),
+                static_cast<float>(y)
+            });
+        }
+        DabPlusRsHistoryPolyline().Points(points);
+
+        std::array<TextBlock, 5> labels{
+            DabPlusRsDistributionZeroText(),
+            DabPlusRsDistributionLowText(),
+            DabPlusRsDistributionMediumText(),
+            DabPlusRsDistributionHighText(),
+            DabPlusRsDistributionSevereText()
+        };
+        std::array<ProgressBar, 5> bars{
+            DabPlusRsDistributionZeroBar(),
+            DabPlusRsDistributionLowBar(),
+            DabPlusRsDistributionMediumBar(),
+            DabPlusRsDistributionHighBar(),
+            DabPlusRsDistributionSevereBar()
+        };
+        wchar_t const* names[5]{
+            L"0 bytes", L"1–2 bytes", L"3–5 bytes",
+            L"6–10 bytes", L">10 bytes"
+        };
+        for (uint32_t index = 0u; index < 5u; ++index)
+        {
+            float const percent = visible != 0u
+                ? 100.0f * static_cast<float>(buckets[index]) /
+                    static_cast<float>(visible)
+                : 0.0f;
+            labels[index].Text(
+                hstring{ names[index] } + L"   " +
+                format_float(percent, L"%", 1));
+            bars[index].Value(percent);
+        }
+        DabPlusRsSummaryText().Text(
+            L"Mean corrected bytes " +
+            (snapshot.msc_superframe_generation != 0u
+                ? format_float(
+                    static_cast<float>(snapshot.msc_rs_corrected_total) /
+                        static_cast<float>(
+                            snapshot.msc_superframe_generation),
+                    L"",
+                    2)
+                : hstring{ L"—" }) +
+            L" · maximum " + to_hstring(snapshot.msc_rs_corrected_max) +
+            L" · corrected superframes " +
+            to_hstring(snapshot.msc_rs_corrected_superframes) +
+            L" · uncorrectable " +
+            to_hstring(snapshot.msc_rs_uncorrectable_total) +
+            L" (visible " + to_hstring(uncorrectable) + L")");
+    }
+
+    void MainWindow::UpdateDabPlusAlarms()
+    {
+        DabPlusAlarmList().Items().Clear();
+        if (!m_dabplus_have_snapshot)
+        {
+            return;
+        }
+        auto const& snapshot = m_dabplus_latest_snapshot;
+        auto add_alarm = [&](hstring const& text)
+        {
+            DabPlusAlarmList().Items().Append(
+                box_value(L"⚠ " + text));
+        };
+        if (snapshot.msc_firecode_errors_total != 0u)
+        {
+            add_alarm(L"Fire-code failures: " +
+                      to_hstring(snapshot.msc_firecode_errors_total));
+        }
+        if (snapshot.msc_rs_corrected_last_superframe > 10u)
+        {
+            add_alarm(L"High RS corrections in latest frame: " +
+                      to_hstring(
+                          snapshot.msc_rs_corrected_last_superframe) +
+                      L" bytes");
+        }
+        if (snapshot.msc_rs_uncorrectable_total != 0u)
+        {
+            add_alarm(L"RS uncorrectable superframes: " +
+                      to_hstring(snapshot.msc_rs_uncorrectable_total));
+        }
+        if (snapshot.msc_au_crc_errors_total != 0u)
+        {
+            add_alarm(L"Audio-unit CRC failures: " +
+                      to_hstring(snapshot.msc_au_crc_errors_total));
+        }
+        if (snapshot.audio_aac_errors != 0u)
+        {
+            add_alarm(L"AAC decoder failures: " +
+                      to_hstring(snapshot.audio_aac_errors));
+        }
+        if (snapshot.audio_output_frames != 0u &&
+            snapshot.audio_availability_percent < 99.0f)
+        {
+            add_alarm(L"Audio availability below 99%: " +
+                      format_float(
+                          snapshot.audio_availability_percent,
+                          L"%",
+                          2));
+        }
+        if (snapshot.audio_clipped_samples != 0u)
+        {
+            add_alarm(L"Audio PCM clipping: " +
+                      to_hstring(snapshot.audio_clipped_samples) +
+                      L" samples");
+        }
+        if (snapshot.pad_parse_errors != 0u)
+        {
+            add_alarm(L"Malformed PAD framing: " +
+                      to_hstring(snapshot.pad_parse_errors));
+        }
+        if (DabPlusAlarmList().Items().Size() == 0u)
+        {
+            DabPlusAlarmList().Items().Append(
+                box_value(L"No current DAB+ warnings"));
+        }
     }
 
     void MainWindow::UpdateDabPipeline(dab_receive_snapshot_t const& snapshot)
@@ -4744,6 +5414,18 @@ namespace winrt::DabMeasurementWinUI::implementation
         m_dab_catalog_changed_tick = m_tick;
         m_dab_last_audio_crc_errors = 0u;
         m_dab_last_audio_crc_error_tick = 0u;
+        m_dabplus_latest_snapshot = {};
+        m_dabplus_have_snapshot = false;
+        m_dabplus_last_attempt = 0u;
+        m_dabplus_last_audio_generation = 0u;
+        m_dabplus_last_audio_index = 0u;
+        if (DabPlusSuperframeList())
+        {
+            DabPlusSuperframeList().Items().Clear();
+            DabPlusSuperframeTimelinePanel().Children().Clear();
+            DabPlusAudioUnitList().Items().Clear();
+            DabPlusAlarmList().Items().Clear();
+        }
         DabOverviewMuteMarkerText().Text(L"No superframe interruptions");
         UpdateDabOverviewHistoryVisuals();
 

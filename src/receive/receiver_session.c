@@ -223,6 +223,9 @@ static int receive_emit_superframe(dab_receive_callback_t callback,
         event.audio_data = superframe->superframe_data + superframe->au_start[au_index];
         event.audio_length = superframe->au_length[au_index];
         event.generation = superframe->generation;
+        event.audio_unit_index = au_index;
+        event.audio_unit_start = superframe->au_start[au_index];
+        event.audio_crc_valid = superframe->au_crc_valid[au_index];
         if (callback(&event, user) != 0) {
             return -1;
         }

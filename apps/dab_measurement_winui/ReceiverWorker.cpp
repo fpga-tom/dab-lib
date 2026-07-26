@@ -40,6 +40,7 @@ namespace dab::measurement
 
         m_cancel_requested.store(false, std::memory_order_release);
         ResetPlaybackState();
+        ResetAudioMeasurements();
         m_recovery_attempt_count = 0u;
         m_snapshot_sequence_offset = 0u;
         m_measurement_sequence_offset = 0u;
@@ -60,7 +61,11 @@ namespace dab::measurement
         m_msc_generation_offset = 0u;
         m_msc_decode_attempts_offset = 0u;
         m_msc_decode_failures_offset = 0u;
+        m_msc_firecode_checks_offset = 0u;
+        m_msc_firecode_errors_offset = 0u;
         m_msc_rs_corrected_offset = 0u;
+        m_msc_rs_corrected_superframes_offset = 0u;
+        m_msc_rs_uncorrectable_offset = 0u;
         m_msc_au_crc_errors_offset = 0u;
         m_msc_au_crc_checks_offset = 0u;
         m_msc_ber_error_bits_offset = 0u;
@@ -251,8 +256,20 @@ namespace dab::measurement
             worker->m_msc_decode_attempts_offset + snapshot->msc_decode_attempts);
         adjusted.msc_decode_failures = saturate_u32(
             worker->m_msc_decode_failures_offset + snapshot->msc_decode_failures);
+        adjusted.msc_firecode_checks_total = saturate_u32(
+            worker->m_msc_firecode_checks_offset +
+            snapshot->msc_firecode_checks_total);
+        adjusted.msc_firecode_errors_total = saturate_u32(
+            worker->m_msc_firecode_errors_offset +
+            snapshot->msc_firecode_errors_total);
         adjusted.msc_rs_corrected_total = saturate_u32(
             worker->m_msc_rs_corrected_offset + snapshot->msc_rs_corrected_total);
+        adjusted.msc_rs_corrected_superframes = saturate_u32(
+            worker->m_msc_rs_corrected_superframes_offset +
+            snapshot->msc_rs_corrected_superframes);
+        adjusted.msc_rs_uncorrectable_total = saturate_u32(
+            worker->m_msc_rs_uncorrectable_offset +
+            snapshot->msc_rs_uncorrectable_total);
         adjusted.msc_au_crc_errors_total = saturate_u32(
             worker->m_msc_au_crc_errors_offset + snapshot->msc_au_crc_errors_total);
         adjusted.msc_au_crc_checks_total = saturate_u32(
@@ -295,6 +312,18 @@ namespace dab::measurement
             adjusted.hardware_overruns = saturate_u32(
                 worker->m_hardware_overruns_offset + snapshot->hardware_overruns);
         }
+        for (uint32_t index = 0u;
+             index < adjusted.msc_dabplus_history_count;
+             ++index)
+        {
+            adjusted.msc_dabplus_history[index].attempt_number =
+                saturate_u32(
+                    worker->m_msc_decode_attempts_offset +
+                    adjusted.msc_dabplus_history[index].attempt_number);
+            adjusted.msc_dabplus_history[index].generation +=
+                worker->m_msc_generation_offset;
+        }
+        worker->ApplyAudioMeasurements(adjusted);
         worker->m_mailbox.Publish(adjusted);
         return 0;
     }
@@ -548,6 +577,12 @@ namespace dab::measurement
         {
             std::copy_n(event.asc, command.asc_length, command.asc.begin());
         }
+        {
+            std::scoped_lock measurement_lock{ m_audio_measurement_mutex };
+            m_audio_measurements.format_valid = true;
+            m_audio_measurements.sample_rate = event.sample_rate;
+            m_audio_measurements.channels = event.channels;
+        }
 
         {
             std::scoped_lock lock{ m_audio_queue_mutex };
@@ -570,7 +605,10 @@ namespace dab::measurement
             return;
         }
         command.kind = AudioCommandKind::access_unit;
-        command.generation = event.generation;
+        command.generation = event.generation + m_msc_generation_offset;
+        command.audio_unit_index = event.audio_unit_index;
+        command.audio_unit_start = event.audio_unit_start;
+        command.crc_valid = event.audio_crc_valid != 0u;
         command.data.assign(event.audio_data, event.audio_data + event.audio_length);
 
         {
@@ -593,10 +631,266 @@ namespace dab::measurement
                     return;
                 }
                 m_audio_commands.erase(oldest_audio);
+                {
+                    std::scoped_lock measurement_lock{
+                        m_audio_measurement_mutex
+                    };
+                    m_audio_measurements.queue_drops++;
+                }
             }
             m_audio_commands.push_back(std::move(command));
         }
         m_audio_queue_cv.notify_one();
+    }
+
+    void ReceiverWorker::ResetAudioMeasurements() noexcept
+    {
+        try
+        {
+            std::scoped_lock lock{ m_audio_measurement_mutex };
+            m_audio_measurements = {};
+        }
+        catch (...)
+        {
+        }
+    }
+
+    void ReceiverWorker::CaptureAudioPlaybackDiagnostics(
+        bool reset_baseline) noexcept
+    {
+        dab_audio_playback_diagnostics_t diagnostics{};
+        if (dab_audio_playback_get_diagnostics(
+                &m_audio_playback,
+                &diagnostics) != 0)
+        {
+            return;
+        }
+        try
+        {
+            std::scoped_lock lock{ m_audio_measurement_mutex };
+            auto& state = m_audio_measurements;
+            auto add_delta = [](uint64_t current,
+                                uint64_t& previous,
+                                uint64_t& total)
+            {
+                total += current >= previous
+                    ? current - previous
+                    : current;
+                previous = current;
+            };
+            uint64_t unused_pcm_total = 0u;
+            add_delta(diagnostics.pcm_frames_written,
+                      state.last_pcm_frames,
+                      unused_pcm_total);
+            add_delta(diagnostics.output_frames,
+                      state.last_output_frames,
+                      state.output_frames);
+            add_delta(diagnostics.muted_frames,
+                      state.last_muted_frames,
+                      state.muted_frames);
+            add_delta(diagnostics.underrun_events,
+                      state.last_underrun_events,
+                      state.underrun_events);
+            add_delta(diagnostics.clipped_samples,
+                      state.last_clipped_samples,
+                      state.clipped_samples);
+            add_delta(diagnostics.total_samples,
+                      state.last_total_samples,
+                      state.total_samples);
+            state.longest_interruption_frames = (std::max)(
+                state.longest_interruption_frames,
+                diagnostics.longest_interruption_frames);
+            state.decoder_backend = diagnostics.decoder_backend;
+            if (diagnostics.pcm_frames_written != 0u)
+            {
+                state.level_valid = true;
+                state.left_rms_dbfs = diagnostics.left_rms_dbfs;
+                state.right_rms_dbfs = diagnostics.right_rms_dbfs;
+                state.left_peak_dbfs = diagnostics.left_peak_dbfs;
+                state.right_peak_dbfs = diagnostics.right_peak_dbfs;
+            }
+            if (reset_baseline)
+            {
+                state.last_pcm_frames = 0u;
+                state.last_output_frames = 0u;
+                state.last_muted_frames = 0u;
+                state.last_underrun_events = 0u;
+                state.last_clipped_samples = 0u;
+                state.last_total_samples = 0u;
+            }
+        }
+        catch (...)
+        {
+        }
+    }
+
+    void ReceiverWorker::RecordAudioAccessUnit(
+        AudioCommand const& command,
+        dab_receive_audio_au_result_t result) noexcept
+    {
+        try
+        {
+            dab_receive_audio_au_history_entry_t entry{};
+            entry.valid = 1u;
+            entry.au_index = static_cast<uint8_t>(command.audio_unit_index);
+            entry.crc_valid = command.crc_valid ? 1u : 0u;
+            entry.decoder_result = static_cast<uint8_t>(result);
+            entry.generation = command.generation;
+            entry.timestamp_ns = static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::system_clock::now().time_since_epoch())
+                    .count());
+            entry.start_offset = command.audio_unit_start;
+            entry.length = static_cast<uint32_t>(command.data.size());
+            entry.preview_length = static_cast<uint8_t>((std::min)(
+                command.data.size(),
+                static_cast<size_t>(
+                    DAB_RECEIVE_AUDIO_AU_PREVIEW_CAPACITY)));
+            if (entry.preview_length != 0u)
+            {
+                std::copy_n(command.data.begin(),
+                            entry.preview_length,
+                            entry.preview);
+            }
+
+            bool pad_present = false;
+            bool pad_malformed = false;
+            if (command.crc_valid &&
+                command.data.size() >= 3u &&
+                (command.data[0] >> 5u) == 4u)
+            {
+                size_t pad_start = 2u;
+                size_t pad_length = command.data[1];
+                pad_present = true;
+                if (pad_length == 255u)
+                {
+                    if (command.data.size() < 4u)
+                    {
+                        pad_malformed = true;
+                    }
+                    else
+                    {
+                        pad_length += command.data[2];
+                        pad_start++;
+                    }
+                }
+                if (!pad_malformed &&
+                    (pad_length < 2u ||
+                     pad_start + pad_length > command.data.size()))
+                {
+                    pad_malformed = true;
+                }
+            }
+            entry.pad_present = pad_present ? 1u : 0u;
+
+            std::scoped_lock lock{ m_audio_measurement_mutex };
+            auto& state = m_audio_measurements;
+            state.au_received++;
+            if (result == DAB_RECEIVE_AUDIO_AU_CRC_REJECTED)
+            {
+                state.au_crc_rejected++;
+            }
+            else if (result == DAB_RECEIVE_AUDIO_AU_DECODED)
+            {
+                state.au_decoded++;
+            }
+            else if (result == DAB_RECEIVE_AUDIO_AU_DECODE_ERROR)
+            {
+                state.aac_errors++;
+            }
+            else if (result == DAB_RECEIVE_AUDIO_AU_OUTPUT_ERROR)
+            {
+                state.output_errors++;
+            }
+            if (pad_present)
+            {
+                state.pad_access_units++;
+            }
+            if (pad_malformed)
+            {
+                state.pad_parse_errors++;
+            }
+            state.au_history.push_back(entry);
+            while (state.au_history.size() >
+                   DAB_RECEIVE_AUDIO_AU_HISTORY_CAPACITY)
+            {
+                state.au_history.pop_front();
+            }
+        }
+        catch (...)
+        {
+        }
+    }
+
+    void ReceiverWorker::ApplyAudioMeasurements(
+        dab_receive_snapshot_t& snapshot) noexcept
+    {
+        try
+        {
+            std::scoped_lock lock{ m_audio_measurement_mutex };
+            auto const& state = m_audio_measurements;
+            snapshot.audio_format_valid = state.format_valid ? 1 : 0;
+            snapshot.audio_output_active =
+                m_audio_output_active.load(std::memory_order_acquire) ? 1 : 0;
+            snapshot.audio_decoder_backend = state.decoder_backend;
+            snapshot.audio_sample_rate_hz = state.sample_rate;
+            snapshot.audio_channels = state.channels;
+            snapshot.audio_au_received = state.au_received;
+            snapshot.audio_au_crc_rejected = state.au_crc_rejected;
+            snapshot.audio_au_decoded = state.au_decoded;
+            snapshot.audio_aac_errors = state.aac_errors;
+            snapshot.audio_output_errors = state.output_errors;
+            snapshot.audio_queue_drops = state.queue_drops;
+            snapshot.audio_level_valid = state.level_valid ? 1 : 0;
+            snapshot.audio_left_rms_dbfs = state.left_rms_dbfs;
+            snapshot.audio_right_rms_dbfs = state.right_rms_dbfs;
+            snapshot.audio_left_peak_dbfs = state.left_peak_dbfs;
+            snapshot.audio_right_peak_dbfs = state.right_peak_dbfs;
+            snapshot.audio_clipped_samples = state.clipped_samples;
+            snapshot.audio_total_samples = state.total_samples;
+            snapshot.audio_clipping_percent =
+                state.total_samples != 0u
+                    ? static_cast<float>(
+                        100.0 *
+                        static_cast<double>(state.clipped_samples) /
+                        static_cast<double>(state.total_samples))
+                    : 0.0f;
+            snapshot.audio_output_frames = state.output_frames;
+            snapshot.audio_muted_frames = state.muted_frames;
+            snapshot.audio_underrun_events = state.underrun_events;
+            snapshot.audio_longest_interruption_frames =
+                state.longest_interruption_frames;
+            snapshot.audio_availability_percent =
+                state.output_frames != 0u
+                    ? static_cast<float>(
+                        100.0 *
+                        static_cast<double>(
+                            state.output_frames - (std::min)(
+                                state.output_frames,
+                                state.muted_frames)) /
+                        static_cast<double>(state.output_frames))
+                    : 0.0f;
+            snapshot.pad_access_units = state.pad_access_units;
+            snapshot.pad_parse_errors = state.pad_parse_errors;
+            snapshot.pad_metadata_decoder_supported = 0u;
+            snapshot.audio_au_history_count =
+                static_cast<uint32_t>((std::min)(
+                    state.au_history.size(),
+                    static_cast<size_t>(
+                        DAB_RECEIVE_AUDIO_AU_HISTORY_CAPACITY)));
+            size_t const first =
+                state.au_history.size() - snapshot.audio_au_history_count;
+            for (uint32_t index = 0u;
+                 index < snapshot.audio_au_history_count;
+                 ++index)
+            {
+                snapshot.audio_au_history[index] =
+                    state.au_history[first + index];
+            }
+        }
+        catch (...)
+        {
+        }
     }
 
     void ReceiverWorker::EnqueueAudioReset() noexcept
@@ -633,6 +927,7 @@ namespace dab::measurement
         auto schedule_retry = [&](char const* reason)
         {
             m_audio_output_active.store(false, std::memory_order_release);
+            CaptureAudioPlaybackDiagnostics(true);
             dab_audio_playback_close(&m_audio_playback);
             decoder_configured = false;
             recovering = true;
@@ -677,6 +972,7 @@ namespace dab::measurement
                 if (command && command->kind == AudioCommandKind::reset)
                 {
                     m_audio_output_active.store(false, std::memory_order_release);
+                    CaptureAudioPlaybackDiagnostics(true);
                     dab_audio_playback_close(&m_audio_playback);
                     active_format.reset();
                     decoder_configured = false;
@@ -688,6 +984,7 @@ namespace dab::measurement
                 if (command && command->kind == AudioCommandKind::format)
                 {
                     m_audio_output_active.store(false, std::memory_order_release);
+                    CaptureAudioPlaybackDiagnostics(true);
                     dab_audio_playback_close(&m_audio_playback);
                     active_format = std::move(*command);
                     decoder_configured = false;
@@ -698,6 +995,13 @@ namespace dab::measurement
                 }
                 if (command && command->kind == AudioCommandKind::access_unit && active_format)
                 {
+                    if (!command->crc_valid)
+                    {
+                        RecordAudioAccessUnit(
+                            *command,
+                            DAB_RECEIVE_AUDIO_AU_CRC_REJECTED);
+                        continue;
+                    }
                     auto const now = clock::now();
                     if (!decoder_configured && now >= retry_at)
                     {
@@ -710,6 +1014,9 @@ namespace dab::measurement
                             active_format->asc_length);
                         if (configure_result != 0)
                         {
+                            RecordAudioAccessUnit(
+                                *command,
+                                DAB_RECEIVE_AUDIO_AU_OUTPUT_ERROR);
                             schedule_retry("Audio decoder or output setup failed");
                             continue;
                         }
@@ -717,6 +1024,9 @@ namespace dab::measurement
                     }
                     if (!decoder_configured)
                     {
+                        RecordAudioAccessUnit(
+                            *command,
+                            DAB_RECEIVE_AUDIO_AU_OUTPUT_ERROR);
                         continue;
                     }
 
@@ -727,9 +1037,17 @@ namespace dab::measurement
                         command->generation);
                     if (playback_result < 0)
                     {
+                        RecordAudioAccessUnit(
+                            *command,
+                            DAB_RECEIVE_AUDIO_AU_OUTPUT_ERROR);
                         schedule_retry("Audio decoding or output failed");
                         continue;
                     }
+                    RecordAudioAccessUnit(
+                        *command,
+                        playback_result == 0
+                            ? DAB_RECEIVE_AUDIO_AU_DECODED
+                            : DAB_RECEIVE_AUDIO_AU_DECODE_ERROR);
                     if (playback_result == 0 &&
                         dab_audio_playback_output_active(&m_audio_playback) > 0)
                     {
@@ -752,6 +1070,7 @@ namespace dab::measurement
                         schedule_retry("Audio output device stopped");
                     }
                 }
+                CaptureAudioPlaybackDiagnostics(false);
             }
         }
         catch (...)
@@ -759,6 +1078,7 @@ namespace dab::measurement
             PublishStatus(State(), "Audio worker stopped after an internal error", true);
         }
         m_audio_output_active.store(false, std::memory_order_release);
+        CaptureAudioPlaybackDiagnostics(true);
         dab_audio_playback_close(&m_audio_playback);
     }
 
@@ -794,7 +1114,15 @@ namespace dab::measurement
             m_msc_generation_offset += m_last_session_snapshot.msc_superframe_generation;
             m_msc_decode_attempts_offset += m_last_session_snapshot.msc_decode_attempts;
             m_msc_decode_failures_offset += m_last_session_snapshot.msc_decode_failures;
+            m_msc_firecode_checks_offset +=
+                m_last_session_snapshot.msc_firecode_checks_total;
+            m_msc_firecode_errors_offset +=
+                m_last_session_snapshot.msc_firecode_errors_total;
             m_msc_rs_corrected_offset += m_last_session_snapshot.msc_rs_corrected_total;
+            m_msc_rs_corrected_superframes_offset +=
+                m_last_session_snapshot.msc_rs_corrected_superframes;
+            m_msc_rs_uncorrectable_offset +=
+                m_last_session_snapshot.msc_rs_uncorrectable_total;
             m_msc_au_crc_errors_offset +=
                 m_last_session_snapshot.msc_au_crc_errors_total;
             m_msc_au_crc_checks_offset +=

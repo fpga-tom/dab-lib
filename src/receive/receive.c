@@ -591,6 +591,10 @@ void dab_receive_snapshot_build(dab_receive_snapshot_t *snapshot,
         snapshot->msc_superframe_generation = msc_audio->generation;
         snapshot->msc_decode_attempts = msc_audio->decode_attempts;
         snapshot->msc_decode_failures = msc_audio->decode_failures;
+        snapshot->msc_firecode_checks_total =
+            msc_audio->firecode_checks_total;
+        snapshot->msc_firecode_errors_total =
+            msc_audio->firecode_errors_total;
         snapshot->msc_ber_valid = msc_audio->ber_compared_bits != 0u;
         snapshot->msc_ber_error_bits = msc_audio->ber_error_bits;
         snapshot->msc_ber_compared_bits = msc_audio->ber_compared_bits;
@@ -600,10 +604,74 @@ void dab_receive_snapshot_build(dab_receive_snapshot_t *snapshot,
             : 0.0f;
         snapshot->msc_rs_corrected_last_superframe = msc_audio->rs_corrected_last_superframe;
         snapshot->msc_rs_corrected_total = msc_audio->rs_corrected_total;
+        snapshot->msc_rs_corrected_superframes =
+            msc_audio->rs_corrected_superframes;
+        snapshot->msc_rs_uncorrectable_last_superframe =
+            msc_audio->rs_uncorrectable_last_superframe;
+        snapshot->msc_rs_uncorrectable_total =
+            msc_audio->rs_uncorrectable_total;
+        snapshot->msc_rs_corrected_max = msc_audio->rs_corrected_max;
         snapshot->msc_au_crc_errors_last_superframe =
             msc_audio->au_crc_errors_last_superframe;
         snapshot->msc_au_crc_errors_total = msc_audio->au_crc_errors_total;
         snapshot->msc_au_crc_checks_total = msc_audio->au_crc_checks_total;
+        snapshot->msc_dabplus_dac_rate = msc_audio->dac_rate;
+        snapshot->msc_dabplus_sbr_flag = msc_audio->sbr_flag;
+        snapshot->msc_dabplus_aac_channel_mode =
+            msc_audio->aac_channel_mode;
+        snapshot->msc_dabplus_ps_flag = msc_audio->ps_flag;
+        snapshot->msc_dabplus_mpeg_surround_config =
+            msc_audio->mpeg_surround_config;
+        snapshot->msc_dabplus_au_count = msc_audio->au_count;
+        memcpy(snapshot->msc_dabplus_au_crc_valid,
+               msc_audio->au_crc_valid,
+               sizeof(snapshot->msc_dabplus_au_crc_valid));
+        memcpy(snapshot->msc_dabplus_au_start,
+               msc_audio->au_start,
+               sizeof(snapshot->msc_dabplus_au_start));
+        memcpy(snapshot->msc_dabplus_au_length,
+               msc_audio->au_length,
+               sizeof(snapshot->msc_dabplus_au_length));
+        memcpy(snapshot->msc_dabplus_au_preview_length,
+               msc_audio->au_preview_length,
+               sizeof(snapshot->msc_dabplus_au_preview_length));
+        memcpy(snapshot->msc_dabplus_au_preview,
+               msc_audio->au_preview,
+               sizeof(snapshot->msc_dabplus_au_preview));
+        snapshot->msc_dabplus_history_count =
+            msc_audio->history_count < DAB_RECEIVE_DABPLUS_HISTORY_CAPACITY
+                ? msc_audio->history_count
+                : DAB_RECEIVE_DABPLUS_HISTORY_CAPACITY;
+        for (uint32_t index = 0u;
+             index < snapshot->msc_dabplus_history_count;
+             ++index) {
+            const dab_msc_dabplus_history_entry_t *source =
+                &msc_audio->history[index];
+            dab_receive_dabplus_history_entry_t *target =
+                &snapshot->msc_dabplus_history[index];
+            target->valid = source->valid;
+            target->firecode_valid = source->firecode_valid;
+            target->rs_uncorrectable = source->rs_uncorrectable;
+            target->superframe_valid = source->superframe_valid;
+            target->au_count = source->au_count;
+            target->au_crc_valid_mask = source->au_crc_valid_mask;
+            target->dac_rate = source->dac_rate;
+            target->sbr_flag = source->sbr_flag;
+            target->aac_channel_mode = source->aac_channel_mode;
+            target->ps_flag = source->ps_flag;
+            target->rs_corrected_bytes = source->rs_corrected_bytes;
+            target->rs_uncorrectable_rows = source->rs_uncorrectable_rows;
+            target->attempt_number = source->attempt_number;
+            target->generation = source->generation;
+            target->frame_start_sample = source->frame_start_sample;
+            target->superframe_bytes = source->superframe_bytes;
+            memcpy(target->au_start,
+                   source->au_start,
+                   sizeof(target->au_start));
+            memcpy(target->au_length,
+                   source->au_length,
+                   sizeof(target->au_length));
+        }
         snapshot->msc_last_decode_ok = msc_audio->last_decode_ok != 0u;
         snapshot->msc_runtime_reset_count = msc_audio->runtime_reset_count;
         snapshot->msc_last_reconfig_reason = msc_audio->last_reconfig_reason;

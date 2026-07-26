@@ -810,6 +810,12 @@ void test_msc_ingest_component_payload_builds_dabplus_superframe(void) {
     TEST_ASSERT(superframe.au_length[0] == 392u);
     TEST_ASSERT(superframe.au_length[1] == 398u);
     TEST_ASSERT(superframe.au_length[2] == (sizeof(data1) - 800u - 2u));
+    TEST_ASSERT(superframe.firecode_valid == 1u);
+    TEST_ASSERT(superframe.rs_uncorrectable ==
+                (superframe.rs_uncorrectable_rows != 0u));
+    TEST_ASSERT(superframe.au_crc_valid[0] == 0u);
+    TEST_ASSERT(superframe.au_crc_valid[1] == 0u);
+    TEST_ASSERT(superframe.au_crc_valid[2] == 0u);
     TEST_ASSERT(superframe.superframe_data != 0);
     TEST_ASSERT(superframe.superframe_data[0] != 0u);
     TEST_ASSERT(superframe.superframe_data[1] != 0u);
@@ -818,6 +824,22 @@ void test_msc_ingest_component_payload_builds_dabplus_superframe(void) {
     TEST_ASSERT(debug.au_crc_checks_total == 3u);
     TEST_ASSERT(debug.au_crc_errors_last_superframe == 3u);
     TEST_ASSERT(debug.au_crc_errors_total == 3u);
+    TEST_ASSERT(debug.firecode_checks_total == 1u);
+    TEST_ASSERT(debug.firecode_errors_total == 0u);
+    TEST_ASSERT(debug.rs_uncorrectable_total ==
+                (debug.rs_uncorrectable_last_superframe != 0u ? 1u : 0u));
+    TEST_ASSERT(debug.dac_rate == 1u);
+    TEST_ASSERT(debug.sbr_flag == 1u);
+    TEST_ASSERT(debug.au_count == 3u);
+    TEST_ASSERT(debug.au_preview_length[0] ==
+                DAB_MSC_DABPLUS_AU_PREVIEW_BYTES);
+    TEST_ASSERT(debug.history_count == 1u);
+    TEST_ASSERT(debug.history[0].valid == 1u);
+    TEST_ASSERT(debug.history[0].firecode_valid == 1u);
+    TEST_ASSERT(debug.history[0].rs_uncorrectable ==
+                (debug.history[0].rs_uncorrectable_rows != 0u));
+    TEST_ASSERT(debug.history[0].attempt_number == 1u);
+    TEST_ASSERT(debug.history[0].au_count == 3u);
 }
 
 void test_msc_build_layout_and_payload_preserve_packet_metadata(void) {

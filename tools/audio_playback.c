@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #include "audio_playback.h"
 
@@ -295,8 +296,18 @@ static int dab_audio_playback_pa_callback(const void *input,
     dab_mutex_unlock(&audio->ring_mutex);
     if (prebuffer_done) {
         got = dab_audio_ring_read_frames(audio, out, (size_t)frame_count);
+        dab_mutex_lock(&audio->ring_mutex);
+        audio->diagnostic_output_frames += frame_count;
+        if (got < (size_t)frame_count) {
+            const uint64_t missing = (uint64_t)frame_count - (uint64_t)got;
+            audio->diagnostic_muted_frames += missing;
+            audio->diagnostic_underrun_events++;
+            if (missing > audio->diagnostic_longest_interruption_frames) {
+                audio->diagnostic_longest_interruption_frames = missing;
+            }
+        }
+        dab_mutex_unlock(&audio->ring_mutex);
     }
-    (void)got;
     return paContinue;
 }
 static void dab_audio_playback_print_hex(const char *label,
@@ -407,6 +418,41 @@ int dab_audio_playback_output_active(dab_audio_playback_t *audio) {
         return -1;
     }
     return active == 1 ? 1 : 0;
+}
+
+int dab_audio_playback_get_diagnostics(
+    dab_audio_playback_t *audio,
+    dab_audio_playback_diagnostics_t *diagnostics) {
+    if (audio == 0 || diagnostics == 0) {
+        return -1;
+    }
+    memset(diagnostics, 0, sizeof(*diagnostics));
+    diagnostics->valid = audio->configured;
+    diagnostics->decoder_backend = audio->decoder_backend;
+    diagnostics->channels = audio->channels;
+    diagnostics->sample_rate = audio->sample_rate;
+    diagnostics->output_active =
+        dab_audio_playback_output_active(audio) > 0 ? 1u : 0u;
+    if (audio->ring_ready != 0u) {
+        dab_mutex_lock(&audio->ring_mutex);
+    }
+    diagnostics->pcm_frames_written =
+        audio->diagnostic_pcm_frames_written;
+    diagnostics->output_frames = audio->diagnostic_output_frames;
+    diagnostics->muted_frames = audio->diagnostic_muted_frames;
+    diagnostics->underrun_events = audio->diagnostic_underrun_events;
+    diagnostics->longest_interruption_frames =
+        audio->diagnostic_longest_interruption_frames;
+    diagnostics->clipped_samples = audio->diagnostic_clipped_samples;
+    diagnostics->total_samples = audio->diagnostic_total_samples;
+    diagnostics->left_rms_dbfs = audio->diagnostic_left_rms_dbfs;
+    diagnostics->right_rms_dbfs = audio->diagnostic_right_rms_dbfs;
+    diagnostics->left_peak_dbfs = audio->diagnostic_left_peak_dbfs;
+    diagnostics->right_peak_dbfs = audio->diagnostic_right_peak_dbfs;
+    if (audio->ring_ready != 0u) {
+        dab_mutex_unlock(&audio->ring_mutex);
+    }
+    return 0;
 }
 
 static void dab_audio_playback_reset_decoder(dab_audio_playback_t *audio) {
@@ -526,6 +572,56 @@ static int dab_audio_playback_write_stream(dab_audio_playback_t *audio,
             return -1;
         }
         pcm_out = audio->eq_pcm;
+    }
+    {
+        double sum_sq[2] = {0.0, 0.0};
+        int32_t peak[2] = {0, 0};
+        uint64_t clipped = 0u;
+        const uint32_t channels = audio->channels;
+        for (unsigned long frame = 0u; frame < frames; ++frame) {
+            for (uint32_t channel = 0u; channel < channels; ++channel) {
+                const int16_t sample =
+                    pcm_out[((size_t)frame * channels) + channel];
+                const int32_t magnitude =
+                    sample < 0 ? -(int32_t)sample : (int32_t)sample;
+                const uint32_t meter_channel = channel == 0u ? 0u : 1u;
+                const double normalized = (double)sample / 32768.0;
+                sum_sq[meter_channel] += normalized * normalized;
+                if (magnitude > peak[meter_channel]) {
+                    peak[meter_channel] = magnitude;
+                }
+                if (sample == INT16_MIN || sample == INT16_MAX) {
+                    clipped++;
+                }
+            }
+        }
+        if (channels == 1u) {
+            sum_sq[1] = sum_sq[0];
+            peak[1] = peak[0];
+        }
+        dab_mutex_lock(&audio->ring_mutex);
+        audio->diagnostic_pcm_frames_written += frames;
+        audio->diagnostic_clipped_samples += clipped;
+        audio->diagnostic_total_samples +=
+            (uint64_t)frames * (uint64_t)channels;
+        audio->diagnostic_left_rms_dbfs =
+            sum_sq[0] > 0.0
+                ? (float)(10.0 * log10(sum_sq[0] / (double)frames))
+                : -120.0f;
+        audio->diagnostic_right_rms_dbfs =
+            sum_sq[1] > 0.0
+                ? (float)(10.0 * log10(sum_sq[1] / (double)frames))
+                : -120.0f;
+        audio->diagnostic_left_peak_dbfs =
+            peak[0] > 0
+                ? (float)(20.0 * log10((double)peak[0] / 32768.0))
+                : -120.0f;
+        audio->diagnostic_right_peak_dbfs =
+            peak[1] > 0
+                ? (float)(20.0 * log10((double)peak[1] / 32768.0))
+                : -120.0f;
+        audio->diagnostic_level_valid = 1u;
+        dab_mutex_unlock(&audio->ring_mutex);
     }
     dab_audio_playback_publish_spectrum(audio, pcm_out, (uint32_t)frames);
     dab_audio_ring_write_frames(audio, pcm_out, (size_t)frames);

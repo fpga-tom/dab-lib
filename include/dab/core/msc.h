@@ -22,7 +22,9 @@ enum {
     DAB_MSC_DABPLUS_COLUMNS_PER_SUPERFRAME = 120u,
     DAB_MSC_DABPLUS_COLUMNS_PER_RS_PAYLOAD = 110u,
     DAB_MSC_DABPLUS_RESYNC_COLUMNS = 24u,
-    DAB_MSC_DABPLUS_MAX_AUS = 6u
+    DAB_MSC_DABPLUS_MAX_AUS = 6u,
+    DAB_MSC_DABPLUS_HISTORY_CAPACITY = 128u,
+    DAB_MSC_DABPLUS_AU_PREVIEW_BYTES = 64u
 };
 
 typedef enum {
@@ -217,6 +219,27 @@ typedef struct {
 
 typedef struct {
     uint8_t valid;
+    uint8_t firecode_valid;
+    uint8_t rs_uncorrectable;
+    uint8_t superframe_valid;
+    uint8_t au_count;
+    uint8_t au_crc_valid_mask;
+    uint8_t dac_rate;
+    uint8_t sbr_flag;
+    uint8_t aac_channel_mode;
+    uint8_t ps_flag;
+    uint16_t rs_corrected_bytes;
+    uint16_t rs_uncorrectable_rows;
+    uint32_t attempt_number;
+    uint64_t generation;
+    uint64_t frame_start_sample;
+    uint32_t superframe_bytes;
+    uint32_t au_start[DAB_MSC_DABPLUS_MAX_AUS];
+    uint32_t au_length[DAB_MSC_DABPLUS_MAX_AUS];
+} dab_msc_dabplus_history_entry_t;
+
+typedef struct {
+    uint8_t valid;
     uint8_t synchronized;
     uint64_t generation;
     uint8_t service_index;
@@ -234,6 +257,11 @@ typedef struct {
     uint8_t ps_flag;
     uint8_t mpeg_surround_config;
     uint8_t au_count;
+    uint8_t firecode_valid;
+    uint8_t rs_uncorrectable;
+    uint16_t rs_corrected_bytes;
+    uint16_t rs_uncorrectable_rows;
+    uint8_t au_crc_valid[DAB_MSC_DABPLUS_MAX_AUS];
     uint32_t au_start[DAB_MSC_DABPLUS_MAX_AUS];
     uint32_t au_length[DAB_MSC_DABPLUS_MAX_AUS];
     const uint8_t *superframe_data;
@@ -249,11 +277,32 @@ typedef struct {
     uint64_t generation;
     uint32_t decode_attempts;
     uint32_t decode_failures;
+    uint32_t firecode_checks_total;
+    uint32_t firecode_errors_total;
     uint32_t rs_corrected_last_superframe;
     uint32_t rs_corrected_total;
+    uint32_t rs_corrected_superframes;
+    uint32_t rs_uncorrectable_last_superframe;
+    uint32_t rs_uncorrectable_total;
+    uint32_t rs_corrected_max;
     uint32_t au_crc_errors_last_superframe;
     uint32_t au_crc_errors_total;
     uint32_t au_crc_checks_total;
+    uint8_t dac_rate;
+    uint8_t sbr_flag;
+    uint8_t aac_channel_mode;
+    uint8_t ps_flag;
+    uint8_t mpeg_surround_config;
+    uint8_t au_count;
+    uint8_t au_crc_valid[DAB_MSC_DABPLUS_MAX_AUS];
+    uint32_t au_start[DAB_MSC_DABPLUS_MAX_AUS];
+    uint32_t au_length[DAB_MSC_DABPLUS_MAX_AUS];
+    uint8_t au_preview_length[DAB_MSC_DABPLUS_MAX_AUS];
+    uint8_t au_preview[DAB_MSC_DABPLUS_MAX_AUS]
+                      [DAB_MSC_DABPLUS_AU_PREVIEW_BYTES];
+    uint32_t history_count;
+    dab_msc_dabplus_history_entry_t
+        history[DAB_MSC_DABPLUS_HISTORY_CAPACITY];
     uint8_t last_decode_ok;
     uint32_t runtime_reset_count;
     uint8_t last_reconfig_reason;
