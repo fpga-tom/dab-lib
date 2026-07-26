@@ -14,6 +14,13 @@ namespace winrt::DabMeasurementWinUI::implementation
         MainWindow();
         ~MainWindow();
 
+        void FileNewSession_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void FileCloseSession_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        winrt::fire_and_forget FileSaveSnapshot_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        winrt::fire_and_forget FileExportMeasurementsCsv_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        winrt::fire_and_forget FileExportEventsCsv_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        winrt::fire_and_forget FileSaveScreenshot_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void FileExit_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void StartButton_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void ChannelComboBox_SelectionChanged(IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
         void ServicesListView_SelectionChanged(IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
@@ -99,6 +106,7 @@ namespace winrt::DabMeasurementWinUI::implementation
         };
 
         void OnTimerTick(IInspectable const&, IInspectable const&);
+        void ResetFileSession(bool closed);
         std::optional<dab::measurement::ReceiverSettings> ReadReceiverSettings();
         void HandleReceiverStatus(dab::measurement::ReceiverStatus const& status);
         void SetReceiverControlsEnabled(bool enabled);

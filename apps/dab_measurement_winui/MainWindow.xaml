@@ -24,10 +24,56 @@
 
         <MenuBar Grid.Row="0" Background="{StaticResource PanelBrush}">
             <MenuBarItem Title="File">
-                <MenuFlyoutItem Text="New measurement" />
-                <MenuFlyoutItem Text="Open session..." />
+                <MenuFlyoutItem Text="New measurement session"
+                                Click="FileNewSession_Click"
+                                KeyboardAcceleratorTextOverride="Ctrl+N">
+                    <MenuFlyoutItem.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="N" Modifiers="Control" />
+                    </MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem Text="Open recording..."
+                                IsEnabled="False"
+                                ToolTipService.ToolTip="Recording replay is not implemented yet"
+                                KeyboardAcceleratorTextOverride="Ctrl+O" />
+                <MenuFlyoutSubItem Text="Recent recordings" IsEnabled="False">
+                    <MenuFlyoutItem Text="No recent recordings" IsEnabled="False" />
+                </MenuFlyoutSubItem>
+                <MenuFlyoutItem Text="Close session"
+                                Click="FileCloseSession_Click"
+                                KeyboardAcceleratorTextOverride="Ctrl+W">
+                    <MenuFlyoutItem.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="W" Modifiers="Control" />
+                    </MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
                 <MenuFlyoutSeparator />
-                <MenuFlyoutItem Text="Export snapshot..." />
+                <MenuFlyoutItem Text="Save measurement snapshot to Downloads"
+                                Click="FileSaveSnapshot_Click"
+                                KeyboardAcceleratorTextOverride="Ctrl+S">
+                    <MenuFlyoutItem.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="S" Modifiers="Control" />
+                    </MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
+                <MenuFlyoutSubItem Text="Export">
+                    <MenuFlyoutItem Text="Current measurements as CSV"
+                                    Click="FileExportMeasurementsCsv_Click"
+                                    KeyboardAcceleratorTextOverride="Ctrl+E">
+                        <MenuFlyoutItem.KeyboardAccelerators>
+                            <KeyboardAccelerator Key="E" Modifiers="Control" />
+                        </MenuFlyoutItem.KeyboardAccelerators>
+                    </MenuFlyoutItem>
+                    <MenuFlyoutItem Text="Events and alarms as CSV"
+                                    Click="FileExportEventsCsv_Click" />
+                    <MenuFlyoutItem Text="Measurement report..."
+                                    IsEnabled="False"
+                                    ToolTipService.ToolTip="Report generation is not implemented yet" />
+                    <MenuFlyoutSeparator />
+                    <MenuFlyoutItem Text="Current workspace screenshot"
+                                    Click="FileSaveScreenshot_Click" />
+                </MenuFlyoutSubItem>
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem Text="Exit"
+                                Click="FileExit_Click"
+                                KeyboardAcceleratorTextOverride="Alt+F4" />
             </MenuBarItem>
             <MenuBarItem Title="Receiver">
                 <MenuFlyoutItem Text="Device setup..." />

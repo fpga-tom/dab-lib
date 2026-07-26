@@ -67,6 +67,59 @@ namespace
         return hstring{ buffer };
     }
 
+    std::wstring filename_timestamp()
+    {
+        SYSTEMTIME now{};
+        GetLocalTime(&now);
+        wchar_t buffer[32]{};
+        swprintf_s(buffer,
+                   L"%04u%02u%02u_%02u%02u%02u",
+                   now.wYear,
+                   now.wMonth,
+                   now.wDay,
+                   now.wHour,
+                   now.wMinute,
+                   now.wSecond);
+        return buffer;
+    }
+
+    std::wstring csv_field(std::wstring_view value)
+    {
+        bool const quote =
+            value.find_first_of(L",\"\r\n") != std::wstring_view::npos;
+        if (!quote)
+        {
+            return std::wstring{ value };
+        }
+        std::wstring escaped;
+        escaped.reserve(value.size() + 2u);
+        escaped.push_back(L'"');
+        for (wchar_t character : value)
+        {
+            if (character == L'"')
+            {
+                escaped.push_back(L'"');
+            }
+            escaped.push_back(character);
+        }
+        escaped.push_back(L'"');
+        return escaped;
+    }
+
+    std::wstring csv_float(bool valid, float value, int precision = 3)
+    {
+        if (!valid || !std::isfinite(value))
+        {
+            return {};
+        }
+        wchar_t buffer[64]{};
+        swprintf_s(buffer,
+                   L"%.*f",
+                   precision,
+                   static_cast<double>(value));
+        return buffer;
+    }
+
     hstring status_text(std::string const& value)
     {
         return winrt::to_hstring(value);
@@ -463,6 +516,358 @@ namespace winrt::DabMeasurementWinUI::implementation
     {
         m_timer.Stop();
         m_receiver.StopAndJoin();
+    }
+
+    void MainWindow::ResetFileSession(bool closed)
+    {
+        bool const receiver_active = m_receiver.IsActive();
+        m_pending_receiver_restart.reset();
+        if (receiver_active)
+        {
+            m_receiver.RequestStop();
+            m_metrics_stale = true;
+            StartButton().IsEnabled(false);
+            StartButtonLabel().Text(L"Stopping...");
+        }
+        else
+        {
+            m_metrics_stale = false;
+            SetReceiverControlsEnabled(true);
+            StartButton().IsEnabled(true);
+            StartButtonLabel().Text(L"Start");
+        }
+
+        ClearCatalogView();
+        ResetDabOverviewHistory();
+        ResetFicMeasurementSession();
+        ResetMscMeasurementSession();
+        ResetRfSyncDiagnostics();
+        ResetRfChannelDiagnostics();
+        ResetRfNullScope();
+        m_rf_history_write = 0u;
+        m_rf_history_count = 0u;
+        m_latest_mer_valid = false;
+        m_rf_was_locked = false;
+        m_rf_lock_started_ns = 0u;
+        UpdateRfHistoryVisuals();
+        ResetRfHistorySession();
+        m_fic_mailbox_history_version = m_mailbox_version;
+
+        TimelineList().Items().Clear();
+        if (DabEventsList())
+        {
+            DabEventsList().Items().Clear();
+        }
+        ShowWorkspace(WorkspaceKind::receiver);
+        DataModeText().Text(closed ? L"NO SESSION" : L"NEW SESSION");
+        DataSeamText().Text(receiver_active
+            ? hstring{ L"waiting for receiver to stop" }
+            : (closed
+                ? hstring{ L"session closed" }
+                : hstring{ L"ready to start receiver" }));
+        AddTimelineEvent(closed
+            ? hstring{ L"Measurement session closed" }
+            : hstring{ L"New measurement session created" });
+    }
+
+    void MainWindow::FileNewSession_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        ResetFileSession(false);
+    }
+
+    void MainWindow::FileCloseSession_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        ResetFileSession(true);
+    }
+
+    winrt::fire_and_forget MainWindow::FileSaveSnapshot_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        auto lifetime = get_strong();
+        if (!m_msc_have_snapshot)
+        {
+            AddTimelineEvent(L"Snapshot not saved — no receiver snapshot is available");
+            co_return;
+        }
+        try
+        {
+            using namespace Windows::Storage;
+            auto const& snapshot = m_msc_latest_snapshot;
+            std::wstring text;
+            text += L"DAB+ Measurement Workbench snapshot\r\n";
+            text += L"Saved: ";
+            text += history_iso_utc(current_wall_time_100ns());
+            text += L"\r\nContext: ";
+            text += DabContextText().Text().c_str();
+            text += L"\r\nSnapshot sequence: ";
+            text += std::to_wstring(snapshot.sequence);
+            text += L"\r\nFrequency: ";
+            text += std::to_wstring(snapshot.frequency_hz);
+            text += L" Hz\r\nSample rate: ";
+            text += std::to_wstring(snapshot.sample_rate_hz);
+            text += L" samples/s\r\nLocked: ";
+            text += snapshot.locked != 0 ? L"yes" : L"no";
+            text += L"\r\nADC RMS: ";
+            text += snapshot.adc_level_valid != 0
+                ? std::to_wstring(snapshot.adc_level_dbfs) + L" dBFS"
+                : L"unavailable";
+            text += L"\r\nC/N: ";
+            text += snapshot.cn_valid != 0
+                ? std::to_wstring(snapshot.cn_db) + L" dB"
+                : L"unavailable";
+            text += L"\r\nSNR: ";
+            text += snapshot.snr_valid != 0
+                ? std::to_wstring(snapshot.snr_db) + L" dB"
+                : L"unavailable";
+            text += L"\r\nCFO: ";
+            text += snapshot.cfo_valid != 0
+                ? std::to_wstring(snapshot.cfo_hz) + L" Hz"
+                : L"unavailable";
+            text += L"\r\nFIC valid FIBs: ";
+            text += std::to_wstring(snapshot.fic_total_valid_fibs);
+            text += L"\r\nMSC BER: ";
+            text += snapshot.msc_ber_valid != 0
+                ? std::to_wstring(snapshot.msc_ber)
+                : L"unavailable";
+            text += L"\r\nDAB+ attempts / failures: ";
+            text += std::to_wstring(snapshot.msc_decode_attempts);
+            text += L" / ";
+            text += std::to_wstring(snapshot.msc_decode_failures);
+            text += L"\r\nFire-code errors: ";
+            text += std::to_wstring(snapshot.msc_firecode_errors_total);
+            text += L"\r\nRS corrected bytes / uncorrectable frames: ";
+            text += std::to_wstring(snapshot.msc_rs_corrected_total);
+            text += L" / ";
+            text += std::to_wstring(snapshot.msc_rs_uncorrectable_total);
+            text += L"\r\nAU CRC errors / checks: ";
+            text += std::to_wstring(snapshot.msc_au_crc_errors_total);
+            text += L" / ";
+            text += std::to_wstring(snapshot.msc_au_crc_checks_total);
+            text += L"\r\nAAC errors: ";
+            text += std::to_wstring(snapshot.audio_aac_errors);
+            text += L"\r\nAudio availability: ";
+            text += std::to_wstring(snapshot.audio_availability_percent);
+            text += L"%\r\nReceiver drops / overruns: ";
+            text += std::to_wstring(snapshot.dropped_blocks);
+            text += L" / ";
+            text += std::to_wstring(snapshot.hardware_overruns);
+            text += L"\r\n";
+
+            std::wstring const filename =
+                L"DAB_Measurement_Snapshot_" +
+                filename_timestamp() + L".txt";
+            auto const file = co_await DownloadsFolder::CreateFileAsync(
+                filename,
+                CreationCollisionOption::GenerateUniqueName);
+            co_await FileIO::WriteTextAsync(file, hstring{ text });
+            AddTimelineEvent(L"Measurement snapshot saved to " + file.Path());
+        }
+        catch (hresult_error const& error)
+        {
+            AddTimelineEvent(L"Snapshot save failed: " + error.message());
+        }
+    }
+
+    winrt::fire_and_forget MainWindow::FileExportMeasurementsCsv_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        auto lifetime = get_strong();
+        if (!m_msc_have_snapshot)
+        {
+            AddTimelineEvent(L"CSV not exported — no receiver snapshot is available");
+            co_return;
+        }
+        try
+        {
+            using namespace Windows::Storage;
+            auto const& s = m_msc_latest_snapshot;
+            std::wstring csv =
+                L"timestamp_utc,context,sequence,frequency_hz,sample_rate_hz,"
+                L"locked,adc_rms_dbfs,adc_peak_dbfs,cn_db,snr_db,cfo_hz,"
+                L"fic_valid_fibs,fic_fig_errors,msc_ber,dabplus_attempts,"
+                L"dabplus_failures,firecode_errors,rs_corrected_bytes,"
+                L"rs_uncorrectable,au_crc_errors,au_crc_checks,aac_errors,"
+                L"audio_availability_percent,audio_clipping_percent,"
+                L"dropped_blocks,hardware_overruns\r\n";
+            csv += history_iso_utc(current_wall_time_100ns()) + L"," +
+                csv_field(DabContextText().Text().c_str()) + L"," +
+                std::to_wstring(s.sequence) + L"," +
+                std::to_wstring(s.frequency_hz) + L"," +
+                std::to_wstring(s.sample_rate_hz) + L"," +
+                (s.locked != 0 ? L"1" : L"0") + L"," +
+                csv_float(s.adc_level_valid != 0, s.adc_level_dbfs) + L"," +
+                csv_float(s.adc_level_valid != 0, s.adc_peak_dbfs) + L"," +
+                csv_float(s.cn_valid != 0, s.cn_db) + L"," +
+                csv_float(s.snr_valid != 0, s.snr_db) + L"," +
+                csv_float(s.cfo_valid != 0, s.cfo_hz) + L"," +
+                std::to_wstring(s.fic_total_valid_fibs) + L"," +
+                std::to_wstring(s.fic_total_fig_parse_errors) + L"," +
+                csv_float(s.msc_ber_valid != 0, s.msc_ber, 9) + L"," +
+                std::to_wstring(s.msc_decode_attempts) + L"," +
+                std::to_wstring(s.msc_decode_failures) + L"," +
+                std::to_wstring(s.msc_firecode_errors_total) + L"," +
+                std::to_wstring(s.msc_rs_corrected_total) + L"," +
+                std::to_wstring(s.msc_rs_uncorrectable_total) + L"," +
+                std::to_wstring(s.msc_au_crc_errors_total) + L"," +
+                std::to_wstring(s.msc_au_crc_checks_total) + L"," +
+                std::to_wstring(s.audio_aac_errors) + L"," +
+                csv_float(s.audio_output_frames != 0u,
+                          s.audio_availability_percent) + L"," +
+                csv_float(s.audio_total_samples != 0u,
+                          s.audio_clipping_percent,
+                          6) + L"," +
+                std::to_wstring(s.dropped_blocks) + L"," +
+                (s.hardware_overruns_valid != 0
+                    ? std::to_wstring(s.hardware_overruns)
+                    : std::wstring{}) + L"\r\n";
+
+            std::wstring const filename =
+                L"DAB_Current_Measurements_" +
+                filename_timestamp() + L".csv";
+            auto const file = co_await DownloadsFolder::CreateFileAsync(
+                filename,
+                CreationCollisionOption::GenerateUniqueName);
+            co_await FileIO::WriteTextAsync(file, hstring{ csv });
+            AddTimelineEvent(L"Current measurements CSV saved to " + file.Path());
+        }
+        catch (hresult_error const& error)
+        {
+            AddTimelineEvent(L"Measurement CSV export failed: " + error.message());
+        }
+    }
+
+    winrt::fire_and_forget MainWindow::FileExportEventsCsv_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        auto lifetime = get_strong();
+        try
+        {
+            using namespace Windows::Storage;
+            std::wstring csv =
+                L"source,timestamp_utc,severity,measurement,value,description\r\n";
+            if (DabEventsList())
+            {
+                auto const items = DabEventsList().Items();
+                for (uint32_t index = 0u; index < items.Size(); ++index)
+                {
+                    hstring const event_text =
+                        unbox_value_or<hstring>(items.GetAt(index), L"");
+                    csv += L"timeline,,Info,,," +
+                        csv_field(event_text.c_str()) + L"\r\n";
+                }
+            }
+            for (auto const& event : m_rf_history_events)
+            {
+                csv += L"rf," +
+                    history_iso_utc(event.wall_time_100ns) + L"," +
+                    csv_field(event.severity) + L"," +
+                    csv_field(event.measurement) + L"," +
+                    csv_field(event.value) + L"," +
+                    csv_field(event.description) + L"\r\n";
+            }
+            if (DabPlusAlarmList())
+            {
+                auto const alarms = DabPlusAlarmList().Items();
+                for (uint32_t index = 0u; index < alarms.Size(); ++index)
+                {
+                    hstring const alarm =
+                        unbox_value_or<hstring>(alarms.GetAt(index), L"");
+                    if (alarm.starts_with(L"No current"))
+                    {
+                        continue;
+                    }
+                    csv += L"dabplus," +
+                        history_iso_utc(current_wall_time_100ns()) +
+                        L",Warning,DAB+,,"
+                        + csv_field(alarm.c_str()) + L"\r\n";
+                }
+            }
+
+            std::wstring const filename =
+                L"DAB_Events_Alarms_" +
+                filename_timestamp() + L".csv";
+            auto const file = co_await DownloadsFolder::CreateFileAsync(
+                filename,
+                CreationCollisionOption::GenerateUniqueName);
+            co_await FileIO::WriteTextAsync(file, hstring{ csv });
+            AddTimelineEvent(L"Events and alarms CSV saved to " + file.Path());
+        }
+        catch (hresult_error const& error)
+        {
+            AddTimelineEvent(L"Events CSV export failed: " + error.message());
+        }
+    }
+
+    winrt::fire_and_forget MainWindow::FileSaveScreenshot_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        auto lifetime = get_strong();
+        try
+        {
+            using namespace Windows::Graphics::Imaging;
+            using namespace Windows::Storage;
+            using namespace Windows::Storage::Streams;
+            using namespace Microsoft::UI::Xaml::Media::Imaging;
+
+            FrameworkElement capture = ReceiverWorkspaceMain();
+            std::wstring workspace_name = L"Receiver";
+            if (m_active_workspace == WorkspaceKind::rf_measurements)
+            {
+                capture = RfWorkspace();
+                workspace_name = L"RF";
+            }
+            else if (m_active_workspace == WorkspaceKind::dab_measurements)
+            {
+                capture = DabWorkspace();
+                workspace_name = L"DAB";
+            }
+
+            RenderTargetBitmap bitmap;
+            co_await bitmap.RenderAsync(capture);
+            auto const pixel_buffer = co_await bitmap.GetPixelsAsync();
+            DataReader reader = DataReader::FromBuffer(pixel_buffer);
+            std::vector<uint8_t> pixels(pixel_buffer.Length());
+            reader.ReadBytes(pixels);
+
+            std::wstring const filename =
+                L"DAB_" + workspace_name + L"_Workspace_" +
+                filename_timestamp() + L".png";
+            auto const file = co_await KnownFolders::PicturesLibrary().CreateFileAsync(
+                filename,
+                CreationCollisionOption::GenerateUniqueName);
+            auto const stream = co_await file.OpenAsync(FileAccessMode::ReadWrite);
+            auto const encoder = co_await BitmapEncoder::CreateAsync(
+                BitmapEncoder::PngEncoderId(),
+                stream);
+            encoder.SetPixelData(BitmapPixelFormat::Bgra8,
+                                 BitmapAlphaMode::Premultiplied,
+                                 static_cast<uint32_t>(bitmap.PixelWidth()),
+                                 static_cast<uint32_t>(bitmap.PixelHeight()),
+                                 96.0,
+                                 96.0,
+                                 pixels);
+            co_await encoder.FlushAsync();
+            AddTimelineEvent(L"Workspace screenshot saved to " + file.Path());
+        }
+        catch (hresult_error const& error)
+        {
+            AddTimelineEvent(L"Workspace screenshot failed: " + error.message());
+        }
+    }
+
+    void MainWindow::FileExit_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        Close();
     }
 
     void MainWindow::ChannelComboBox_SelectionChanged(IInspectable const&, SelectionChangedEventArgs const&)
