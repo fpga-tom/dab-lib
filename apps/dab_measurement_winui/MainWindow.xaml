@@ -364,11 +364,96 @@
                                 Click="ViewResetLayout_Click" />
             </MenuBarItem>
             <MenuBarItem Title="Tools">
-                <MenuFlyoutItem Text="Device diagnostics" />
-                <MenuFlyoutItem Text="Recording browser" />
+                <MenuFlyoutSubItem Text="Receiver diagnostics">
+                    <MenuFlyoutItem Text="RF input and SDR transport"
+                                    Tag="2"
+                                    Click="MeasurementRfPage_Click" />
+                    <MenuFlyoutItem Text="Null symbol scope"
+                                    Tag="3"
+                                    Click="MeasurementRfPage_Click" />
+                    <MenuFlyoutItem Text="Frequency and synchronization"
+                                    Tag="4"
+                                    Click="MeasurementRfPage_Click" />
+                    <MenuFlyoutItem Text="Channel response and CIR"
+                                    Tag="5"
+                                    Click="MeasurementRfPage_Click" />
+                    <MenuFlyoutItem Text="RF history and alarms"
+                                    Tag="6"
+                                    Click="MeasurementRfPage_Click" />
+                </MenuFlyoutSubItem>
+                <MenuFlyoutSubItem Text="Decoder inspectors">
+                    <MenuFlyoutItem Text="FIC FIG browser"
+                                    Tag="fic:2"
+                                    Click="MeasurementDabPage_Click" />
+                    <MenuFlyoutItem Text="FIC multiplex database"
+                                    Tag="fic:3"
+                                    Click="MeasurementDabPage_Click" />
+                    <MenuFlyoutItem Text="FIC raw inspector"
+                                    Tag="fic:4"
+                                    Click="MeasurementDabPage_Click" />
+                    <MenuFlyoutSeparator />
+                    <MenuFlyoutItem Text="MSC buffer pipeline"
+                                    Tag="msc:4"
+                                    Click="MeasurementDabPage_Click" />
+                    <MenuFlyoutItem Text="MSC raw data"
+                                    Tag="msc:5"
+                                    Click="MeasurementDabPage_Click" />
+                    <MenuFlyoutSeparator />
+                    <MenuFlyoutItem Text="DAB+ Reed-Solomon"
+                                    Tag="dabplus:2"
+                                    Click="MeasurementDabPage_Click" />
+                    <MenuFlyoutItem Text="DAB+ audio-unit inspector"
+                                    Tag="dabplus:3"
+                                    Click="MeasurementDabPage_Click" />
+                    <MenuFlyoutItem Text="Audio diagnostics"
+                                    Tag="dabplus:4"
+                                    Click="MeasurementDabPage_Click" />
+                    <MenuFlyoutItem Text="PAD and metadata inspector"
+                                    Tag="dabplus:5"
+                                    Click="MeasurementDabPage_Click" />
+                </MenuFlyoutSubItem>
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem Text="Capture last triggered IQ"
+                                Click="MeasurementCaptureIq_Click" />
+                <MenuFlyoutItem Text="Open triggered-IQ capture folder"
+                                Click="ToolsOpenCaptureFolder_Click" />
+                <MenuFlyoutItem Text="Copy session diagnostic summary"
+                                Click="ToolsCopyDiagnosticSummary_Click" />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem Text="Recording browser..."
+                                IsEnabled="False"
+                                ToolTipService.ToolTip="Recording and replay are not implemented yet" />
+                <MenuFlyoutItem Text="Developer diagnostics..."
+                                IsEnabled="False"
+                                ToolTipService.ToolTip="Developer diagnostics are not exposed in this build" />
             </MenuBarItem>
             <MenuBarItem Title="Help">
-                <MenuFlyoutItem Text="About DAB+ Measurement Workbench" />
+                <MenuFlyoutItem Text="Quick start"
+                                Click="HelpQuickStart_Click"
+                                KeyboardAcceleratorTextOverride="F1">
+                    <MenuFlyoutItem.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="F1" />
+                    </MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem Text="Keyboard and mouse shortcuts"
+                                Click="HelpShortcuts_Click" />
+                <MenuFlyoutItem Text="RF and DAB measurement terminology"
+                                Click="HelpTerminology_Click" />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem Text="Open dab-lib README"
+                                Click="HelpOpenReadme_Click" />
+                <MenuFlyoutItem Text="Online documentation..."
+                                IsEnabled="False"
+                                ToolTipService.ToolTip="No online documentation URL is configured" />
+                <MenuFlyoutItem Text="Report an issue..."
+                                IsEnabled="False"
+                                ToolTipService.ToolTip="No issue-tracker URL is configured" />
+                <MenuFlyoutItem Text="Check for updates..."
+                                IsEnabled="False"
+                                ToolTipService.ToolTip="Automatic update checking is not implemented" />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem Text="About DAB+ Measurement Workbench"
+                                Click="HelpAbout_Click" />
             </MenuBarItem>
         </MenuBar>
 

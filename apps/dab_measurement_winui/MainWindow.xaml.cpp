@@ -4,6 +4,7 @@
 #include <cstring>
 #include <cwctype>
 #include <limits>
+#include <winrt/Windows.System.h>
 
 extern "C" {
 #include "dab/core/fic.h"
@@ -1388,6 +1389,299 @@ namespace winrt::DabMeasurementWinUI::implementation
             m_full_screen = false;
         }
         UpdateViewMenuState();
+    }
+
+    winrt::fire_and_forget MainWindow::ToolsOpenCaptureFolder_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        auto lifetime = get_strong();
+        wchar_t local_app_data[MAX_PATH]{};
+        DWORD const length = GetEnvironmentVariableW(
+            L"LOCALAPPDATA",
+            local_app_data,
+            static_cast<DWORD>(std::size(local_app_data)));
+        if (length == 0u || length >= std::size(local_app_data))
+        {
+            AddTimelineEvent(L"Unable to locate the triggered-IQ capture folder");
+            co_return;
+        }
+
+        std::wstring folder{ local_app_data };
+        folder += L"\\DabMeasurementWinUI";
+        if (!CreateDirectoryW(folder.c_str(), nullptr) &&
+            GetLastError() != ERROR_ALREADY_EXISTS)
+        {
+            AddTimelineEvent(L"Unable to create the triggered-IQ capture folder");
+            co_return;
+        }
+
+        try
+        {
+            auto const capture_folder =
+                co_await Windows::Storage::StorageFolder::GetFolderFromPathAsync(
+                    folder);
+            bool const opened =
+                co_await Windows::System::Launcher::LaunchFolderAsync(
+                    capture_folder);
+            AddTimelineEvent(opened
+                ? hstring{ L"Opened triggered-IQ capture folder" }
+                : hstring{ L"Windows declined to open the triggered-IQ capture folder" });
+        }
+        catch (hresult_error const& error)
+        {
+            AddTimelineEvent(
+                L"Unable to open the triggered-IQ capture folder: " +
+                error.message());
+        }
+    }
+
+    void MainWindow::ToolsCopyDiagnosticSummary_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        try
+        {
+            std::wstring summary =
+                L"DAB+ Measurement Workbench - session diagnostics\r\n";
+            summary += L"Captured: ";
+            summary += local_clock_text().c_str();
+            summary += L"\r\nReceiver: ";
+            summary += m_receiver.IsActive() ? L"active" : L"stopped";
+            summary += L"\r\nDevice: ";
+            summary += StatusDeviceText().Text().c_str();
+            summary += L"\r\nChannel: ";
+            summary += StatusChannelText().Text().c_str();
+            summary += L"\r\nFrequency: ";
+            summary += FrequencyTextBox().Text().c_str();
+
+            double gain = GainNumberBox().Value();
+            if (!std::isfinite(gain))
+            {
+                gain = 40.0;
+            }
+            wchar_t front_end[160]{};
+            swprintf_s(front_end,
+                       L"\r\nFront end: gain %ld dB, AGC %ls, PPM %+d, bias tee %ls",
+                       std::lround(gain),
+                       m_receiver_agc_enabled ? L"enabled" : L"disabled",
+                       m_receiver_ppm_correction,
+                       m_receiver_bias_tee_enabled ? L"enabled" : L"disabled");
+            summary += front_end;
+
+            summary += L"\r\nSynchronization: ";
+            summary += StatusSyncText().Text().c_str();
+            summary += L"\r\nMeasurement state: ";
+            summary += DataModeText().Text().c_str();
+            summary += m_metrics_stale ? L" (stale)" : L"";
+            summary += L"\r\nReceiver detail: ";
+            summary += DataSeamText().Text().c_str();
+            summary += L"\r\nRF power: ";
+            summary += RfPowerValueText().Text().c_str();
+            summary += L"\r\nC/N: ";
+            summary += RfCnValueText().Text().c_str();
+            summary += L"\r\nMER: ";
+            summary += RfMerValueText().Text().c_str();
+            summary += L"\r\nCFO: ";
+            summary += RfCfoValueText().Text().c_str();
+            summary += L"\r\nOverruns: ";
+            summary += StatusOverrunText().Text().c_str();
+            summary += L"\r\nCPU: ";
+            summary += StatusCpuText().Text().c_str();
+            summary += L"\r\nDAB context: ";
+            summary += DabContextText().Text().c_str();
+            summary += L"\r\nDAB component: ";
+            summary += DabComponentContextText().Text().c_str();
+            summary += L"\r\n";
+
+            using namespace Windows::ApplicationModel::DataTransfer;
+            DataPackage package;
+            package.SetText(hstring{ summary });
+            Clipboard::SetContent(package);
+            AddTimelineEvent(L"Session diagnostic summary copied to clipboard");
+        }
+        catch (hresult_error const& error)
+        {
+            AddTimelineEvent(L"Unable to copy diagnostic summary: " + error.message());
+        }
+    }
+
+    winrt::fire_and_forget MainWindow::ShowHelpDialog(
+        hstring const& title,
+        hstring const& content)
+    {
+        auto lifetime = get_strong();
+        try
+        {
+            TextBlock body;
+            body.Text(content);
+            body.TextWrapping(TextWrapping::Wrap);
+            body.IsTextSelectionEnabled(true);
+            body.LineHeight(21.0);
+
+            ScrollViewer scroll;
+            scroll.MaxWidth(760.0);
+            scroll.MaxHeight(560.0);
+            scroll.HorizontalScrollBarVisibility(ScrollBarVisibility::Disabled);
+            scroll.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);
+            scroll.Content(body);
+
+            ContentDialog dialog;
+            dialog.XamlRoot(RootLayout().XamlRoot());
+            dialog.Title(box_value(title));
+            dialog.Content(scroll);
+            dialog.CloseButtonText(L"Close");
+            co_await dialog.ShowAsync();
+        }
+        catch (hresult_error const& error)
+        {
+            AddTimelineEvent(L"Unable to show help: " + error.message());
+        }
+    }
+
+    void MainWindow::HelpQuickStart_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        ShowHelpDialog(
+            L"Quick start",
+            L"1. Select the SDR device and Band III channel in the receiver toolbar.\r\n\r\n"
+            L"2. Set gain, AGC, PPM correction, and bias tee from Receiver before starting. "
+            L"Hardware settings are intentionally locked while streaming.\r\n\r\n"
+            L"3. Press F5 or choose Receiver > Start receiver. Wait for RF lock and a valid FIC catalogue.\r\n\r\n"
+            L"4. Select an audio service in the Receiver workspace. Selecting a different service restarts only "
+            L"the receiver session needed to decode that component.\r\n\r\n"
+            L"5. Use RF Measurements for input level, spectrum, synchronization, null symbol, CIR, and history. "
+            L"Use DAB Measurements for FIC, MSC, DAB+, audio continuity, and metadata.\r\n\r\n"
+            L"6. Save snapshots and CSV exports from File. Triggered IQ is captured from the latest null-scope "
+            L"window and stored under LocalAppData\\DabMeasurementWinUI.\r\n\r\n"
+            L"Important: dBFS is relative to ADC full scale. Treat a dBm value as absolute received power only "
+            L"when a valid device calibration profile is active.");
+    }
+
+    void MainWindow::HelpShortcuts_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        ShowHelpDialog(
+            L"Keyboard and mouse shortcuts",
+            L"F1                     Quick start\r\n"
+            L"F5                     Start or stop the receiver\r\n"
+            L"F11                    Enter or leave full screen\r\n"
+            L"Ctrl+N                 New measurement session\r\n"
+            L"Ctrl+W                 Close measurement session\r\n"
+            L"Ctrl+S                 Save measurement snapshot\r\n"
+            L"Ctrl+E                 Export current measurements as CSV\r\n"
+            L"Ctrl+L                 Focus and select the frequency field\r\n"
+            L"Ctrl+M                 Enlarge or restore the receiver analysis panel\r\n\r\n"
+            L"Spectrum interaction\r\n"
+            L"Mouse wheel            Zoom around the pointer frequency\r\n"
+            L"Drag                   Pan the visible span\r\n"
+            L"Double-click           Reset spectrum view\r\n"
+            L"Click                  Place the active marker\r\n"
+            L"Drag marker            Move an existing marker\r\n"
+            L"Right-click            Open tune/reset actions\r\n\r\n"
+            L"CIR interaction\r\n"
+            L"Click a CIR peak       Place a path marker and show delay, relative power, and distance difference");
+    }
+
+    void MainWindow::HelpTerminology_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        ShowHelpDialog(
+            L"RF and DAB measurement terminology",
+            L"dBFS — Level relative to ADC full scale. 0 dBFS is the clipping limit; it is not received power in dBm.\r\n\r\n"
+            L"dBm — Absolute power relative to 1 mW. It is trustworthy only with a calibration that includes the device, gain state, and signal path.\r\n\r\n"
+            L"C/N — Carrier-to-noise ratio, estimated using the DAB null or another noise estimate.\r\n\r\n"
+            L"MER — Modulation error ratio. It compares ideal and measured constellation vectors after synchronization/equalization; higher is better.\r\n\r\n"
+            L"CFO — Carrier-frequency offset. Coarse CFO is the acquisition estimate, fine CFO is the tracking correction, and residual CFO is what remains.\r\n\r\n"
+            L"CIR — Channel impulse response. Peaks after the main path indicate delayed propagation paths. Delay multiplied by propagation speed estimates path-distance difference.\r\n\r\n"
+            L"FIC / FIB / FIG — The Fast Information Channel carries Fast Information Blocks containing Fast Information Groups that describe the ensemble.\r\n\r\n"
+            L"MSC / CIF / subchannel — The Main Service Channel transports service data in Common Interleaved Frames allocated to protected subchannels.\r\n\r\n"
+            L"Pre-Viterbi BER — A pseudo-BER or error estimate before convolutional decoding. Post-Viterbi errors are residual decoder failures.\r\n\r\n"
+            L"RS corrections — Reed-Solomon bytes corrected in a DAB+ superframe. Rising corrections are an early warning even while audio remains valid.\r\n\r\n"
+            L"AU CRC — Integrity check for a DAB+ audio access unit. Failure may cause concealment or muting.\r\n\r\n"
+            L"Availability — Fraction of the session with valid audio output. Concealed and muted intervals are reported separately.\r\n\r\n"
+            L"Stale — The displayed value is retained from an older valid snapshot because live receiver progress stopped or recovery is active.");
+    }
+
+    winrt::fire_and_forget MainWindow::HelpOpenReadme_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        auto lifetime = get_strong();
+        wchar_t module_path[32768]{};
+        DWORD const length = GetModuleFileNameW(
+            nullptr,
+            module_path,
+            static_cast<DWORD>(std::size(module_path)));
+        if (length == 0u || length >= std::size(module_path))
+        {
+            AddTimelineEvent(L"Unable to locate the dab-lib README");
+            co_return;
+        }
+
+        std::wstring readme{ module_path, length };
+        for (int level = 0; level < 5; ++level)
+        {
+            size_t const separator = readme.find_last_of(L"\\/");
+            if (separator == std::wstring::npos)
+            {
+                AddTimelineEvent(L"Unable to resolve the dab-lib repository path");
+                co_return;
+            }
+            readme.resize(separator);
+        }
+        readme += L"\\README.md";
+        if (GetFileAttributesW(readme.c_str()) == INVALID_FILE_ATTRIBUTES)
+        {
+            AddTimelineEvent(L"dab-lib README was not found beside this development build");
+            co_return;
+        }
+
+        try
+        {
+            auto const file =
+                co_await Windows::Storage::StorageFile::GetFileFromPathAsync(
+                    readme);
+            bool const opened =
+                co_await Windows::System::Launcher::LaunchFileAsync(file);
+            AddTimelineEvent(opened
+                ? hstring{ L"Opened dab-lib README" }
+                : hstring{ L"Windows declined to open the dab-lib README" });
+        }
+        catch (hresult_error const& error)
+        {
+            AddTimelineEvent(L"Unable to open the dab-lib README: " + error.message());
+        }
+    }
+
+    void MainWindow::HelpAbout_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        std::wstring content =
+            L"DAB+ Measurement Workbench\r\n"
+            L"Development measurement application from dab-lib\r\n\r\n"
+            L"Runtime: Windows App SDK 1.8 / C++ WinUI 3\r\n"
+            L"Architecture: x64\r\n"
+            L"Receiver pipeline: DAB Mode I, 2.048 MS/s\r\n"
+            L"Supported front ends: SDRplay and RTL-SDR\r\n\r\n"
+            L"Current device: ";
+        content += StatusDeviceText().Text().c_str();
+        content += L"\r\nCurrent channel: ";
+        content += StatusChannelText().Text().c_str();
+        content += L" / ";
+        content += FrequencyTextBox().Text().c_str();
+        content += L"\r\nReceiver state: ";
+        content += StatusSyncText().Text().c_str();
+        content += L"\r\n\r\n"
+            L"This is an engineering measurement build. Absolute RF power requires a valid calibration profile. "
+            L"Unavailable commands are disabled until their backing capture, replay, configuration, or online service exists.";
+        ShowHelpDialog(
+            L"About DAB+ Measurement Workbench",
+            hstring{ content });
     }
 
     void MainWindow::DabOverviewKpi_Click(IInspectable const& sender, RoutedEventArgs const&)

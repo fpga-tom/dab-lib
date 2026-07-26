@@ -45,6 +45,13 @@ namespace winrt::DabMeasurementWinUI::implementation
         void ViewStatusBar_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void ViewFullScreen_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void ViewResetLayout_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        winrt::fire_and_forget ToolsOpenCaptureFolder_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void ToolsCopyDiagnosticSummary_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void HelpQuickStart_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void HelpShortcuts_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void HelpTerminology_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        winrt::fire_and_forget HelpOpenReadme_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void HelpAbout_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void StartButton_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void ChannelComboBox_SelectionChanged(IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
         void ServicesListView_SelectionChanged(IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
@@ -132,6 +139,9 @@ namespace winrt::DabMeasurementWinUI::implementation
 
         void OnTimerTick(IInspectable const&, IInspectable const&);
         void ResetFileSession(bool closed);
+        winrt::fire_and_forget ShowHelpDialog(
+            winrt::hstring const& title,
+            winrt::hstring const& content);
         std::optional<dab::measurement::ReceiverSettings> ReadReceiverSettings();
         void HandleReceiverStatus(dab::measurement::ReceiverStatus const& status);
         void SetReceiverControlsEnabled(bool enabled);
