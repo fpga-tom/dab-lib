@@ -39,6 +39,12 @@ namespace winrt::DabMeasurementWinUI::implementation
         void MeasurementCaptureIq_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void MeasurementAddAnnotation_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void MeasurementAlarmThresholds_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void ViewReceiverPlot_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void ViewAnalysisPanelMaximized_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void ViewToolbar_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void ViewStatusBar_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void ViewFullScreen_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void ViewResetLayout_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void StartButton_Click(IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
         void ChannelComboBox_SelectionChanged(IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
         void ServicesListView_SelectionChanged(IInspectable const&, Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
@@ -130,6 +136,7 @@ namespace winrt::DabMeasurementWinUI::implementation
         void HandleReceiverStatus(dab::measurement::ReceiverStatus const& status);
         void SetReceiverControlsEnabled(bool enabled);
         void UpdateReceiverMenuState();
+        void UpdateViewMenuState();
         void SelectReceiverChannel(int32_t index);
         void ApplySnapshot(dab_receive_snapshot_t const& snapshot);
         void ApplyRfSnapshot(dab_receive_snapshot_t const& snapshot);
@@ -251,6 +258,9 @@ namespace winrt::DabMeasurementWinUI::implementation
         bool m_receiver_agc_enabled{ false };
         int32_t m_receiver_ppm_correction{ 0 };
         bool m_receiver_bias_tee_enabled{ false };
+        bool m_toolbar_visible{ true };
+        bool m_status_bar_visible{ true };
+        bool m_full_screen{ false };
         std::optional<dab::measurement::ReceiverSettings> m_pending_receiver_restart;
         static constexpr size_t rf_history_capacity = 240u;
         std::array<float, rf_history_capacity> m_rf_power_history{};

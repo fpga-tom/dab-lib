@@ -20,7 +20,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="156" />
-            <RowDefinition Height="34" />
+            <RowDefinition x:Name="StatusBarRow" Height="34" />
         </Grid.RowDefinitions>
 
         <MenuBar Grid.Row="0" Background="{StaticResource PanelBrush}">
@@ -304,13 +304,64 @@
                                 ToolTipService.ToolTip="RF calibration profile management is not implemented yet" />
             </MenuBarItem>
             <MenuBarItem Title="View">
-                <MenuFlyoutItem Text="Receiver workspace" Click="ReceiverWorkspace_Click" />
-                <MenuFlyoutItem Text="RF Measurements" Click="RfMeasurements_Click" />
-                <MenuFlyoutItem Text="DAB Measurements" Click="DabMeasurements_Click" />
+                <MenuFlyoutSubItem Text="Workspace">
+                    <ToggleMenuFlyoutItem x:Name="ViewReceiverWorkspaceMenuItem"
+                                          Text="Receiver"
+                                          IsChecked="True"
+                                          Click="ReceiverWorkspace_Click" />
+                    <ToggleMenuFlyoutItem x:Name="ViewRfWorkspaceMenuItem"
+                                          Text="RF Measurements"
+                                          Click="RfMeasurements_Click" />
+                    <ToggleMenuFlyoutItem x:Name="ViewDabWorkspaceMenuItem"
+                                          Text="DAB Measurements"
+                                          Click="DabMeasurements_Click" />
+                </MenuFlyoutSubItem>
+                <MenuFlyoutSubItem Text="Receiver plots">
+                    <MenuFlyoutItem Text="Spectrum and waterfall"
+                                    Tag="spectrum"
+                                    Click="ViewReceiverPlot_Click" />
+                    <MenuFlyoutSeparator />
+                    <MenuFlyoutItem Text="Constellation"
+                                    Tag="analysis:0"
+                                    Click="ViewReceiverPlot_Click" />
+                    <MenuFlyoutItem Text="Channel impulse response"
+                                    Tag="analysis:1"
+                                    Click="ViewReceiverPlot_Click" />
+                    <MenuFlyoutItem Text="Carrier MER"
+                                    Tag="analysis:2"
+                                    Click="ViewReceiverPlot_Click" />
+                    <MenuFlyoutSeparator />
+                    <MenuFlyoutItem Text="Timeline, events and alarms"
+                                    Tag="timeline"
+                                    Click="ViewReceiverPlot_Click" />
+                </MenuFlyoutSubItem>
                 <MenuFlyoutSeparator />
-                <MenuFlyoutItem Text="Spectrum and waterfall" />
-                <MenuFlyoutItem Text="Constellation" />
-                <MenuFlyoutItem Text="Timeline" />
+                <ToggleMenuFlyoutItem x:Name="ViewAnalysisPanelMaximizedMenuItem"
+                                      Text="Enlarge receiver analysis panel"
+                                      Click="ViewAnalysisPanelMaximized_Click"
+                                      KeyboardAcceleratorTextOverride="Ctrl+M" />
+                <ToggleMenuFlyoutItem x:Name="ViewToolbarMenuItem"
+                                      Text="Receiver toolbar"
+                                      IsChecked="True"
+                                      Click="ViewToolbar_Click" />
+                <ToggleMenuFlyoutItem x:Name="ViewStatusBarMenuItem"
+                                      Text="Status bar"
+                                      IsChecked="True"
+                                      Click="ViewStatusBar_Click" />
+                <MenuFlyoutItem Text="Navigation pane layout..."
+                                IsEnabled="False"
+                                ToolTipService.ToolTip="Navigation pane customization is not implemented yet" />
+                <MenuFlyoutSeparator />
+                <ToggleMenuFlyoutItem x:Name="ViewFullScreenMenuItem"
+                                      Text="Full screen"
+                                      Click="ViewFullScreen_Click"
+                                      KeyboardAcceleratorTextOverride="F11">
+                    <ToggleMenuFlyoutItem.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="F11" />
+                    </ToggleMenuFlyoutItem.KeyboardAccelerators>
+                </ToggleMenuFlyoutItem>
+                <MenuFlyoutItem Text="Reset layout"
+                                Click="ViewResetLayout_Click" />
             </MenuBarItem>
             <MenuBarItem Title="Tools">
                 <MenuFlyoutItem Text="Device diagnostics" />
@@ -321,7 +372,8 @@
             </MenuBarItem>
         </MenuBar>
 
-        <Border Grid.Row="1"
+        <Border x:Name="ReceiverToolbarPanel"
+                Grid.Row="1"
                 Padding="12,8"
                 Background="{StaticResource PanelRaisedBrush}"
                 BorderBrush="{StaticResource PanelStrokeBrush}"
@@ -628,7 +680,9 @@
                 </Border>
 
                 <Border x:Name="ReceiverAnalysisPanel" Grid.Row="1" Style="{StaticResource PanelCardStyle}">
-                    <TabView IsAddTabButtonVisible="False" TabWidthMode="Equal">
+                    <TabView x:Name="ReceiverAnalysisTabView"
+                             IsAddTabButtonVisible="False"
+                             TabWidthMode="Equal">
                         <TabView.TabStripFooter>
                             <Button x:Name="CirExpandButton"
                                     Width="34"
@@ -4196,7 +4250,12 @@
             </TabView>
         </Grid>
 
-        <Border Grid.Row="4" Background="#FF0B1522" BorderBrush="{StaticResource PanelStrokeBrush}" BorderThickness="0,1,0,0" Padding="12,0">
+        <Border x:Name="StatusBarPanel"
+                Grid.Row="4"
+                Background="#FF0B1522"
+                BorderBrush="{StaticResource PanelStrokeBrush}"
+                BorderThickness="0,1,0,0"
+                Padding="12,0">
             <Grid ColumnSpacing="16">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />

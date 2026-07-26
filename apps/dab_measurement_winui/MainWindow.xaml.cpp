@@ -524,6 +524,7 @@ namespace winrt::DabMeasurementWinUI::implementation
     {
         m_receiver_menu_ready = true;
         UpdateReceiverMenuState();
+        UpdateViewMenuState();
     }
 
     void MainWindow::ResetFileSession(bool closed)
@@ -1270,6 +1271,125 @@ namespace winrt::DabMeasurementWinUI::implementation
         RfHistoryAlarmMeasurementComboBox().Focus(FocusState::Programmatic);
     }
 
+    void MainWindow::ViewReceiverPlot_Click(
+        IInspectable const& sender,
+        RoutedEventArgs const&)
+    {
+        auto const item = sender.try_as<MenuFlyoutItem>();
+        if (!item || !item.Tag())
+        {
+            return;
+        }
+
+        std::wstring const tag{ unbox_value<hstring>(item.Tag()).c_str() };
+        if (tag == L"spectrum")
+        {
+            SetCirPanelMaximized(false);
+            ShowWorkspace(WorkspaceKind::receiver);
+            return;
+        }
+        if (tag == L"timeline")
+        {
+            SetCirPanelMaximized(false);
+            ShowWorkspace(WorkspaceKind::receiver);
+            TimelineList().Focus(FocusState::Programmatic);
+            return;
+        }
+        constexpr std::wstring_view prefix{ L"analysis:" };
+        if (!std::wstring_view{ tag }.starts_with(prefix))
+        {
+            return;
+        }
+
+        wchar_t* end = nullptr;
+        long const index = std::wcstol(tag.c_str() + prefix.size(), &end, 10);
+        if (end == tag.c_str() + prefix.size() || index < 0 || index >= 3)
+        {
+            return;
+        }
+        ShowWorkspace(WorkspaceKind::receiver);
+        ReceiverAnalysisTabView().SelectedIndex(static_cast<int32_t>(index));
+    }
+
+    void MainWindow::ViewAnalysisPanelMaximized_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        bool const maximize = ViewAnalysisPanelMaximizedMenuItem().IsChecked();
+        ShowWorkspace(WorkspaceKind::receiver);
+        SetCirPanelMaximized(maximize);
+        UpdateViewMenuState();
+    }
+
+    void MainWindow::ViewToolbar_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        m_toolbar_visible = ViewToolbarMenuItem().IsChecked();
+        ReceiverToolbarPanel().Visibility(
+            m_toolbar_visible ? Visibility::Visible : Visibility::Collapsed);
+        UpdateViewMenuState();
+    }
+
+    void MainWindow::ViewStatusBar_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        m_status_bar_visible = ViewStatusBarMenuItem().IsChecked();
+        StatusBarPanel().Visibility(
+            m_status_bar_visible ? Visibility::Visible : Visibility::Collapsed);
+        StatusBarRow().Height(GridLengthHelper::FromPixels(
+            m_status_bar_visible ? 34.0 : 0.0));
+        UpdateViewMenuState();
+    }
+
+    void MainWindow::ViewFullScreen_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        bool const full_screen = ViewFullScreenMenuItem().IsChecked();
+        try
+        {
+            auto const app_window = AppWindow();
+            app_window.SetPresenter(full_screen
+                ? Microsoft::UI::Windowing::AppWindowPresenterKind::FullScreen
+                : Microsoft::UI::Windowing::AppWindowPresenterKind::Default);
+            m_full_screen = full_screen;
+        }
+        catch (hresult_error const& error)
+        {
+            m_full_screen = false;
+            AddTimelineEvent(L"Unable to change full-screen mode: " + error.message());
+        }
+        UpdateViewMenuState();
+    }
+
+    void MainWindow::ViewResetLayout_Click(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        SetCirPanelMaximized(false);
+        m_toolbar_visible = true;
+        m_status_bar_visible = true;
+        ReceiverToolbarPanel().Visibility(Visibility::Visible);
+        StatusBarPanel().Visibility(Visibility::Visible);
+        StatusBarRow().Height(GridLengthHelper::FromPixels(34.0));
+        if (m_full_screen)
+        {
+            try
+            {
+                AppWindow().SetPresenter(
+                    Microsoft::UI::Windowing::AppWindowPresenterKind::Default);
+            }
+            catch (hresult_error const& error)
+            {
+                AddTimelineEvent(L"Unable to restore window presenter: " + error.message());
+            }
+            m_full_screen = false;
+        }
+        UpdateViewMenuState();
+    }
+
     void MainWindow::DabOverviewKpi_Click(IInspectable const& sender, RoutedEventArgs const&)
     {
         auto const button = sender.try_as<Button>();
@@ -1813,6 +1933,7 @@ namespace winrt::DabMeasurementWinUI::implementation
             CirExpandButton(),
             accessible_name);
         ApplyWorkspaceWidth(RootLayout().ActualWidth());
+        UpdateViewMenuState();
     }
 
     void MainWindow::RfSpectrum_Loaded(IInspectable const&, RoutedEventArgs const&)
@@ -3010,6 +3131,25 @@ namespace winrt::DabMeasurementWinUI::implementation
         ReceiverPpmStatusMenuItem().Text(ppm_text);
     }
 
+    void MainWindow::UpdateViewMenuState()
+    {
+        if (!m_receiver_menu_ready)
+        {
+            return;
+        }
+
+        ViewReceiverWorkspaceMenuItem().IsChecked(
+            m_active_workspace == WorkspaceKind::receiver);
+        ViewRfWorkspaceMenuItem().IsChecked(
+            m_active_workspace == WorkspaceKind::rf_measurements);
+        ViewDabWorkspaceMenuItem().IsChecked(
+            m_active_workspace == WorkspaceKind::dab_measurements);
+        ViewAnalysisPanelMaximizedMenuItem().IsChecked(m_cir_panel_maximized);
+        ViewToolbarMenuItem().IsChecked(m_toolbar_visible);
+        ViewStatusBarMenuItem().IsChecked(m_status_bar_visible);
+        ViewFullScreenMenuItem().IsChecked(m_full_screen);
+    }
+
     void MainWindow::ShowWorkspace(WorkspaceKind workspace)
     {
         if (workspace != WorkspaceKind::receiver && m_cir_panel_maximized)
@@ -3056,6 +3196,7 @@ namespace winrt::DabMeasurementWinUI::implementation
             }
             AddTimelineEvent(message);
         }
+        UpdateViewMenuState();
     }
 
     void MainWindow::UpdateRfContext()
