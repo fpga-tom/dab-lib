@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "dab/core/msc.h"
+#include "dab/core/charset.h"
 #include "dab/os/os_mutex.h"
 #include "dab/os/os_thread.h"
 #include "audio_playback.h"
@@ -641,37 +642,21 @@ static uint16_t dab_gui_dls_crc16(const uint8_t *data, size_t size) {
 
 static void dab_gui_dls_publish(const uint8_t *text, size_t text_size) {
     char utf8[DAB_GUI_DLS_MAX_TEXT_BYTES];
-    size_t source_offset = 0u;
-    size_t output_size = 0u;
 
     if (text == 0) {
         return;
     }
-
-    while (source_offset < text_size && output_size + 2u < sizeof(utf8)) {
-        const uint8_t character = text[source_offset++];
-        if (character == '\r') {
-            break;
-        }
-        if (character < 0x20u || (character >= 0x7fu && character <= 0x9fu)) {
-            continue;
-        }
-        if (character < 0x80u) {
-            utf8[output_size++] = (char)character;
-        } else {
-            utf8[output_size++] = (char)(0xc0u | (character >> 6u));
-            utf8[output_size++] = (char)(0x80u | (character & 0x3fu));
-        }
+    if (dab_text_to_utf8(g_dls_state.label_charset,
+                         text,
+                         text_size,
+                         utf8,
+                         sizeof(utf8)) != 0) {
+        return;
     }
-
-    while (output_size > 0u && utf8[output_size - 1u] == ' ') {
-        --output_size;
-    }
-    utf8[output_size] = '\0';
 
     dab_gui_playback_ensure_mutex();
     dab_mutex_lock(&g_playback_mutex);
-    memcpy(g_playback_status.now_playing, utf8, output_size + 1u);
+    memcpy(g_playback_status.now_playing, utf8, strlen(utf8) + 1u);
     dab_mutex_unlock(&g_playback_mutex);
 }
 
