@@ -225,6 +225,7 @@ add_library(dab STATIC
     src/core/audio_eq.c
     src/core/audio_spectrum.c
     src/core/block_pool.c
+    src/core/charset.c
     src/core/frontend.c
     src/core/fic.c
     src/core/msc.c
@@ -583,6 +584,7 @@ if(DAB_BUILD_TESTS)
     add_executable(dab_tests
         tests/test_audio_eq.c
         tests/test_main.c
+        tests/test_charset.c
         tests/test_audio_spectrum.c
         tests/test_block_pool.c
         tests/test_frontend.c
