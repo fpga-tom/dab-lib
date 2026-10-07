@@ -22,7 +22,9 @@ enum {
     DAB_MSC_DABPLUS_COLUMNS_PER_SUPERFRAME = 120u,
     DAB_MSC_DABPLUS_COLUMNS_PER_RS_PAYLOAD = 110u,
     DAB_MSC_DABPLUS_RESYNC_COLUMNS = 24u,
-    DAB_MSC_DABPLUS_MAX_AUS = 6u
+    DAB_MSC_DABPLUS_MAX_AUS = 6u,
+    DAB_MSC_DABPLUS_HISTORY_CAPACITY = 128u,
+    DAB_MSC_DABPLUS_AU_PREVIEW_BYTES = 64u
 };
 
 typedef enum {
@@ -99,6 +101,15 @@ typedef struct {
     dab_msc_decoder_config_t config;
     uint32_t reset_count;
     uint8_t last_reconfig_reason;
+    uint64_t ber_error_bits;
+    uint64_t ber_compared_bits;
+    uint64_t input_confidence_sum;
+    uint64_t input_confidence_samples;
+    uint64_t deinterleaver_cifs_seen;
+    uint64_t decoded_cif_attempts;
+    uint64_t decoded_cif_successes;
+    uint64_t decoded_cif_failures;
+    uint64_t decoded_output_bytes;
     dab_msc_deinterleaver_t *deinterleaver;
     dab_msc_decoder_workspace_t *workspace;
     dab_msc_dabplus_stream_runtime_t *dabplus;
@@ -208,6 +219,27 @@ typedef struct {
 
 typedef struct {
     uint8_t valid;
+    uint8_t firecode_valid;
+    uint8_t rs_uncorrectable;
+    uint8_t superframe_valid;
+    uint8_t au_count;
+    uint8_t au_crc_valid_mask;
+    uint8_t dac_rate;
+    uint8_t sbr_flag;
+    uint8_t aac_channel_mode;
+    uint8_t ps_flag;
+    uint16_t rs_corrected_bytes;
+    uint16_t rs_uncorrectable_rows;
+    uint32_t attempt_number;
+    uint64_t generation;
+    uint64_t frame_start_sample;
+    uint32_t superframe_bytes;
+    uint32_t au_start[DAB_MSC_DABPLUS_MAX_AUS];
+    uint32_t au_length[DAB_MSC_DABPLUS_MAX_AUS];
+} dab_msc_dabplus_history_entry_t;
+
+typedef struct {
+    uint8_t valid;
     uint8_t synchronized;
     uint64_t generation;
     uint8_t service_index;
@@ -225,6 +257,11 @@ typedef struct {
     uint8_t ps_flag;
     uint8_t mpeg_surround_config;
     uint8_t au_count;
+    uint8_t firecode_valid;
+    uint8_t rs_uncorrectable;
+    uint16_t rs_corrected_bytes;
+    uint16_t rs_uncorrectable_rows;
+    uint8_t au_crc_valid[DAB_MSC_DABPLUS_MAX_AUS];
     uint32_t au_start[DAB_MSC_DABPLUS_MAX_AUS];
     uint32_t au_length[DAB_MSC_DABPLUS_MAX_AUS];
     const uint8_t *superframe_data;
@@ -240,11 +277,37 @@ typedef struct {
     uint64_t generation;
     uint32_t decode_attempts;
     uint32_t decode_failures;
+    uint32_t firecode_checks_total;
+    uint32_t firecode_errors_total;
     uint32_t rs_corrected_last_superframe;
     uint32_t rs_corrected_total;
+    uint32_t rs_corrected_superframes;
+    uint32_t rs_uncorrectable_last_superframe;
+    uint32_t rs_uncorrectable_total;
+    uint32_t rs_corrected_max;
+    uint32_t au_crc_errors_last_superframe;
+    uint32_t au_crc_errors_total;
+    uint32_t au_crc_checks_total;
+    uint8_t dac_rate;
+    uint8_t sbr_flag;
+    uint8_t aac_channel_mode;
+    uint8_t ps_flag;
+    uint8_t mpeg_surround_config;
+    uint8_t au_count;
+    uint8_t au_crc_valid[DAB_MSC_DABPLUS_MAX_AUS];
+    uint32_t au_start[DAB_MSC_DABPLUS_MAX_AUS];
+    uint32_t au_length[DAB_MSC_DABPLUS_MAX_AUS];
+    uint8_t au_preview_length[DAB_MSC_DABPLUS_MAX_AUS];
+    uint8_t au_preview[DAB_MSC_DABPLUS_MAX_AUS]
+                      [DAB_MSC_DABPLUS_AU_PREVIEW_BYTES];
+    uint32_t history_count;
+    dab_msc_dabplus_history_entry_t
+        history[DAB_MSC_DABPLUS_HISTORY_CAPACITY];
     uint8_t last_decode_ok;
     uint32_t runtime_reset_count;
     uint8_t last_reconfig_reason;
+    uint64_t ber_error_bits;
+    uint64_t ber_compared_bits;
 } dab_msc_dabplus_debug_t;
 
 typedef struct {
@@ -260,6 +323,9 @@ typedef struct {
     uint16_t decoded_component_count;
     uint8_t service_filter_enabled;
     uint32_t service_filter_sid;
+    uint8_t cif_counter_valid;
+    uint16_t last_cif_count;
+    uint32_t cif_discontinuity_count;
 } dab_msc_state_t;
 
 int dab_msc_init(dab_msc_state_t *state);
@@ -267,6 +333,8 @@ void dab_msc_reset(dab_msc_state_t *state);
 void dab_msc_set_service_filter(dab_msc_state_t *state, uint32_t sid);
 void dab_msc_clear_service_filter(dab_msc_state_t *state);
 int dab_msc_build_layout(dab_msc_layout_t *layout, const dab_fic_database_t *db);
+int dab_msc_resolve_subchannel(const dab_fic_subchannel_t *in,
+                               dab_msc_subchannel_t *out);
 int dab_msc_build_frame_view(dab_msc_frame_view_t *frame_view,
                              const dab_msc_layout_t *layout,
                              uint32_t msc_softbit_count);

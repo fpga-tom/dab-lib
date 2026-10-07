@@ -1,5 +1,7 @@
 # dab-lib
 
+Copyright (C) 2026 Tomas Krajco
+
 Plain-C DAB/DAB+ receiver skeleton with:
 - portable SDR HAL
 - portable OS layer
@@ -44,6 +46,17 @@ The Inno Setup script is:
 
 The generated installer is written to:
 - `dist/installer`
+
+The installer includes the project license and notices for bundled third-party
+libraries.
+
+## License
+
+DAB SDR GUI and dab-lib are free software licensed under the GNU General Public
+License, version 2 or (at your option) any later version. See `LICENSE`.
+
+Bundled dependencies retain their own licenses and copyright notices. See
+`THIRD_PARTY_NOTICES.md`.
 
 ## Tests
 

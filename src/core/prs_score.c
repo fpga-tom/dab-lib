@@ -1,6 +1,7 @@
 #include "dab/core/prs_score.h"
 
 #include <math.h>
+#include <string.h>
 
 #include "dab/core/ofdm.h"
 #include "prs_template_mode_i_table.h"
@@ -750,14 +751,31 @@ int dab_prs_estimate_rf_level_dbfs_i16(const dab_sdr_block_view_t *block,
                                        uint64_t start_sample,
                                        uint32_t count,
                                        float *level_dbfs_out) {
+    dab_prs_rf_input_metrics_t metrics;
+
+    if (level_dbfs_out == 0 ||
+        dab_prs_measure_rf_input_i16(block, start_sample, count, &metrics) != 0) {
+        return -1;
+    }
+    *level_dbfs_out = metrics.rms_dbfs;
+    return 0;
+}
+
+int dab_prs_measure_rf_input_i16(const dab_sdr_block_view_t *block,
+                                 uint64_t start_sample,
+                                 uint32_t count,
+                                 dab_prs_rf_input_metrics_t *metrics) {
     const double full_scale = 32768.0;
     uint64_t offset;
     double mean_i = 0.0;
     double mean_q = 0.0;
-    double power = 0.0;
+    double i_power = 0.0;
+    double q_power = 0.0;
+    double cross_power = 0.0;
+    double peak_power = 0.0;
     uint32_t i;
 
-    if (block == 0 || block->iq_interleaved == 0 || level_dbfs_out == 0 || count == 0u ||
+    if (block == 0 || block->iq_interleaved == 0 || metrics == 0 || count == 0u ||
         start_sample < block->sample_index) {
         return -1;
     }
@@ -768,10 +786,30 @@ int dab_prs_estimate_rf_level_dbfs_i16(const dab_sdr_block_view_t *block,
         return -1;
     }
 
+    memset(metrics, 0, sizeof(*metrics));
+
     for (i = 0u; i < count; ++i) {
         const uint64_t sample = offset + (uint64_t)i;
-        mean_i += (double)block->iq_interleaved[2u * sample];
-        mean_q += (double)block->iq_interleaved[(2u * sample) + 1u];
+        const int16_t i_sample = block->iq_interleaved[2u * sample];
+        const int16_t q_sample = block->iq_interleaved[(2u * sample) + 1u];
+        uint32_t i_bin = ((uint32_t)((int32_t)i_sample + 32768) *
+                          DAB_PRS_RF_INPUT_HISTOGRAM_BINS) >> 16u;
+        uint32_t q_bin = ((uint32_t)((int32_t)q_sample + 32768) *
+                          DAB_PRS_RF_INPUT_HISTOGRAM_BINS) >> 16u;
+        if (i_bin >= DAB_PRS_RF_INPUT_HISTOGRAM_BINS) {
+            i_bin = DAB_PRS_RF_INPUT_HISTOGRAM_BINS - 1u;
+        }
+        if (q_bin >= DAB_PRS_RF_INPUT_HISTOGRAM_BINS) {
+            q_bin = DAB_PRS_RF_INPUT_HISTOGRAM_BINS - 1u;
+        }
+        metrics->i_histogram[i_bin]++;
+        metrics->q_histogram[q_bin]++;
+        if (i_sample == INT16_MIN || i_sample == INT16_MAX ||
+            q_sample == INT16_MIN || q_sample == INT16_MAX) {
+            metrics->clipped_sample_count++;
+        }
+        mean_i += (double)i_sample;
+        mean_q += (double)q_sample;
     }
     mean_i /= (double)count;
     mean_q /= (double)count;
@@ -780,14 +818,44 @@ int dab_prs_estimate_rf_level_dbfs_i16(const dab_sdr_block_view_t *block,
         const uint64_t sample = offset + (uint64_t)i;
         const double re = (double)block->iq_interleaved[2u * sample] - mean_i;
         const double im = (double)block->iq_interleaved[(2u * sample) + 1u] - mean_q;
-        power += (re * re) + (im * im);
+        const double sample_power = (re * re) + (im * im);
+        i_power += re * re;
+        q_power += im * im;
+        cross_power += re * im;
+        if (sample_power > peak_power) {
+            peak_power = sample_power;
+        }
     }
-    power /= (double)count;
-    if (power <= 0.0) {
+    i_power /= (double)count;
+    q_power /= (double)count;
+    cross_power /= (double)count;
+    if (i_power + q_power <= 0.0 || peak_power <= 0.0) {
         return -1;
     }
 
-    *level_dbfs_out = (float)(10.0 * log10(power / (full_scale * full_scale)));
+    metrics->rms_dbfs = (float)(10.0 * log10((i_power + q_power) /
+                                             (full_scale * full_scale)));
+    metrics->peak_dbfs = (float)(10.0 * log10(peak_power /
+                                              (full_scale * full_scale)));
+    metrics->crest_factor_db = metrics->peak_dbfs - metrics->rms_dbfs;
+    metrics->sample_count = count;
+    metrics->clipping_percent = 100.0f * (float)metrics->clipped_sample_count /
+                                (float)count;
+    metrics->i_dc = (float)(mean_i / full_scale);
+    metrics->q_dc = (float)(mean_q / full_scale);
+    if (i_power > 0.0 && q_power > 0.0) {
+        double correlation = cross_power / sqrt(i_power * q_power);
+        if (correlation < -1.0) {
+            correlation = -1.0;
+        } else if (correlation > 1.0) {
+            correlation = 1.0;
+        }
+        metrics->iq_quality_valid = 1;
+        metrics->amplitude_imbalance_db = (float)(10.0 * log10(i_power / q_power));
+        metrics->iq_correlation = (float)correlation;
+        metrics->phase_imbalance_deg = (float)(asin(correlation) *
+                                               (180.0 / 3.14159265358979323846));
+    }
     return 0;
 }
 

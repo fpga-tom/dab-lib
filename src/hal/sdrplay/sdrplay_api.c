@@ -4,7 +4,14 @@
 
 static const char *const DAB_SDRPLAY_LIBRARY_NAMES[] = {
 #if defined(_WIN32)
-    "sdrplay_api.dll"
+    "sdrplay_api.dll",
+#if defined(_M_ARM64)
+    "C:\\Program Files\\SDRplay\\API\\arm64\\sdrplay_api.dll"
+#elif defined(_WIN64)
+    "C:\\Program Files\\SDRplay\\API\\x64\\sdrplay_api.dll"
+#else
+    "C:\\Program Files\\SDRplay\\API\\x86\\sdrplay_api.dll"
+#endif
 #elif defined(__APPLE__)
     "libsdrplay_api.dylib",
     "/usr/local/lib/libsdrplay_api.dylib",

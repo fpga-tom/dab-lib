@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{D05C3327-697F-4388-A507-A41F01641C55}</ProjectGuid>
+    <ProjectName>DabReceiverCore</ProjectName>
+    <RootNamespace>DabReceiverCore</RootNamespace>
+    <Keyword>Win32Proj</Keyword>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformMinVersion>10.0.17763.0</WindowsTargetPlatformMinVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)'=='Debug'" Label="Configuration">
+    <UseDebugLibraries>true</UseDebugLibraries>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)'=='Release'" Label="Configuration">
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup>
+    <ResolveNuGetPackages>false</ResolveNuGetPackages>
+  </PropertyGroup>
+  <ImportGroup Label="ExtensionSettings" />
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <OutDir>$(ProjectDir)..\..\out\winui\receiver-core\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(ProjectDir)..\..\out\winui\receiver-core\obj\$(Platform)\$(Configuration)\</IntDir>
+    <TargetName>DabReceiverCore</TargetName>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <WarningLevel>Level4</WarningLevel>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <CompileAs>CompileAsC</CompileAs>
+      <LanguageStandard_C>stdc11</LanguageStandard_C>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\..\include;$(ProjectDir)..\..\src\receive;$(ProjectDir)..\..\tools;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>WIN32;_WINDOWS;DAB_CAPTURE_BLOCK_COUNT=32;DAB_RECEIVE_NO_MAIN=1;DAB_ENABLE_AVX2=1;_CRT_SECURE_NO_WARNINGS;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalOptions>%(AdditionalOptions) /arch:AVX2</AdditionalOptions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
+    <ClCompile>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
+    <ClCompile>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Lib>
+      <LinkTimeCodeGeneration>true</LinkTimeCodeGeneration>
+    </Lib>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="..\..\src\core\audio_eq.c" />
+    <ClCompile Include="..\..\src\core\audio_spectrum.c" />
+    <ClCompile Include="..\..\src\core\block_pool.c" />
+    <ClCompile Include="..\..\src\core\frontend.c" />
+    <ClCompile Include="..\..\src\core\fic.c" />
+    <ClCompile Include="..\..\src\core\msc.c" />
+    <ClCompile Include="..\..\src\core\null_detect.c" />
+    <ClCompile Include="..\..\src\core\ofdm.c" />
+    <ClCompile Include="..\..\src\core\prs_acquire.c" />
+    <ClCompile Include="..\..\src\core\prs_fft.c" />
+    <ClCompile Include="..\..\src\core\prs_fft_avx2.c" />
+    <ClCompile Include="..\..\src\core\prs_fft_scalar.c" />
+    <ClCompile Include="..\..\src\core\prs_score.c" />
+    <ClCompile Include="..\..\src\core\prs_template.c" />
+    <ClCompile Include="..\..\src\core\pc_queue.c" />
+    <ClCompile Include="..\..\src\core\receiver.c" />
+    <ClCompile Include="..\..\src\core\sample_history.c" />
+    <ClCompile Include="..\..\src\core\sync.c" />
+    <ClCompile Include="..\..\src\core\tframe.c" />
+    <ClCompile Include="..\..\src\core\viterbi47_port.c" />
+    <ClCompile Include="..\..\src\hal\sdr_device.c" />
+    <ClCompile Include="..\..\src\hal\sdrplay\sdrplay_api.c" />
+    <ClCompile Include="..\..\src\hal\sdrplay\sdrplay_adapter.c" />
+    <ClCompile Include="..\..\src\hal\sdrplay\sdrplay_adapter_real.c" />
+    <ClCompile Include="..\..\src\hal\sdrplay\sdrplay_adapter_stub.c" />
+    <ClCompile Include="..\..\src\hal\sdrplay\sdrplay_device.c" />
+    <ClCompile Include="..\..\src\hal\rtlsdr\rtlsdr_api.c" />
+    <ClCompile Include="..\..\src\hal\rtlsdr\rtlsdr_adapter.c" />
+    <ClCompile Include="..\..\src\hal\rtlsdr\rtlsdr_adapter_real.c" />
+    <ClCompile Include="..\..\src\hal\rtlsdr\rtlsdr_adapter_stub.c" />
+    <ClCompile Include="..\..\src\hal\rtlsdr\rtlsdr_device.c" />
+    <ClCompile Include="..\..\src\os\os_cond.c" />
+    <ClCompile Include="..\..\src\os\os_mutex.c" />
+    <ClCompile Include="..\..\src\os\os_shared_lib.c" />
+    <ClCompile Include="..\..\src\os\os_thread.c" />
+    <ClCompile Include="..\..\src\os\os_time.c" />
+    <ClCompile Include="..\..\src\measurement\measurement_alarm.c" />
+    <ClCompile Include="..\..\src\measurement\rf_calibration.c" />
+    <ClCompile Include="..\..\src\receive\receive.c" />
+    <ClCompile Include="..\..\src\receive\receiver_session.c" />
+    <ClCompile Include="..\..\src\scan\scan.c" />
+    <ClCompile Include="..\..\src\simd\simd.c" />
+    <ClCompile Include="..\..\src\simd\simd_avx2.c" />
+    <ClCompile Include="..\..\src\simd\simd_scalar.c" />
+    <ClCompile Include="..\..\tools\audio_playback.c">
+      <AdditionalIncludeDirectories>$(ProjectDir)..\..\libs\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>DAB_HAVE_AUDIO_PLAYBACK=1;DAB_HAVE_FAAD2=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets" />
+</Project>

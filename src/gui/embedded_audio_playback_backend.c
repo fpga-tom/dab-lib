@@ -10,6 +10,8 @@
 #include "dab/core/msc.h"
 #include "dab/os/os_mutex.h"
 #include "dab/os/os_thread.h"
+#include "audio_playback.h"
+#include "receiver_session.h"
 
 typedef struct {
     dab_thread_t thread;
@@ -47,8 +49,6 @@ typedef struct {
 } dab_gui_mot_state_t;
 
 static dab_gui_mot_state_t g_mot_state = { .current_transport_id = -1 };
-
-#define DAB_GUI_PLAYBACK_EMBEDDED 1
 
 static void dab_gui_playback_ensure_mutex(void) {
     if (g_playback_mutex_ready == 0) {
@@ -702,17 +702,6 @@ static void dab_gui_embedded_audio_spectrum_callback(const float *bins,
     dab_mutex_unlock(&g_playback_mutex);
 }
 
-static void (*dab_gui_embedded_audio_signal(int signum, void (*handler)(int)))(int) {
-    (void)signum;
-    return handler;
-}
-
-#define signal dab_gui_embedded_audio_signal
-#define main dab_gui_embedded_audio_main
-#include "../../tools/dab_sdrplay_audio.c"
-#undef main
-#undef signal
-
 static int dab_gui_playback_thread_main(void *arg) {
     dab_gui_playback_state_t *state = (dab_gui_playback_state_t *)arg;
     dab_gui_sdr_settings_t settings;
@@ -740,10 +729,10 @@ static int dab_gui_playback_thread_main(void *arg) {
     dab_gui_setenv_real_backend();
     dab_gui_setenv_value("DAB_SDR_BACKEND", settings.backend == DAB_GUI_SDR_BACKEND_RTLSDR ? "rtlsdr" : "sdrplay");
     dab_gui_setenv_value("DAB_SYNC_PROBE_GAIN_DB", gain_arg);
-    g_stop_requested = 0;
+    dab_receiver_session_reset_stop();
     dab_gui_embedded_audio_status_reset();
     dab_audio_playback_set_spectrum_callback(&dab_gui_embedded_audio_spectrum_callback, 0);
-    (void)dab_gui_embedded_audio_main(9, argv);
+    (void)dab_receiver_session_run(9, argv);
     dab_audio_playback_set_spectrum_callback(0, 0);
     dab_gui_mot_reset_state(&g_mot_state);
 
@@ -812,7 +801,7 @@ void dab_gui_playback_stop(void) {
     dab_gui_playback_ensure_mutex();
     dab_mutex_lock(&g_playback_mutex);
     if (g_playback_state.running) {
-        g_stop_requested = 1;
+        dab_receiver_session_request_stop();
         should_join = 1;
     }
     dab_mutex_unlock(&g_playback_mutex);

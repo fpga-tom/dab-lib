@@ -48,6 +48,10 @@ int dab_prs_fft_execute_i16_cfo(const dab_prs_fft_t *fft,
                                 float cfo_hz,
                                 float *out_i,
                                 float *out_q);
+int dab_prs_fft_execute_complex_f32(const dab_prs_fft_t *fft,
+                                    float *re,
+                                    float *im,
+                                    int inverse);
 int dab_prs_fft_apply_bin_shift(float *re,
                                 float *im,
                                 uint32_t count,

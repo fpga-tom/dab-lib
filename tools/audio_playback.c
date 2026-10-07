@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #include "audio_playback.h"
 
@@ -161,13 +162,6 @@ static int dab_audio_ring_init(dab_audio_playback_t *audio, size_t frames) {
         audio->ring_frames = 0u;
         return -1;
     }
-    if (dab_cond_init(&audio->ring_cond) != 0) {
-        dab_mutex_destroy(&audio->ring_mutex);
-        free(audio->ring);
-        audio->ring = 0;
-        audio->ring_frames = 0u;
-        return -1;
-    }
     audio->ring_ready = 1u;
     return 0;
 }
@@ -177,7 +171,6 @@ static void dab_audio_ring_deinit(dab_audio_playback_t *audio) {
         return;
     }
     if (audio->ring_ready != 0u) {
-        dab_cond_destroy(&audio->ring_cond);
         dab_mutex_destroy(&audio->ring_mutex);
         audio->ring_ready = 0u;
     }
@@ -232,7 +225,6 @@ static void dab_audio_ring_write_frames(dab_audio_playback_t *audio,
     }
     audio->ring_write = (audio->ring_write + frames) % audio->ring_frames;
     audio->ring_count += frames;
-    dab_cond_signal(&audio->ring_cond);
     dab_mutex_unlock(&audio->ring_mutex);
 }
 
@@ -271,66 +263,52 @@ static size_t dab_audio_ring_read_frames(dab_audio_playback_t *audio,
     return got;
 }
 
-static int dab_audio_playback_thread_main(void *arg) {
-    dab_audio_playback_t *audio = (dab_audio_playback_t *)arg;
-    int16_t *out;
-    const size_t channels = (size_t)audio->channels;
+static int dab_audio_playback_pa_callback(const void *input,
+                                          void *output,
+                                          unsigned long frame_count,
+                                          const PaStreamCallbackTimeInfo *time_info,
+                                          PaStreamCallbackFlags status_flags,
+                                          void *user) {
+    dab_audio_playback_t *audio = (dab_audio_playback_t *)user;
+    int16_t *out = (int16_t *)output;
+    size_t got = 0u;
+    size_t channels;
+    int prebuffer_done = 0;
     const size_t prefill_frames = DAB_AUDIO_FRAMES_PER_BUFFER * DAB_AUDIO_PREFILL_BLOCKS;
 
-    out = (int16_t *)malloc(DAB_AUDIO_FRAMES_PER_BUFFER * channels * sizeof(int16_t));
-    if (out == 0) {
-        return 0;
+    (void)input;
+    (void)time_info;
+    (void)status_flags;
+    if (audio == 0 || out == 0 || audio->channels == 0u) {
+        return paAbort;
     }
-    while (audio->thread_stop == 0u) {
-        if (audio->ring_ready != 0u) {
-            dab_mutex_lock(&audio->ring_mutex);
-            while (audio->thread_stop == 0u &&
-                   audio->prebuffer_done == 0u &&
-                   audio->ring_count < prefill_frames) {
-                dab_cond_wait(&audio->ring_cond, &audio->ring_mutex);
-            }
-            if (audio->thread_stop == 0u && audio->ring_count >= prefill_frames) {
-                audio->prebuffer_done = 1u;
-            }
-            dab_mutex_unlock(&audio->ring_mutex);
-        }
-        if (audio->thread_stop != 0u) {
-            break;
-        }
-        {
-            size_t got = dab_audio_ring_read_frames(audio, out, DAB_AUDIO_FRAMES_PER_BUFFER);
-            PaError pa_err;
+    channels = (size_t)audio->channels;
+    memset(out, 0, (size_t)frame_count * channels * sizeof(*out));
+    if (audio->ring_ready == 0u) {
+        return paContinue;
+    }
 
-            if (got < DAB_AUDIO_FRAMES_PER_BUFFER) {
-                memset(&out[got * channels],
-                       0,
-                       (DAB_AUDIO_FRAMES_PER_BUFFER - got) * channels * sizeof(int16_t));
-            }
-            pa_err = Pa_WriteStream(audio->stream, out, DAB_AUDIO_FRAMES_PER_BUFFER);
-            if (pa_err != paNoError && pa_err != paOutputUnderflowed) {
-                fprintf(stderr, "audio playback: Pa_WriteStream failed (%s)\n", Pa_GetErrorText(pa_err));
-                break;
-            }
-        }
+    dab_mutex_lock(&audio->ring_mutex);
+    if (audio->prebuffer_done == 0u && audio->ring_count >= prefill_frames) {
+        audio->prebuffer_done = 1u;
     }
-    free(out);
-    return 0;
-}
-
-static void dab_audio_playback_stop_thread(dab_audio_playback_t *audio) {
-    if (audio == 0) {
-        return;
-    }
-    audio->thread_stop = 1u;
-    if (audio->ring_ready != 0u) {
+    prebuffer_done = audio->prebuffer_done != 0u;
+    dab_mutex_unlock(&audio->ring_mutex);
+    if (prebuffer_done) {
+        got = dab_audio_ring_read_frames(audio, out, (size_t)frame_count);
         dab_mutex_lock(&audio->ring_mutex);
-        dab_cond_broadcast(&audio->ring_cond);
+        audio->diagnostic_output_frames += frame_count;
+        if (got < (size_t)frame_count) {
+            const uint64_t missing = (uint64_t)frame_count - (uint64_t)got;
+            audio->diagnostic_muted_frames += missing;
+            audio->diagnostic_underrun_events++;
+            if (missing > audio->diagnostic_longest_interruption_frames) {
+                audio->diagnostic_longest_interruption_frames = missing;
+            }
+        }
         dab_mutex_unlock(&audio->ring_mutex);
     }
-    if (audio->thread_running != 0u) {
-        (void)dab_thread_join(&audio->thread, 0);
-        audio->thread_running = 0u;
-    }
+    return paContinue;
 }
 static void dab_audio_playback_print_hex(const char *label,
                                          const uint8_t *data,
@@ -404,9 +382,8 @@ void dab_audio_playback_close(dab_audio_playback_t *audio) {
     if (audio == 0) {
         return;
     }
-    dab_audio_playback_stop_thread(audio);
     if (audio->stream != 0) {
-        Pa_StopStream(audio->stream);
+        (void)Pa_AbortStream(audio->stream);
         Pa_CloseStream(audio->stream);
         audio->stream = 0;
     }
@@ -429,13 +406,61 @@ void dab_audio_playback_close(dab_audio_playback_t *audio) {
     memset(audio, 0, sizeof(*audio));
 }
 
+int dab_audio_playback_output_active(dab_audio_playback_t *audio) {
+    PaError active;
+
+    if (audio == 0 || audio->stream == 0) {
+        return 0;
+    }
+    active = Pa_IsStreamActive(audio->stream);
+    if (active < 0) {
+        fprintf(stderr, "audio playback: Pa_IsStreamActive failed (%s)\n", Pa_GetErrorText(active));
+        return -1;
+    }
+    return active == 1 ? 1 : 0;
+}
+
+int dab_audio_playback_get_diagnostics(
+    dab_audio_playback_t *audio,
+    dab_audio_playback_diagnostics_t *diagnostics) {
+    if (audio == 0 || diagnostics == 0) {
+        return -1;
+    }
+    memset(diagnostics, 0, sizeof(*diagnostics));
+    diagnostics->valid = audio->configured;
+    diagnostics->decoder_backend = audio->decoder_backend;
+    diagnostics->channels = audio->channels;
+    diagnostics->sample_rate = audio->sample_rate;
+    diagnostics->output_active =
+        dab_audio_playback_output_active(audio) > 0 ? 1u : 0u;
+    if (audio->ring_ready != 0u) {
+        dab_mutex_lock(&audio->ring_mutex);
+    }
+    diagnostics->pcm_frames_written =
+        audio->diagnostic_pcm_frames_written;
+    diagnostics->output_frames = audio->diagnostic_output_frames;
+    diagnostics->muted_frames = audio->diagnostic_muted_frames;
+    diagnostics->underrun_events = audio->diagnostic_underrun_events;
+    diagnostics->longest_interruption_frames =
+        audio->diagnostic_longest_interruption_frames;
+    diagnostics->clipped_samples = audio->diagnostic_clipped_samples;
+    diagnostics->total_samples = audio->diagnostic_total_samples;
+    diagnostics->left_rms_dbfs = audio->diagnostic_left_rms_dbfs;
+    diagnostics->right_rms_dbfs = audio->diagnostic_right_rms_dbfs;
+    diagnostics->left_peak_dbfs = audio->diagnostic_left_peak_dbfs;
+    diagnostics->right_peak_dbfs = audio->diagnostic_right_peak_dbfs;
+    if (audio->ring_ready != 0u) {
+        dab_mutex_unlock(&audio->ring_mutex);
+    }
+    return 0;
+}
+
 static void dab_audio_playback_reset_decoder(dab_audio_playback_t *audio) {
     if (audio == 0) {
         return;
     }
-    dab_audio_playback_stop_thread(audio);
     if (audio->stream != 0) {
-        Pa_StopStream(audio->stream);
+        (void)Pa_AbortStream(audio->stream);
         Pa_CloseStream(audio->stream);
         audio->stream = 0;
     }
@@ -472,44 +497,23 @@ static int dab_audio_playback_open_stream(dab_audio_playback_t *audio,
     if (audio->stream != 0 &&
         audio->sample_rate == sample_rate &&
         audio->channels == channels) {
-        return 0;
+        const int active = dab_audio_playback_output_active(audio);
+        if (active > 0) {
+            return 0;
+        }
     }
     if (audio->stream != 0) {
-        dab_audio_playback_stop_thread(audio);
-        Pa_StopStream(audio->stream);
+        (void)Pa_AbortStream(audio->stream);
         Pa_CloseStream(audio->stream);
         audio->stream = 0;
     }
     dab_audio_ring_deinit(audio);
-
-    pa_err = Pa_OpenDefaultStream(&audio->stream,
-                                  0,
-                                  (int)channels,
-                                  paInt16,
-                                  (double)sample_rate,
-                                  DAB_AUDIO_FRAMES_PER_BUFFER,
-                                  0,
-                                  0);
-    if (pa_err != paNoError) {
-        fprintf(stderr, "audio playback: Pa_OpenDefaultStream failed (%s)\n", Pa_GetErrorText(pa_err));
-        return -1;
-    }
-    pa_err = Pa_StartStream(audio->stream);
-    if (pa_err != paNoError) {
-        fprintf(stderr, "audio playback: Pa_StartStream failed (%s)\n", Pa_GetErrorText(pa_err));
-        Pa_CloseStream(audio->stream);
-        audio->stream = 0;
-        return -1;
-    }
 
     audio->sample_rate = sample_rate;
     audio->channels = channels;
     dab_audio_eq_init(&audio->eq);
     if (dab_audio_eq_configure(&audio->eq, sample_rate, channels) != 0) {
         fprintf(stderr, "audio playback: eq init failed\n");
-        Pa_StopStream(audio->stream);
-        Pa_CloseStream(audio->stream);
-        audio->stream = 0;
         return -1;
     }
     audio->eq_gain_version = 0u;
@@ -522,22 +526,31 @@ static int dab_audio_playback_open_stream(dab_audio_playback_t *audio,
     }
     if (dab_audio_ring_init(audio, ring_frames) != 0) {
         fprintf(stderr, "audio playback: ring init failed\n");
-        Pa_StopStream(audio->stream);
-        Pa_CloseStream(audio->stream);
-        audio->stream = 0;
         return -1;
     }
-    audio->thread_stop = 0u;
     audio->prebuffer_done = 0u;
-    if (dab_thread_create(&audio->thread, dab_audio_playback_thread_main, audio, "dab_audio_playback") != 0) {
-        fprintf(stderr, "audio playback: failed to create playback thread\n");
+
+    pa_err = Pa_OpenDefaultStream(&audio->stream,
+                                  0,
+                                  (int)channels,
+                                  paInt16,
+                                  (double)sample_rate,
+                                  DAB_AUDIO_FRAMES_PER_BUFFER,
+                                  dab_audio_playback_pa_callback,
+                                  audio);
+    if (pa_err != paNoError) {
+        fprintf(stderr, "audio playback: Pa_OpenDefaultStream failed (%s)\n", Pa_GetErrorText(pa_err));
         dab_audio_ring_deinit(audio);
-        Pa_StopStream(audio->stream);
-        Pa_CloseStream(audio->stream);
-        audio->stream = 0;
         return -1;
     }
-    audio->thread_running = 1u;
+    pa_err = Pa_StartStream(audio->stream);
+    if (pa_err != paNoError) {
+        fprintf(stderr, "audio playback: Pa_StartStream failed (%s)\n", Pa_GetErrorText(pa_err));
+        Pa_CloseStream(audio->stream);
+        audio->stream = 0;
+        dab_audio_ring_deinit(audio);
+        return -1;
+    }
     return 0;
 }
 
@@ -560,26 +573,74 @@ static int dab_audio_playback_write_stream(dab_audio_playback_t *audio,
         }
         pcm_out = audio->eq_pcm;
     }
+    {
+        double sum_sq[2] = {0.0, 0.0};
+        int32_t peak[2] = {0, 0};
+        uint64_t clipped = 0u;
+        const uint32_t channels = audio->channels;
+        for (unsigned long frame = 0u; frame < frames; ++frame) {
+            for (uint32_t channel = 0u; channel < channels; ++channel) {
+                const int16_t sample =
+                    pcm_out[((size_t)frame * channels) + channel];
+                const int32_t magnitude =
+                    sample < 0 ? -(int32_t)sample : (int32_t)sample;
+                const uint32_t meter_channel = channel == 0u ? 0u : 1u;
+                const double normalized = (double)sample / 32768.0;
+                sum_sq[meter_channel] += normalized * normalized;
+                if (magnitude > peak[meter_channel]) {
+                    peak[meter_channel] = magnitude;
+                }
+                if (sample == INT16_MIN || sample == INT16_MAX) {
+                    clipped++;
+                }
+            }
+        }
+        if (channels == 1u) {
+            sum_sq[1] = sum_sq[0];
+            peak[1] = peak[0];
+        }
+        dab_mutex_lock(&audio->ring_mutex);
+        audio->diagnostic_pcm_frames_written += frames;
+        audio->diagnostic_clipped_samples += clipped;
+        audio->diagnostic_total_samples +=
+            (uint64_t)frames * (uint64_t)channels;
+        audio->diagnostic_left_rms_dbfs =
+            sum_sq[0] > 0.0
+                ? (float)(10.0 * log10(sum_sq[0] / (double)frames))
+                : -120.0f;
+        audio->diagnostic_right_rms_dbfs =
+            sum_sq[1] > 0.0
+                ? (float)(10.0 * log10(sum_sq[1] / (double)frames))
+                : -120.0f;
+        audio->diagnostic_left_peak_dbfs =
+            peak[0] > 0
+                ? (float)(20.0 * log10((double)peak[0] / 32768.0))
+                : -120.0f;
+        audio->diagnostic_right_peak_dbfs =
+            peak[1] > 0
+                ? (float)(20.0 * log10((double)peak[1] / 32768.0))
+                : -120.0f;
+        audio->diagnostic_level_valid = 1u;
+        dab_mutex_unlock(&audio->ring_mutex);
+    }
     dab_audio_playback_publish_spectrum(audio, pcm_out, (uint32_t)frames);
     dab_audio_ring_write_frames(audio, pcm_out, (size_t)frames);
     return 0;
 }
 
-static int dab_audio_playback_configure(dab_audio_playback_t *audio,
-                                        const dab_msc_dabplus_superframe_t *superframe) {
-    uint8_t asc[7];
-    uint32_t asc_length;
+static int dab_audio_playback_configure_asc(dab_audio_playback_t *audio,
+                                            uint32_t service_id,
+                                            const uint8_t *asc,
+                                            uint32_t asc_length) {
     PaError pa_err;
+    int portaudio_initialized_here = 0;
+    uint8_t decoder_asc[8];
 
-    if (audio == 0 || superframe == 0) {
+    if (audio == 0 || asc == 0 || asc_length == 0u ||
+        asc_length > (uint32_t)sizeof(audio->asc)) {
         return -1;
     }
-
-    asc_length = dab_audio_playback_build_asc(superframe, asc, sizeof(asc));
-    if (asc_length == 0u) {
-        fprintf(stderr, "audio playback: failed to build ASC\n");
-        return -1;
-    }
+    memcpy(decoder_asc, asc, asc_length);
 
     if (audio->configured == 0u) {
         pa_err = Pa_Initialize();
@@ -587,6 +648,7 @@ static int dab_audio_playback_configure(dab_audio_playback_t *audio,
             fprintf(stderr, "audio playback: Pa_Initialize failed (%s)\n", Pa_GetErrorText(pa_err));
             return -1;
         }
+        portaudio_initialized_here = 1;
     }
 
 #if defined(DAB_HAVE_FAAD2)
@@ -601,7 +663,7 @@ static int dab_audio_playback_configure(dab_audio_playback_t *audio,
                 config->outputFormat = FAAD_FMT_16BIT;
                 config->dontUpSampleImplicitSBR = 0u;
                 if (NeAACDecSetConfiguration(decoder, config) != 0u &&
-                    NeAACDecInit2(decoder, asc, (unsigned long)asc_length, &sr, &ch) == 0) {
+                    NeAACDecInit2(decoder, decoder_asc, (unsigned long)asc_length, &sr, &ch) == 0) {
                     audio->faad_decoder = decoder;
                     audio->decoder_backend = DAB_AUDIO_DECODER_FAAD;
                     audio->sample_rate = (uint32_t)sr;
@@ -619,7 +681,7 @@ static int dab_audio_playback_configure(dab_audio_playback_t *audio,
     if (audio->decoder_backend == DAB_AUDIO_DECODER_NONE) {
         HANDLE_AACDECODER decoder = aacDecoder_Open(TT_MP4_RAW, 1u);
         if (decoder != 0) {
-            UCHAR *asc_ptr = asc;
+            UCHAR *asc_ptr = decoder_asc;
             UINT asc_size = (UINT)asc_length;
             AAC_DECODER_ERROR err = aacDecoder_ConfigRaw(decoder, &asc_ptr, &asc_size);
 
@@ -639,7 +701,7 @@ static int dab_audio_playback_configure(dab_audio_playback_t *audio,
 #endif
     if (audio->decoder_backend == DAB_AUDIO_DECODER_NONE) {
         fprintf(stderr, "audio playback: no usable AAC decoder backend\n");
-        if (audio->configured != 0u) {
+        if (portaudio_initialized_here != 0) {
             Pa_Terminate();
         }
         audio->configured = 0u;
@@ -647,6 +709,33 @@ static int dab_audio_playback_configure(dab_audio_playback_t *audio,
     }
 
     audio->configured = 1u;
+    audio->service_id = service_id;
+    memcpy(audio->asc, asc, asc_length);
+    audio->asc_length = asc_length;
+    return 0;
+}
+
+static int dab_audio_playback_configure(dab_audio_playback_t *audio,
+                                        const dab_msc_dabplus_superframe_t *superframe) {
+    uint8_t asc[7];
+    uint32_t asc_length;
+
+    if (audio == 0 || superframe == 0) {
+        return -1;
+    }
+
+    asc_length = dab_audio_playback_build_asc(superframe, asc, sizeof(asc));
+    if (asc_length == 0u) {
+        fprintf(stderr, "audio playback: failed to build ASC\n");
+        return -1;
+    }
+    if (dab_audio_playback_configure_asc(audio,
+                                         superframe->sid,
+                                         asc,
+                                         asc_length) != 0) {
+        return -1;
+    }
+
     audio->dac_rate = superframe->dac_rate;
     audio->sbr_flag = superframe->sbr_flag;
     audio->aac_channel_mode = superframe->aac_channel_mode;
@@ -672,6 +761,41 @@ static int dab_audio_playback_configure(dab_audio_playback_t *audio,
     return 0;
 }
 
+int dab_audio_playback_set_format(dab_audio_playback_t *audio,
+                                  uint32_t service_id,
+                                  uint32_t sample_rate,
+                                  uint32_t channels,
+                                  const uint8_t *asc,
+                                  uint32_t asc_length) {
+    (void)sample_rate;
+    (void)channels;
+
+    if (audio == 0 || asc == 0 || asc_length == 0u ||
+        asc_length > (uint32_t)sizeof(audio->asc)) {
+        return -1;
+    }
+    if (audio->decoder_backend != DAB_AUDIO_DECODER_NONE &&
+        audio->service_id == service_id &&
+        audio->asc_length == asc_length &&
+        memcmp(audio->asc, asc, asc_length) == 0) {
+        return 0;
+    }
+    if (audio->decoder_backend != DAB_AUDIO_DECODER_NONE) {
+        dab_audio_playback_reset_decoder(audio);
+    }
+    if (dab_audio_playback_configure_asc(audio,
+                                         service_id,
+                                         asc,
+                                         asc_length) != 0) {
+        return -1;
+    }
+    printf("audio playback decoder configured sid=0x%08x backend=%s\n",
+           service_id,
+           audio->decoder_backend == DAB_AUDIO_DECODER_FAAD ? "faad" :
+           (audio->decoder_backend == DAB_AUDIO_DECODER_FDK ? "fdk" : "none"));
+    return 0;
+}
+
 static int dab_audio_playback_ensure_configured(dab_audio_playback_t *audio,
                                                 const dab_msc_dabplus_superframe_t *superframe) {
     if (audio == 0 || superframe == 0) {
@@ -688,7 +812,7 @@ static int dab_audio_playback_ensure_configured(dab_audio_playback_t *audio,
     }
 
     if (audio->stream != 0) {
-        Pa_StopStream(audio->stream);
+        (void)Pa_AbortStream(audio->stream);
         Pa_CloseStream(audio->stream);
         audio->stream = 0;
     }
@@ -790,6 +914,36 @@ static const char *dab_audio_playback_error_string(const dab_audio_playback_t *a
     (void)audio;
     (void)error_code;
     return "";
+}
+
+int dab_audio_playback_consume_au(dab_audio_playback_t *audio,
+                                  const uint8_t *au_data,
+                                  uint32_t au_length,
+                                  uint64_t generation) {
+    int decode_rc;
+
+    if (audio == 0 || audio->decoder_backend == DAB_AUDIO_DECODER_NONE) {
+        return -1;
+    }
+    decode_rc = dab_audio_playback_decode_au(audio, au_data, au_length);
+    if (decode_rc < 0) {
+        return -1;
+    }
+    if (decode_rc > 0) {
+        audio->total_decode_failures++;
+        audio->consecutive_decode_failures++;
+        fprintf(stderr,
+                "audio playback: AU decode failure sid=0x%08x generation=%llu consecutive=%u total=%u msg=%s\n",
+                audio->service_id,
+                (unsigned long long)generation,
+                audio->consecutive_decode_failures,
+                audio->total_decode_failures,
+                dab_audio_playback_error_string(audio, decode_rc));
+        return 1;
+    }
+    audio->consecutive_decode_failures = 0u;
+    audio->last_generation = generation;
+    return 0;
 }
 
 int dab_audio_playback_consume_superframe(dab_audio_playback_t *audio,

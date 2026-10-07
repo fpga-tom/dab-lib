@@ -325,6 +325,8 @@ void test_msc_process_frame_with_fic_populates_layout(void) {
     db.subchannels[1].protection_kind = DAB_FIC_PROTECTION_EEP;
     db.subchannels[1].protection_option = 0u;
     db.subchannels[1].protection_level = 0u;
+    db.fig0_ext0_valid = 1u;
+    db.cif_count = 100u;
 
     TEST_ASSERT(dab_msc_init(&state) == 0);
     TEST_ASSERT(dab_msc_process_frame_with_fic(&state, 777u, msc, DAB_TFRAME_MSC_SOFTBITS, &db) == 0);
@@ -604,6 +606,8 @@ void test_msc_process_frame_with_fic_tracks_decoded_component_bindings(void) {
     db.subchannels[1].protection_kind = DAB_FIC_PROTECTION_EEP;
     db.subchannels[1].protection_option = 0u;
     db.subchannels[1].protection_level = 0u;
+    db.fig0_ext0_valid = 1u;
+    db.cif_count = 100u;
 
     db.service_count = 1u;
     db.services[0].sid = 0x3456u;
@@ -625,6 +629,18 @@ void test_msc_process_frame_with_fic_tracks_decoded_component_bindings(void) {
     TEST_ASSERT(state.decoded_components[0].sid == 0x3456u);
     TEST_ASSERT(state.decoded_components[0].subchid == 1u);
     TEST_ASSERT(state.decoded_components[0].tmid == 0u);
+    TEST_ASSERT(state.runtimes[1].deinterleaver_cifs_seen ==
+                DAB_MSC_CIFS_PER_FRAME);
+    TEST_ASSERT(state.runtimes[1].decoded_cif_attempts ==
+                DAB_MSC_CIFS_PER_FRAME);
+    TEST_ASSERT(state.runtimes[1].decoded_cif_successes ==
+                DAB_MSC_CIFS_PER_FRAME);
+    TEST_ASSERT(state.runtimes[1].decoded_cif_failures == 0u);
+    TEST_ASSERT(state.runtimes[1].decoded_output_bytes ==
+                4u * (state.runtimes[1].config.framebits / 8u));
+    TEST_ASSERT(state.cif_counter_valid == 1u);
+    TEST_ASSERT(state.last_cif_count == 100u);
+    TEST_ASSERT(state.cif_discontinuity_count == 0u);
 
     for (cif_index = 0u; cif_index < DAB_MSC_CIFS_PER_FRAME; ++cif_index) {
         TEST_ASSERT(dab_msc_decode_subchannel_cif(msc,
@@ -639,6 +655,21 @@ void test_msc_process_frame_with_fic_tracks_decoded_component_bindings(void) {
                            state.decoded_subchannels[1].data[cif_index],
                            state.decoded_subchannels[1].byte_count[cif_index]) == 0);
     }
+    db.services[0].components[0].tmid = 1u;
+    db.cif_count = 104u;
+    TEST_ASSERT(dab_msc_process_frame_with_fic(&state,
+                                                124u,
+                                                msc,
+                                                DAB_TFRAME_MSC_SOFTBITS,
+                                                &db) == 0);
+    TEST_ASSERT(state.cif_discontinuity_count == 0u);
+    db.cif_count = 120u;
+    TEST_ASSERT(dab_msc_process_frame_with_fic(&state,
+                                                125u,
+                                                msc,
+                                                DAB_TFRAME_MSC_SOFTBITS,
+                                                &db) == 0);
+    TEST_ASSERT(state.cif_discontinuity_count == 1u);
     free(legacy_deinterleaver);
     dab_msc_reset(&state);
 }
@@ -705,6 +736,7 @@ void test_msc_ingest_component_payload_builds_dabplus_superframe(void) {
     dab_msc_layout_t layout = {0};
     dab_msc_component_payload_t payload;
     dab_msc_dabplus_superframe_t superframe;
+    dab_msc_dabplus_debug_t debug;
     uint8_t data1[24u * DAB_MSC_DABPLUS_COLUMNS_PER_RS_PAYLOAD];
     uint8_t cifs[DAB_MSC_DABPLUS_COLUMNS_PER_SUPERFRAME][DAB_MSC_MAX_LOGICAL_FRAME_BYTES_PER_CIF] = {{0}};
     uint16_t firecode;
@@ -778,9 +810,36 @@ void test_msc_ingest_component_payload_builds_dabplus_superframe(void) {
     TEST_ASSERT(superframe.au_length[0] == 392u);
     TEST_ASSERT(superframe.au_length[1] == 398u);
     TEST_ASSERT(superframe.au_length[2] == (sizeof(data1) - 800u - 2u));
+    TEST_ASSERT(superframe.firecode_valid == 1u);
+    TEST_ASSERT(superframe.rs_uncorrectable ==
+                (superframe.rs_uncorrectable_rows != 0u));
+    TEST_ASSERT(superframe.au_crc_valid[0] == 0u);
+    TEST_ASSERT(superframe.au_crc_valid[1] == 0u);
+    TEST_ASSERT(superframe.au_crc_valid[2] == 0u);
     TEST_ASSERT(superframe.superframe_data != 0);
     TEST_ASSERT(superframe.superframe_data[0] != 0u);
     TEST_ASSERT(superframe.superframe_data[1] != 0u);
+    TEST_ASSERT(dab_msc_get_primary_dabplus_debug(&state, 0x5555u, &debug) == 0);
+    TEST_ASSERT(debug.valid == 1u);
+    TEST_ASSERT(debug.au_crc_checks_total == 3u);
+    TEST_ASSERT(debug.au_crc_errors_last_superframe == 3u);
+    TEST_ASSERT(debug.au_crc_errors_total == 3u);
+    TEST_ASSERT(debug.firecode_checks_total == 1u);
+    TEST_ASSERT(debug.firecode_errors_total == 0u);
+    TEST_ASSERT(debug.rs_uncorrectable_total ==
+                (debug.rs_uncorrectable_last_superframe != 0u ? 1u : 0u));
+    TEST_ASSERT(debug.dac_rate == 1u);
+    TEST_ASSERT(debug.sbr_flag == 1u);
+    TEST_ASSERT(debug.au_count == 3u);
+    TEST_ASSERT(debug.au_preview_length[0] ==
+                DAB_MSC_DABPLUS_AU_PREVIEW_BYTES);
+    TEST_ASSERT(debug.history_count == 1u);
+    TEST_ASSERT(debug.history[0].valid == 1u);
+    TEST_ASSERT(debug.history[0].firecode_valid == 1u);
+    TEST_ASSERT(debug.history[0].rs_uncorrectable ==
+                (debug.history[0].rs_uncorrectable_rows != 0u));
+    TEST_ASSERT(debug.history[0].attempt_number == 1u);
+    TEST_ASSERT(debug.history[0].au_count == 3u);
 }
 
 void test_msc_build_layout_and_payload_preserve_packet_metadata(void) {

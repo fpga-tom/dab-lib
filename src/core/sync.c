@@ -64,11 +64,21 @@ void dab_sync_reset(dab_sync_t *sync) {
 }
 
 void dab_sync_on_null_candidate(dab_sync_t *sync, const dab_null_event_t *event) {
+    float confidence;
+
     if (sync == 0 || event == 0) {
         return;
     }
+    confidence = 1.0f - event->min_ratio;
+    if (confidence < 0.0f) {
+        confidence = 0.0f;
+    } else if (confidence > 1.0f) {
+        confidence = 1.0f;
+    }
     sync->state.frame_start_sample = event->sample_index;
     sync->state.timing_error_samples = (int32_t)event->length - (int32_t)sync->config.expected_null_samples;
+    sync->state.null_confidence = confidence;
+    sync->state.null_confidence_valid = event->length != 0u;
     sync->state.mode = DAB_SYNC_MODE_ACQUIRE;
     sync->state.locked = 0;
 }
@@ -92,7 +102,12 @@ int dab_sync_on_prs_acquire(dab_sync_t *sync,
     sync->state.coarse_freq_error_hz = coarse_freq_error_hz;
     sync->state.carrier_offset_bins = carrier_offset_bins;
     sync->state.fine_freq_error_hz = 0.0f;
+    sync->state.residual_freq_error_hz = 0.0f;
     sync->state.cfo_integrator_hz = coarse_freq_error_hz;
+    sync->state.sample_clock_error_sum = 0;
+    sync->state.sample_clock_frame_count = 0u;
+    sync->state.sample_clock_error_ppm = 0.0f;
+    sync->state.sample_clock_error_valid = 0;
     sync->state.good_frames = 1u;
     sync->state.bad_frames = 0u;
     sync->state.mode = DAB_SYNC_MODE_TRACK;
@@ -138,6 +153,15 @@ int dab_sync_on_prs_track(dab_sync_t *sync,
     sync->state.coarse_freq_error_hz =
         sync->state.cfo_integrator_hz +
         (sync->config.cfo_pi_proportional_gain * sync->state.fine_freq_error_hz);
+    sync->state.residual_freq_error_hz = measured_freq_error_hz -
+                                         sync->state.coarse_freq_error_hz;
+    sync->state.sample_clock_error_sum += error;
+    sync->state.sample_clock_frame_count++;
+    sync->state.sample_clock_error_ppm =
+        (float)(1000000.0 * (double)sync->state.sample_clock_error_sum /
+                ((double)sync->config.expected_frame_samples *
+                 (double)sync->state.sample_clock_frame_count));
+    sync->state.sample_clock_error_valid = sync->state.sample_clock_frame_count >= 8u;
     sync->state.good_frames++;
     sync->state.bad_frames = 0u;
     return 1;

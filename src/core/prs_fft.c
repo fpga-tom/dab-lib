@@ -128,16 +128,52 @@ static void dab_prs_fft_bit_reverse_permute(const dab_prs_fft_t *fft, float *re,
     }
 }
 
+int dab_prs_fft_execute_complex_f32(const dab_prs_fft_t *fft,
+                                    float *re,
+                                    float *im,
+                                    int inverse) {
+    const dab_prs_fft_backend_t *backend = dab_prs_fft_select_backend();
+    uint32_t i;
+    uint32_t stage;
+
+    if (fft == 0 || re == 0 || im == 0 || fft->config.fft_samples == 0u) {
+        return -1;
+    }
+
+    if (inverse != 0) {
+        for (i = 0u; i < fft->config.fft_samples; ++i) {
+            im[i] = -im[i];
+        }
+    }
+
+    dab_prs_fft_bit_reverse_permute(fft, re, im);
+    for (stage = 0u; stage < fft->stage_count; ++stage) {
+        backend->stage_fn(re,
+                          im,
+                          fft->twiddle_re + fft->stage_offsets[stage],
+                          fft->twiddle_im + fft->stage_offsets[stage],
+                          fft->config.fft_samples,
+                          fft->stage_halves[stage]);
+    }
+
+    if (inverse != 0) {
+        const float scale = 1.0f / (float)fft->config.fft_samples;
+        for (i = 0u; i < fft->config.fft_samples; ++i) {
+            re[i] *= scale;
+            im[i] *= -scale;
+        }
+    }
+    return 0;
+}
+
 int dab_prs_fft_execute_i16_cfo(const dab_prs_fft_t *fft,
                                 const dab_sdr_block_view_t *block,
                                 uint64_t fft_start_sample,
                                 float cfo_hz,
                                 float *out_i,
                                 float *out_q) {
-    const dab_prs_fft_backend_t *backend = dab_prs_fft_select_backend();
     const uint64_t block_start = block != 0 ? block->sample_index : 0u;
     uint32_t offset;
-    uint32_t stage;
 
     if (fft == 0 || block == 0 || out_i == 0 || out_q == 0 || block->iq_interleaved == 0) {
         return -1;
@@ -270,18 +306,7 @@ int dab_prs_fft_execute_i16_cfo(const dab_prs_fft_t *fft,
             rot_im = next_im;
         }
     }
-    dab_prs_fft_bit_reverse_permute(fft, out_i, out_q);
-
-    for (stage = 0u; stage < fft->stage_count; ++stage) {
-        backend->stage_fn(out_i,
-                          out_q,
-                          fft->twiddle_re + fft->stage_offsets[stage],
-                          fft->twiddle_im + fft->stage_offsets[stage],
-                          fft->config.fft_samples,
-                          fft->stage_halves[stage]);
-    }
-
-    return 0;
+    return dab_prs_fft_execute_complex_f32(fft, out_i, out_q, 0);
 }
 
 int dab_prs_fft_execute_i16(const dab_prs_fft_t *fft,

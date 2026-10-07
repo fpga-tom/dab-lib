@@ -30,7 +30,18 @@ typedef struct {
     float coarse_freq_error_hz;
     int32_t carrier_offset_bins;
     float fine_freq_error_hz;
+    float residual_freq_error_hz;
     float cfo_integrator_hz;
+    float cp_correlation_peak;
+    int cp_correlation_valid;
+    float null_confidence;
+    int null_confidence_valid;
+    float fft_timing_offset_samples;
+    int fft_timing_valid;
+    int64_t sample_clock_error_sum;
+    uint32_t sample_clock_frame_count;
+    float sample_clock_error_ppm;
+    int sample_clock_error_valid;
     float prs_score;
     float receiver_snr_db;
     int receiver_snr_valid;

@@ -149,9 +149,12 @@ static dab_sdr_status_t dab_sdrplay_stream_stop(struct dab_sdr_stream *stream) {
     return status;
 }
 
-static dab_sdr_status_t dab_sdrplay_stream_read(struct dab_sdr_stream *stream, dab_sdr_block_view_t *block) {
+static dab_sdr_status_t dab_sdrplay_stream_read_internal(struct dab_sdr_stream *stream,
+                                                         dab_sdr_block_view_t *block,
+                                                         uint32_t timeout_ms) {
     dab_sdrplay_stream_t *impl = (dab_sdrplay_stream_t *)stream;
     dab_iq_block_t *next_block = NULL;
+    int queue_result;
 
     if (impl == NULL || block == NULL) {
         return DAB_SDR_STATUS_INVALID_ARGUMENT;
@@ -165,7 +168,15 @@ static dab_sdr_status_t dab_sdrplay_stream_read(struct dab_sdr_stream *stream, d
         impl->current_block = NULL;
     }
 
-    if (dab_pc_queue_pop(&impl->filled_blocks, (void **)&next_block) != 0) {
+    queue_result = timeout_ms == 0u
+        ? dab_pc_queue_pop(&impl->filled_blocks, (void **)&next_block)
+        : dab_pc_queue_pop_timeout(&impl->filled_blocks,
+                                   (void **)&next_block,
+                                   timeout_ms);
+    if (queue_result == DAB_PC_QUEUE_TIMEOUT) {
+        return DAB_SDR_STATUS_TIMEOUT;
+    }
+    if (queue_result != DAB_PC_QUEUE_OK) {
         return DAB_SDR_STATUS_ERROR;
     }
 
@@ -193,10 +204,41 @@ static void dab_sdrplay_stream_destroy(struct dab_sdr_stream *stream) {
     free(impl);
 }
 
+static dab_sdr_status_t dab_sdrplay_stream_diagnostics(
+    struct dab_sdr_stream *stream,
+    dab_sdr_stream_diagnostics_t *diagnostics) {
+    dab_sdrplay_stream_t *impl = (dab_sdrplay_stream_t *)stream;
+    if (impl == NULL || diagnostics == NULL) {
+        return DAB_SDR_STATUS_INVALID_ARGUMENT;
+    }
+    memset(diagnostics, 0, sizeof(*diagnostics));
+    if (impl->filled_queue_ready) {
+        dab_pc_queue_usage(&impl->filled_blocks,
+                           &diagnostics->queue_depth,
+                           &diagnostics->queue_high_watermark,
+                           &diagnostics->queue_capacity);
+    }
+    diagnostics->dropped_blocks = impl->dropped_blocks;
+    return DAB_SDR_STATUS_OK;
+}
+
+static dab_sdr_status_t dab_sdrplay_stream_read(struct dab_sdr_stream *stream,
+                                                 dab_sdr_block_view_t *block) {
+    return dab_sdrplay_stream_read_internal(stream, block, 0u);
+}
+
+static dab_sdr_status_t dab_sdrplay_stream_read_timeout(struct dab_sdr_stream *stream,
+                                                         dab_sdr_block_view_t *block,
+                                                         uint32_t timeout_ms) {
+    return dab_sdrplay_stream_read_internal(stream, block, timeout_ms);
+}
+
 static const dab_sdr_stream_vtbl_t DAB_SDRPLAY_STREAM_VTBL = {
     dab_sdrplay_stream_start,
     dab_sdrplay_stream_stop,
     dab_sdrplay_stream_read,
+    dab_sdrplay_stream_read_timeout,
+    dab_sdrplay_stream_diagnostics,
     dab_sdrplay_stream_destroy
 };
 
@@ -269,6 +311,21 @@ uint32_t dab_sdrplay_stream_dropped_blocks(const dab_sdr_stream_t *stream) {
         return 0u;
     }
     return impl->dropped_blocks;
+}
+
+dab_sdr_status_t dab_sdrplay_stream_get_gain_diagnostics(
+    dab_sdr_stream_t *stream,
+    dab_sdrplay_gain_diagnostics_t *diagnostics) {
+    dab_sdrplay_stream_t *impl = (dab_sdrplay_stream_t *)stream;
+
+    if (impl == NULL || diagnostics == NULL) {
+        return DAB_SDR_STATUS_INVALID_ARGUMENT;
+    }
+    if (impl->adapter == NULL) {
+        memset(diagnostics, 0, sizeof(*diagnostics));
+        return DAB_SDR_STATUS_ERROR;
+    }
+    return dab_sdrplay_adapter_get_gain_diagnostics(impl->adapter, diagnostics);
 }
 
 static int dab_sdrplay_validate_stream_config(const dab_stream_config_t *config, const dab_sdr_capabilities_t *caps) {

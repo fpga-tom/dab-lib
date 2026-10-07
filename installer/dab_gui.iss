@@ -2,7 +2,7 @@
 #define AppExeName "dab_gui.exe"
 
 #ifndef AppVersion
-  #define AppVersion "0.1.3"
+  #define AppVersion "0.1.4"
 #endif
 
 #ifndef SourceDir
@@ -31,6 +31,7 @@ WizardStyle=modern
 DisableDirPage=no
 DisableProgramGroupPage=yes
 UninstallDisplayIcon={app}\{#AppExeName}
+LicenseFile={#SourceDir}\LICENSE
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked

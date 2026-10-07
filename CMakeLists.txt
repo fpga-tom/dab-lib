@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.21)
 
 project(dab_lib C CXX)
 
-set(DAB_APP_VERSION "0.1.3")
+set(DAB_APP_VERSION "0.1.4")
 set(DAB_CAPTURE_BLOCK_COUNT 32 CACHE STRING "Preallocated IQ blocks per open SDR stream")
 if(DAB_CAPTURE_BLOCK_COUNT LESS 2)
     message(FATAL_ERROR "DAB_CAPTURE_BLOCK_COUNT must be at least 2")
@@ -257,7 +257,10 @@ add_library(dab STATIC
     src/os/os_shared_lib.c
     src/os/os_thread.c
     src/os/os_time.c
+    src/measurement/measurement_alarm.c
+    src/measurement/rf_calibration.c
     src/receive/receive.c
+    src/receive/receiver_session.c
     src/scan/scan.c
     src/simd/simd.c
     src/simd/simd_scalar.c
@@ -266,9 +269,13 @@ add_library(dab STATIC
 target_include_directories(dab
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/receive
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools
 )
 
 target_compile_definitions(dab PUBLIC DAB_CAPTURE_BLOCK_COUNT=${DAB_CAPTURE_BLOCK_COUNT})
+target_compile_definitions(dab PRIVATE DAB_RECEIVE_NO_MAIN=1)
 set_target_properties(dab PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 if(NOT WIN32)
@@ -293,15 +300,21 @@ if(DAB_BUILD_GUI)
             src/gui/dab_gui_settings.c
             src/gui/embedded_audio_playback_backend.c
             src/gui/embedded_audio_scan_backend.c
+            src/receive/receiver_session.c
             tools/audio_playback.c
         )
 
         target_include_directories(dab_gui PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/receive
             ${CMAKE_CURRENT_SOURCE_DIR}/src/gui
             ${CMAKE_CURRENT_SOURCE_DIR}/tools
         )
-        target_compile_definitions(dab_gui PRIVATE DAB_GUI_APP_VERSION="${DAB_APP_VERSION}")
+        target_compile_definitions(dab_gui PRIVATE
+            DAB_GUI_APP_VERSION="${DAB_APP_VERSION}"
+            DAB_GUI_PLAYBACK_EMBEDDED=1
+            DAB_RECEIVER_SESSION_EMBEDDED=1
+        )
 
         target_link_libraries(dab_gui PRIVATE dab ${DAB_WXWIDGETS_TARGET})
         if(OpenGL_FOUND)
@@ -320,7 +333,17 @@ if(DAB_BUILD_GUI)
         dab_set_windows_stack_size(dab_gui 8388608)
         dab_copy_runtime_dlls(dab_gui ${DAB_AUDIO_RUNTIME_DLLS} ${DAB_WXWIDGETS_RUNTIME_DLLS})
         install(TARGETS dab_gui RUNTIME DESTINATION . COMPONENT gui)
-        install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/INSTALL.md DESTINATION . COMPONENT gui)
+        install(FILES
+            ${CMAKE_CURRENT_SOURCE_DIR}/INSTALL.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE
+            ${CMAKE_CURRENT_SOURCE_DIR}/SOURCE_CODE.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_NOTICES.md
+            DESTINATION .
+            COMPONENT gui
+        )
+        install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/LICENSES
+                DESTINATION .
+                COMPONENT gui)
         dab_install_runtime_dlls(gui ${DAB_AUDIO_RUNTIME_DLLS} ${DAB_WXWIDGETS_RUNTIME_DLLS})
     else()
         message(WARNING "wxWidgets not found; dab_gui target will not be built")
@@ -361,9 +384,14 @@ if(DAB_BUILD_TOOLS)
 
     add_executable(dab_sdrplay_audio
         tools/dab_sdrplay_audio.c
+        src/receive/receiver_session.c
         tools/audio_playback.c
     )
 
+    target_include_directories(dab_sdrplay_audio PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/receive
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools
+    )
     target_link_libraries(dab_sdrplay_audio PRIVATE dab)
 
     add_executable(dab_sync_file_replay
@@ -561,6 +589,9 @@ if(DAB_BUILD_TESTS)
         tests/test_fic.c
         tests/test_hal.c
         tests/test_msc.c
+        tests/test_measurement_alarm.c
+        tests/test_measurement_session_recorder.cpp
+        tests/test_rf_calibration.c
         tests/test_null_detect.c
         tests/test_ofdm.c
         tests/test_os_shared_lib.c
@@ -568,6 +599,7 @@ if(DAB_BUILD_TESTS)
         tests/test_sdrplay.c
         tests/test_rtlsdr_api.c
         tests/test_rtlsdr.c
+        tests/test_receive.c
         tests/test_sample_history.c
         tests/test_pc_queue.c
         tests/test_simd.c
@@ -578,12 +610,17 @@ if(DAB_BUILD_TESTS)
         tests/test_prs_template.c
         tests/test_sync.c
         tests/test_tframe.c
+        apps/dab_measurement_winui/MeasurementSessionRecorder.cpp
+        apps/dab_measurement_winui/MeasurementSessionReplay.cpp
     )
 
     target_link_libraries(dab_tests PRIVATE dab)
+    dab_set_windows_stack_size(dab_tests 8388608)
     target_include_directories(dab_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/receive
         ${CMAKE_CURRENT_SOURCE_DIR}/src/hal/sdrplay
         ${CMAKE_CURRENT_SOURCE_DIR}/src/hal/rtlsdr
+        ${CMAKE_CURRENT_SOURCE_DIR}/apps/dab_measurement_winui
     )
 
     add_test(NAME dab_tests COMMAND dab_tests)

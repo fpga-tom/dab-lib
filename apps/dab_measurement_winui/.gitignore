@@ -1,0 +1,5 @@
+# Visual Studio / C++/WinRT generated artifacts
+Generated Files/
+obj/
+*.user
+.vs/

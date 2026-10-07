@@ -10,6 +10,20 @@ Initializes a `dab_receiver_t` with its IQ block pool and filled-block queue. Us
 ### `dab_receiver_shutdown`
 Stops queues, destroys internal storage, frees allocated receiver buffers, and resets the receiver struct.
 
+## End-to-End Receive Session
+
+### `dab_receive_default_config`
+Loads the default RTL-SDR playback configuration used by the end-to-end receive session.
+
+### `dab_receive_service`
+Runs the reusable live receiver session for one frequency and service until cancellation or failure. Status, audio format, encoded audio access units, and errors are delivered through the caller's event callback. If `config.snapshot` is set, it also receives coherent measurement snapshots after each processed PRS update; returning nonzero stops the session.
+
+### `dab_receive_snapshot_t`
+Provides one copied, callback-scoped view of the live receiver measurements. It includes acquisition identity and sequence data, ADC level in dBFS, PRS score, spectrum C/N, receiver SNR, fractional CFO and integer carrier offset, timing error, SDR block/drop counts, FIC frame/FIB counters, and MSC/DAB+ decode, Reed-Solomon, and reset counters. Validity flags distinguish unavailable measurements from legitimate zero values. FIC and MSC counters reflect the underlying decoder state and restart when that pipeline is reset during recovery.
+
+### `dab_receive_snapshot_callback_t`
+Receives immutable snapshots through `dab_receive_config_t.snapshot`. The snapshot is valid for the duration of the callback and can be copied by consumers that need to retain it. `snapshot_user` is passed through unchanged.
+
 ### `dab_frontend_default_config`
 Fills `dab_frontend_config_t` with default frontend settings. Currently this sets the DC-removal smoothing factor.
 

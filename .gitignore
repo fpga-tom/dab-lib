@@ -28,3 +28,4 @@ local.properties
 build-android/
 adab/app/src/main/jniLibs/**/*.so
 !adab/app/src/main/jniLibs/README.md
+build-audio-backends/
