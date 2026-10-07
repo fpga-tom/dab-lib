@@ -51,7 +51,7 @@ int dab_cond_wait_timeout(dab_cond_t *cond, dab_mutex_t *mutex, uint32_t timeout
     struct timespec deadline;
     int rc;
 
-    if (clock_gettime(CLOCK_REALTIME, &deadline) != 0) {
+    if (timespec_get(&deadline, TIME_UTC) != TIME_UTC) {
         return -1;
     }
     deadline.tv_sec += (time_t)(timeout_ms / 1000u);
