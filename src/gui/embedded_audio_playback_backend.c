@@ -140,6 +140,8 @@ void dab_gui_embedded_audio_status_reset(void) {
     g_playback_status.prs_score = 0.0f;
     g_playback_status.now_playing[0] = '\0';
     g_playback_status.has_ensemble_time = 0;
+    g_playback_status.has_ensemble_label = 0;
+    g_playback_status.ensemble_label[0] = '\0';
     g_playback_spectrum.valid = 0;
     g_playback_spectrum.sample_rate = 0u;
     g_playback_spectrum.bin_count = 0u;
@@ -150,11 +152,41 @@ void dab_gui_embedded_audio_status_reset(void) {
     dab_mutex_unlock(&g_playback_mutex);
 }
 
-void dab_gui_embedded_audio_ensemble_time_update(const dab_fic_database_t *database) {
+void dab_gui_embedded_audio_ensemble_metadata_update(const dab_fic_database_t *database) {
+    char ensemble_label[sizeof(g_playback_status.ensemble_label)] = {0};
+    int has_ensemble_label = 0;
+    uint16_t label_index;
+
+    if (database != 0) {
+        for (label_index = 0u; label_index < database->label_count; ++label_index) {
+            const dab_fic_label_t *label = &database->labels[label_index];
+
+            if (label->used == 0u ||
+                label->scope != DAB_FIC_LABEL_SCOPE_ENSEMBLE ||
+                label->eid != database->eid ||
+                label->text[0] == '\0') {
+                continue;
+            }
+            if (dab_text_to_utf8(label->charset,
+                                 (const uint8_t *)label->text,
+                                 strlen(label->text),
+                                 ensemble_label,
+                                 sizeof(ensemble_label)) == 0 &&
+                ensemble_label[0] != '\0') {
+                has_ensemble_label = 1;
+            }
+            break;
+        }
+    }
+
     dab_gui_playback_ensure_mutex();
     dab_mutex_lock(&g_playback_mutex);
     g_playback_status.has_ensemble_time =
         database != 0 && database->ensemble_time_valid != 0u;
+    g_playback_status.has_ensemble_label = has_ensemble_label;
+    memcpy(g_playback_status.ensemble_label,
+           ensemble_label,
+           sizeof(g_playback_status.ensemble_label));
     if (g_playback_status.has_ensemble_time) {
         g_playback_status.ensemble_time_utc = database->ensemble_time_utc;
         g_playback_status.ensemble_time_has_seconds =

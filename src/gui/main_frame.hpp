@@ -52,6 +52,7 @@ private:
     wxChoice *stationChoice_ = nullptr;
     wxButton *startButton_ = nullptr;
     wxButton *stopButton_ = nullptr;
+    wxStaticText *ensembleLabel_ = nullptr;
     wxStaticText *currentTimeLabel_ = nullptr;
     wxStaticText *ensembleTimeLabel_ = nullptr;
     wxStaticText *nowPlayingLabel_ = nullptr;

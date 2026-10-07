@@ -30,6 +30,8 @@ typedef struct {
     uint8_t ensemble_time_hour;
     uint8_t ensemble_time_minute;
     uint8_t ensemble_time_second;
+    int has_ensemble_label;
+    char ensemble_label[64];
 } dab_gui_playback_status_t;
 
 typedef struct {
