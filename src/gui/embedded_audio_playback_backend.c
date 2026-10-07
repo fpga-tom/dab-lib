@@ -138,6 +138,7 @@ void dab_gui_embedded_audio_status_reset(void) {
     g_playback_status.rf_level_dbfs = 0.0f;
     g_playback_status.prs_score = 0.0f;
     g_playback_status.now_playing[0] = '\0';
+    g_playback_status.has_ensemble_time = 0;
     g_playback_spectrum.valid = 0;
     g_playback_spectrum.sample_rate = 0u;
     g_playback_spectrum.bin_count = 0u;
@@ -145,6 +146,28 @@ void dab_gui_embedded_audio_status_reset(void) {
     g_playback_logo.valid = 0;
     g_playback_logo.byte_count = 0u;
     memset(g_playback_logo.bytes, 0, sizeof(g_playback_logo.bytes));
+    dab_mutex_unlock(&g_playback_mutex);
+}
+
+void dab_gui_embedded_audio_ensemble_time_update(const dab_fic_database_t *database) {
+    dab_gui_playback_ensure_mutex();
+    dab_mutex_lock(&g_playback_mutex);
+    g_playback_status.has_ensemble_time =
+        database != 0 && database->ensemble_time_valid != 0u;
+    if (g_playback_status.has_ensemble_time) {
+        g_playback_status.ensemble_time_utc = database->ensemble_time_utc;
+        g_playback_status.ensemble_time_has_seconds =
+            database->ensemble_time_has_seconds;
+        g_playback_status.ensemble_time_hour = database->ensemble_time_hour;
+        g_playback_status.ensemble_time_minute = database->ensemble_time_minute;
+        g_playback_status.ensemble_time_second = database->ensemble_time_second;
+    } else {
+        g_playback_status.ensemble_time_utc = 0;
+        g_playback_status.ensemble_time_has_seconds = 0;
+        g_playback_status.ensemble_time_hour = 0u;
+        g_playback_status.ensemble_time_minute = 0u;
+        g_playback_status.ensemble_time_second = 0u;
+    }
     dab_mutex_unlock(&g_playback_mutex);
 }
 

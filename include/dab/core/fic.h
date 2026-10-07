@@ -127,6 +127,15 @@ typedef struct {
     uint8_t change_flag;
     uint8_t alarm_flag;
     uint16_t cif_count;
+    uint8_t ensemble_time_valid;
+    uint8_t ensemble_time_utc;
+    uint8_t ensemble_time_has_seconds;
+    uint8_t ensemble_time_has_milliseconds;
+    uint8_t ensemble_time_hour;
+    uint8_t ensemble_time_minute;
+    uint8_t ensemble_time_second;
+    uint16_t ensemble_time_millisecond;
+    uint32_t ensemble_time_mjd;
     dab_fic_subchannel_t subchannels[DAB_FIC_MAX_SUBCHANNELS];
     dab_fic_service_t services[DAB_FIC_MAX_SERVICES];
     uint16_t service_count;
