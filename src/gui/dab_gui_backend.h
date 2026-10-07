@@ -23,6 +23,7 @@ typedef struct {
     float prs_score;
     uint64_t frequency_hz;
     uint32_t sid;
+    char now_playing[256];
 } dab_gui_playback_status_t;
 
 typedef struct {

@@ -1,6 +1,7 @@
 #ifndef DAB_GUI_MAIN_FRAME_HPP
 #define DAB_GUI_MAIN_FRAME_HPP
 
+#include <chrono>
 #include <vector>
 
 #include <wx/frame.h>
@@ -51,12 +52,16 @@ private:
     wxChoice *stationChoice_ = nullptr;
     wxButton *startButton_ = nullptr;
     wxButton *stopButton_ = nullptr;
+    wxStaticText *currentTimeLabel_ = nullptr;
+    wxStaticText *nowPlayingLabel_ = nullptr;
     wxStaticText *controlStatusLabel_ = nullptr;
     wxStaticText *receiverStatusLabel_ = nullptr;
     wxWindow *stationLogoPanel_ = nullptr;
     wxString scanResultsPath_;
     std::vector<StationEntry> stationEntries_;
     wxTimer *playbackStatusTimer_ = nullptr;
+    std::chrono::steady_clock::time_point playbackStartedAt_;
+    bool playbackWasRunning_ = false;
     uint64_t lastLogoGeneration_ = 0u;
     dab_gui_sdr_settings_t sdrSettings_;
     int spectrumDisplayMode_ = 0;

@@ -48,7 +48,34 @@ typedef struct {
     uint16_t expected_dg_length;
 } dab_gui_mot_state_t;
 
+enum {
+    DAB_GUI_DLS_MAX_SEGMENT_BYTES = 48u,
+    DAB_GUI_DLS_MAX_TEXT_BYTES = 256u,
+    DAB_GUI_DLS_MAX_LABEL_SEGMENTS = 8u,
+    DAB_GUI_DLS_MAX_LABEL_SEGMENT_BYTES = 16u,
+    DAB_GUI_DLS_MAX_GROUP_BYTES = 64u
+};
+
+typedef struct {
+    int active;
+    uint8_t toggle;
+    uint8_t group[DAB_GUI_DLS_MAX_GROUP_BYTES];
+    size_t group_size;
+    size_t group_expected_size;
+    int label_active;
+    uint8_t label_toggle;
+    uint8_t label_charset;
+    uint8_t label_segment_present[DAB_GUI_DLS_MAX_LABEL_SEGMENTS];
+    uint8_t label_segment_lengths[DAB_GUI_DLS_MAX_LABEL_SEGMENTS];
+    uint8_t label_segments[DAB_GUI_DLS_MAX_LABEL_SEGMENTS]
+                          [DAB_GUI_DLS_MAX_LABEL_SEGMENT_BYTES];
+    int label_last_segment;
+} dab_gui_dls_state_t;
+
 static dab_gui_mot_state_t g_mot_state = { .current_transport_id = -1 };
+static dab_gui_dls_state_t g_dls_state = {0};
+static int g_last_xpad_ci_type = -1;
+static size_t g_last_xpad_ci_length = 0u;
 
 static void dab_gui_playback_ensure_mutex(void) {
     if (g_playback_mutex_ready == 0) {
@@ -110,6 +137,7 @@ void dab_gui_embedded_audio_status_reset(void) {
     g_playback_status.has_rf_level = 0;
     g_playback_status.rf_level_dbfs = 0.0f;
     g_playback_status.prs_score = 0.0f;
+    g_playback_status.now_playing[0] = '\0';
     g_playback_spectrum.valid = 0;
     g_playback_spectrum.sample_rate = 0u;
     g_playback_spectrum.bin_count = 0u;
@@ -519,6 +547,271 @@ static int dab_gui_xpad_ci_payload_size(uint8_t ci) {
     }
 }
 
+static void dab_gui_dls_process_subfield(int start,
+                                         const uint8_t *data,
+                                         size_t size);
+static int dab_gui_mot_append_accumulated(dab_gui_mot_state_t *state,
+                                          const uint8_t *data,
+                                          size_t size,
+                                          int reset);
+
+static void dab_gui_process_xpad_application(uint8_t application_type,
+                                             const uint8_t *payload,
+                                             size_t payload_size) {
+    if (application_type == 2u || application_type == 3u) {
+        dab_gui_dls_process_subfield(application_type == 2u, payload, payload_size);
+    } else if (application_type == 12u) {
+        if (dab_gui_mot_append_accumulated(&g_mot_state,
+                                           payload,
+                                           payload_size,
+                                           1) != 0) {
+            return;
+        }
+    } else if (application_type == 13u) {
+        if (dab_gui_mot_append_accumulated(&g_mot_state,
+                                           payload,
+                                           payload_size,
+                                           0) != 0) {
+            return;
+        }
+    } else if (application_type == 1u && payload_size >= 2u) {
+        g_mot_state.expected_dg_length =
+            (uint16_t)((((uint16_t)payload[0] & 0x3fu) << 8u) |
+                       (uint16_t)payload[1]);
+    }
+
+    if (g_mot_state.expected_dg_length != 0u &&
+        g_mot_state.accumulated_size >=
+            (size_t)g_mot_state.expected_dg_length) {
+        dab_gui_mot_consume_data_group(&g_mot_state,
+                                       g_mot_state.accumulated_data,
+                                       g_mot_state.expected_dg_length);
+        free(g_mot_state.accumulated_data);
+        g_mot_state.accumulated_data = 0;
+        g_mot_state.accumulated_size = 0u;
+        g_mot_state.expected_dg_length = 0u;
+    }
+}
+
+static void dab_gui_dls_reset(void) {
+    memset(&g_dls_state, 0, sizeof(g_dls_state));
+    g_dls_state.label_last_segment = -1;
+    g_last_xpad_ci_type = -1;
+    g_last_xpad_ci_length = 0u;
+}
+
+static uint16_t dab_gui_dls_crc16(const uint8_t *data, size_t size) {
+    uint16_t crc = 0xffffu;
+    size_t byte_index;
+
+    for (byte_index = 0u; byte_index < size; ++byte_index) {
+        uint8_t bit;
+        crc ^= (uint16_t)data[byte_index] << 8u;
+        for (bit = 0u; bit < 8u; ++bit) {
+            crc = (crc & 0x8000u) != 0u
+                      ? (uint16_t)((crc << 1u) ^ 0x1021u)
+                      : (uint16_t)(crc << 1u);
+        }
+    }
+    return (uint16_t)~crc;
+}
+
+static void dab_gui_dls_publish(const uint8_t *text, size_t text_size) {
+    char utf8[DAB_GUI_DLS_MAX_TEXT_BYTES];
+    size_t source_offset = 0u;
+    size_t output_size = 0u;
+
+    if (text == 0) {
+        return;
+    }
+
+    while (source_offset < text_size && output_size + 2u < sizeof(utf8)) {
+        const uint8_t character = text[source_offset++];
+        if (character == '\r') {
+            break;
+        }
+        if (character < 0x20u || (character >= 0x7fu && character <= 0x9fu)) {
+            continue;
+        }
+        if (character < 0x80u) {
+            utf8[output_size++] = (char)character;
+        } else {
+            utf8[output_size++] = (char)(0xc0u | (character >> 6u));
+            utf8[output_size++] = (char)(0x80u | (character & 0x3fu));
+        }
+    }
+
+    while (output_size > 0u && utf8[output_size - 1u] == ' ') {
+        --output_size;
+    }
+    utf8[output_size] = '\0';
+
+    dab_gui_playback_ensure_mutex();
+    dab_mutex_lock(&g_playback_mutex);
+    memcpy(g_playback_status.now_playing, utf8, output_size + 1u);
+    dab_mutex_unlock(&g_playback_mutex);
+}
+
+static void dab_gui_dls_process_group(const uint8_t *group, size_t group_size) {
+    uint16_t received_crc;
+    uint16_t calculated_crc;
+    uint8_t header;
+    uint8_t toggle;
+    uint8_t first_segment;
+    uint8_t last_segment;
+    uint8_t segment_number;
+    size_t text_size;
+    uint8_t assembled[DAB_GUI_DLS_MAX_TEXT_BYTES];
+    size_t assembled_size = 0u;
+    size_t index;
+
+    if (group == 0 || group_size < 4u) {
+        return;
+    }
+
+    received_crc = (uint16_t)(((uint16_t)group[group_size - 2u] << 8u) |
+                              group[group_size - 1u]);
+    calculated_crc = dab_gui_dls_crc16(group, group_size - 2u);
+    if (received_crc != calculated_crc) {
+        return;
+    }
+
+    header = group[0];
+    if ((header & 0x10u) != 0u) {
+        if ((header & 0x0fu) == 1u) {
+            dab_gui_playback_ensure_mutex();
+            dab_mutex_lock(&g_playback_mutex);
+            g_playback_status.now_playing[0] = '\0';
+            dab_mutex_unlock(&g_playback_mutex);
+        }
+        return;
+    }
+
+    text_size = (size_t)(header & 0x0fu) + 1u;
+    if (group_size != text_size + 4u) {
+        return;
+    }
+
+    toggle = (uint8_t)(header >> 7u);
+    first_segment = (uint8_t)((header & 0x40u) != 0u);
+    last_segment = (uint8_t)((header & 0x20u) != 0u);
+    segment_number = first_segment != 0u
+                         ? 0u
+                         : (uint8_t)((group[1] & 0x70u) >> 4u);
+    if (segment_number >= DAB_GUI_DLS_MAX_LABEL_SEGMENTS) {
+        return;
+    }
+
+    if (first_segment != 0u || g_dls_state.label_active == 0 ||
+        g_dls_state.label_toggle != toggle) {
+        if (first_segment == 0u) {
+            return;
+        }
+        memset(g_dls_state.label_segment_present, 0,
+               sizeof(g_dls_state.label_segment_present));
+        g_dls_state.label_last_segment = -1;
+        g_dls_state.label_active = 1;
+        g_dls_state.label_toggle = toggle;
+        g_dls_state.label_charset = (uint8_t)(group[1] >> 4u);
+    }
+
+    if (text_size > DAB_GUI_DLS_MAX_LABEL_SEGMENT_BYTES) {
+        return;
+    }
+    memcpy(g_dls_state.label_segments[segment_number], group + 2u, text_size);
+    g_dls_state.label_segment_lengths[segment_number] = (uint8_t)text_size;
+    g_dls_state.label_segment_present[segment_number] = 1u;
+    if (last_segment != 0u) {
+        g_dls_state.label_last_segment = (int)segment_number;
+    }
+
+    if (g_dls_state.label_last_segment < 0) {
+        return;
+    }
+    for (index = 0u; index <= (size_t)g_dls_state.label_last_segment; ++index) {
+        size_t segment_size;
+        if (g_dls_state.label_segment_present[index] == 0u) {
+            return;
+        }
+        segment_size = g_dls_state.label_segment_lengths[index];
+        if (segment_size > sizeof(assembled) - assembled_size) {
+            return;
+        }
+        memcpy(assembled + assembled_size,
+               g_dls_state.label_segments[index],
+               segment_size);
+        assembled_size += segment_size;
+    }
+    dab_gui_dls_publish(assembled, assembled_size);
+}
+
+static void dab_gui_dls_process_subfield(int start, const uint8_t *data, size_t size) {
+    size_t copied_size = 0u;
+
+    if (data == 0 || size == 0u) {
+        return;
+    }
+    if (start != 0) {
+        g_dls_state.group_size = 0u;
+        g_dls_state.group_expected_size = 0u;
+        g_dls_state.active = 1;
+    } else if (g_dls_state.active == 0) {
+        return;
+    }
+
+    while (copied_size < size &&
+           g_dls_state.group_size < sizeof(g_dls_state.group)) {
+        size_t remaining = sizeof(g_dls_state.group) - g_dls_state.group_size;
+        if (g_dls_state.group_expected_size != 0u) {
+            if (g_dls_state.group_size >= g_dls_state.group_expected_size) {
+                dab_gui_dls_process_group(g_dls_state.group,
+                                          g_dls_state.group_expected_size);
+                g_dls_state.group_size = 0u;
+                g_dls_state.group_expected_size = 0u;
+                g_dls_state.active = 0;
+                break;
+            }
+            remaining = g_dls_state.group_expected_size - g_dls_state.group_size;
+        }
+        if (remaining > size - copied_size) {
+            remaining = size - copied_size;
+        }
+        memcpy(g_dls_state.group + g_dls_state.group_size,
+               data + copied_size,
+               remaining);
+        g_dls_state.group_size += remaining;
+        copied_size += remaining;
+
+        if (g_dls_state.group_expected_size == 0u &&
+            g_dls_state.group_size >= 2u) {
+            const uint8_t header = g_dls_state.group[0];
+            size_t field_size;
+            if ((header & 0x10u) == 0u) {
+                field_size = (size_t)(header & 0x0fu) + 1u;
+            } else if ((header & 0x0fu) == 1u) {
+                field_size = 0u;
+            } else if ((header & 0x0fu) == 2u) {
+                field_size = (size_t)(g_dls_state.group[1] & 0x0fu) + 1u;
+            } else {
+                g_dls_state.group_size = 0u;
+                g_dls_state.group_expected_size = 0u;
+                g_dls_state.active = 0;
+                return;
+            }
+            g_dls_state.group_expected_size = 2u + field_size + 2u;
+        }
+        if (g_dls_state.group_expected_size != 0u &&
+            g_dls_state.group_size >= g_dls_state.group_expected_size) {
+            dab_gui_dls_process_group(g_dls_state.group,
+                                      g_dls_state.group_expected_size);
+            g_dls_state.group_size = 0u;
+            g_dls_state.group_expected_size = 0u;
+            g_dls_state.active = 0;
+            break;
+        }
+    }
+}
+
 static int dab_gui_mot_append_accumulated(dab_gui_mot_state_t *state, const uint8_t *data, size_t size, int reset) {
     uint8_t *combined;
 
@@ -546,12 +839,16 @@ static int dab_gui_mot_append_accumulated(dab_gui_mot_state_t *state, const uint
 
 static void dab_gui_process_pad(const uint8_t *xpad_data, size_t xpad_len, const uint8_t *fpad_data) {
     uint8_t reversed[196];
-    uint8_t ci_bytes[4] = {0};
+    uint8_t ci_values[4] = {0};
+    size_t ci_lengths[4] = {0u};
+    uint8_t ci_count = 0u;
     size_t offset = 0u;
     size_t i;
     uint8_t fpad_type;
     uint8_t xpad_indicator;
     int ci_flag;
+    int next_ci_type = -1;
+    size_t next_ci_length = 0u;
 
     if (xpad_data == 0 || fpad_data == 0 || xpad_len == 0u || xpad_len > sizeof(reversed)) {
         return;
@@ -561,7 +858,7 @@ static void dab_gui_process_pad(const uint8_t *xpad_data, size_t xpad_len, const
     xpad_indicator = (uint8_t)((fpad_data[0] & 0x30u) >> 4u);
     ci_flag = (fpad_data[1] & 0x02u) != 0u;
 
-    if (fpad_type != 0u || xpad_indicator != 0x02u || ci_flag == 0) {
+    if (fpad_type != 0u) {
         return;
     }
 
@@ -569,50 +866,66 @@ static void dab_gui_process_pad(const uint8_t *xpad_data, size_t xpad_len, const
         reversed[i] = xpad_data[xpad_len - 1u - i];
     }
 
-    for (i = 0u; i < 4u && offset < xpad_len; ++i) {
-        ci_bytes[i] = reversed[offset++];
-        if (ci_bytes[i] == 0u) {
-            break;
+    if (ci_flag != 0) {
+        if (xpad_indicator == 0x02u) {
+            while (ci_count < 4u && offset < xpad_len) {
+                const uint8_t ci = reversed[offset++];
+                if ((ci & 0x1fu) == 0u) {
+                    break;
+                }
+                ci_values[ci_count] = ci;
+                ci_lengths[ci_count] = (size_t)dab_gui_xpad_ci_payload_size(ci);
+                ++ci_count;
+            }
+        } else if (xpad_indicator == 0x01u && xpad_len >= 4u) {
+            const uint8_t ci = reversed[offset++];
+            if ((ci & 0x1fu) != 0u) {
+                ci_values[0] = ci;
+                ci_lengths[0] = 3u;
+                ci_count = 1u;
+            }
+        } else {
+            return;
         }
+    } else {
+        if ((xpad_indicator != 0x01u && xpad_indicator != 0x02u) ||
+            g_last_xpad_ci_type < 0 ||
+            g_last_xpad_ci_length == 0u) {
+            return;
+        }
+        ci_values[0] = (uint8_t)g_last_xpad_ci_type;
+        ci_lengths[0] = g_last_xpad_ci_length;
+        ci_count = 1u;
     }
 
-    for (i = 0u; i < 4u; ++i) {
-        const uint8_t ci = ci_bytes[i];
-        const uint8_t application_type = (uint8_t)(ci & 0x1Fu);
-        const int payload_size = dab_gui_xpad_ci_payload_size(ci);
+    for (i = 0u; i < ci_count; ++i) {
+        const uint8_t application_type = (uint8_t)(ci_values[i] & 0x1fu);
+        const size_t payload_size = ci_flag != 0
+                                        ? ci_lengths[i]
+                                        : g_last_xpad_ci_length;
         const uint8_t *payload;
 
-        if (ci == 0u || payload_size <= 0 || offset + (size_t)payload_size > xpad_len) {
+        if (payload_size == 0u || payload_size > xpad_len - offset) {
             break;
         }
 
         payload = reversed + offset;
-        offset += (size_t)payload_size;
+        dab_gui_process_xpad_application(application_type, payload, payload_size);
+        offset += payload_size;
 
-        if (application_type == 12u) {
-            if (dab_gui_mot_append_accumulated(&g_mot_state, payload, (size_t)payload_size, 1) != 0) {
-                continue;
-            }
-        } else if (application_type == 13u) {
-            if (dab_gui_mot_append_accumulated(&g_mot_state, payload, (size_t)payload_size, 0) != 0) {
-                continue;
-            }
-        } else if (application_type == 1u && payload_size >= 2) {
-            g_mot_state.expected_dg_length =
-                (uint16_t)((((uint16_t)payload[0] & 0x3Fu) << 8u) | (uint16_t)payload[1]);
-        }
-
-        if (g_mot_state.expected_dg_length != 0u &&
-            g_mot_state.accumulated_size >= (size_t)g_mot_state.expected_dg_length) {
-            dab_gui_mot_consume_data_group(&g_mot_state,
-                                           g_mot_state.accumulated_data,
-                                           g_mot_state.expected_dg_length);
-            free(g_mot_state.accumulated_data);
-            g_mot_state.accumulated_data = 0;
-            g_mot_state.accumulated_size = 0u;
-            g_mot_state.expected_dg_length = 0u;
+        if (application_type == 1u) {
+            next_ci_type = 1;
+            next_ci_length = payload_size;
+        } else if (application_type == 2u || application_type == 3u) {
+            next_ci_type = 3;
+            next_ci_length = payload_size;
+        } else if (application_type == 12u || application_type == 13u) {
+            next_ci_type = 13;
+            next_ci_length = payload_size;
         }
     }
+    g_last_xpad_ci_type = next_ci_type;
+    g_last_xpad_ci_length = next_ci_length;
 }
 
 static void dab_gui_process_au_pad(const uint8_t *au_data, size_t au_len) {
@@ -735,6 +1048,7 @@ static int dab_gui_playback_thread_main(void *arg) {
     (void)dab_receiver_session_run(9, argv);
     dab_audio_playback_set_spectrum_callback(0, 0);
     dab_gui_mot_reset_state(&g_mot_state);
+    dab_gui_dls_reset();
 
     dab_gui_playback_ensure_mutex();
     dab_mutex_lock(&g_playback_mutex);
@@ -749,6 +1063,7 @@ static int dab_gui_playback_thread_main(void *arg) {
     g_playback_logo.valid = 0;
     g_playback_logo.byte_count = 0u;
     memset(g_playback_logo.bytes, 0, sizeof(g_playback_logo.bytes));
+    g_playback_status.now_playing[0] = '\0';
     dab_mutex_unlock(&g_playback_mutex);
     return 0;
 }
@@ -767,6 +1082,7 @@ int dab_gui_playback_start(uint64_t frequency_hz, uint32_t sid) {
         g_playback_state.sid = sid;
         g_playback_state.running = 1;
         dab_gui_mot_reset_state(&g_mot_state);
+        dab_gui_dls_reset();
         g_playback_status = (dab_gui_playback_status_t){
             .running = 1,
             .locked = 0,
@@ -823,6 +1139,7 @@ void dab_gui_playback_stop(void) {
         g_playback_logo.valid = 0;
         g_playback_logo.byte_count = 0u;
         memset(g_playback_logo.bytes, 0, sizeof(g_playback_logo.bytes));
+        g_playback_status.now_playing[0] = '\0';
         dab_mutex_unlock(&g_playback_mutex);
     }
 }
