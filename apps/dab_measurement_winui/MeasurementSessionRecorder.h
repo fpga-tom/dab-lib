@@ -75,7 +75,7 @@ namespace dab::measurement
     struct MeasurementSessionStartInfo
     {
         std::filesystem::path recordings_root;
-        std::string application_version{ "0.1.3" };
+        std::string application_version{ "0.1.4" };
         std::string context;
         std::string device;
         std::string driver;

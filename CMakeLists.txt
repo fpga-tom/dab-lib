@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.21)
 
 project(dab_lib C CXX)
 
-set(DAB_APP_VERSION "0.1.3")
+set(DAB_APP_VERSION "0.1.4")
 set(DAB_CAPTURE_BLOCK_COUNT 32 CACHE STRING "Preallocated IQ blocks per open SDR stream")
 if(DAB_CAPTURE_BLOCK_COUNT LESS 2)
     message(FATAL_ERROR "DAB_CAPTURE_BLOCK_COUNT must be at least 2")
@@ -333,7 +333,17 @@ if(DAB_BUILD_GUI)
         dab_set_windows_stack_size(dab_gui 8388608)
         dab_copy_runtime_dlls(dab_gui ${DAB_AUDIO_RUNTIME_DLLS} ${DAB_WXWIDGETS_RUNTIME_DLLS})
         install(TARGETS dab_gui RUNTIME DESTINATION . COMPONENT gui)
-        install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/INSTALL.md DESTINATION . COMPONENT gui)
+        install(FILES
+            ${CMAKE_CURRENT_SOURCE_DIR}/INSTALL.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE
+            ${CMAKE_CURRENT_SOURCE_DIR}/SOURCE_CODE.md
+            ${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_NOTICES.md
+            DESTINATION .
+            COMPONENT gui
+        )
+        install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/LICENSES
+                DESTINATION .
+                COMPONENT gui)
         dab_install_runtime_dlls(gui ${DAB_AUDIO_RUNTIME_DLLS} ${DAB_WXWIDGETS_RUNTIME_DLLS})
     else()
         message(WARNING "wxWidgets not found; dab_gui target will not be built")

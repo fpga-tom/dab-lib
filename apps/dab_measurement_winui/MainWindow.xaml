@@ -587,9 +587,11 @@
                     </Button>
 
                     <Button Grid.Column="8"
+                            x:Name="AudioToolbarButton"
                             Height="34"
                             VerticalAlignment="Bottom"
                             HorizontalAlignment="Stretch"
+                            ToolTipService.ToolTip="Open DAB+ audio measurements"
                             Click="AudioButton_Click">
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <TextBlock Text="Audio" />

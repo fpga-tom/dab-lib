@@ -5127,13 +5127,10 @@ namespace winrt::DabMeasurementWinUI::implementation
 
     void MainWindow::AudioButton_Click(IInspectable const&, RoutedEventArgs const&)
     {
-        if (m_replay_loaded)
-        {
-            AddTimelineEvent(
-                L"Replay contains audio measurements, not decoded PCM audio");
-            return;
-        }
-        AddTimelineEvent(L"Audio playback is enabled and follows the selected DAB+ service");
+        ShowWorkspace(WorkspaceKind::dab_measurements);
+        DabTabView().SelectedIndex(3);
+        DabPlusMeasurementTabView().SelectedIndex(4);
+        AddTimelineEvent(L"Opened DAB+ Audio measurements");
     }
 
     void MainWindow::ServicesListView_SelectionChanged(IInspectable const&,
