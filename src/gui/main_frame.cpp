@@ -20,6 +20,7 @@
 #include <wx/choice.h>
 #include <wx/config.h>
 #include <wx/dialog.h>
+#include <wx/datetime.h>
 #include <wx/dcbuffer.h>
 #include <wx/dcgraph.h>
 #include <wx/filename.h>
@@ -1262,10 +1263,27 @@ wxWindow *MainFrame::CreateBottomPanel(wxWindow *parent) {
 
     auto *controls = new wxBoxSizer(wxVERTICAL);
     auto *content = new wxBoxSizer(wxHORIZONTAL);
+    auto *controlsHeader = new wxBoxSizer(wxHORIZONTAL);
     auto *title = new wxStaticText(panel, wxID_ANY, "Playback controls");
     wxFont titleFont = title->GetFont();
     titleFont.SetWeight(wxFONTWEIGHT_BOLD);
     title->SetFont(titleFont);
+
+    currentTimeLabel_ = new wxStaticText(
+        panel,
+        wxID_ANY,
+        wxDateTime::Now().Format("Time: %H:%M:%S"));
+    currentTimeLabel_->SetFont(titleFont);
+    currentTimeLabel_->SetForegroundColour(wxColour(95, 104, 116));
+    controlsHeader->Add(title, 0, wxALIGN_CENTER_VERTICAL);
+    controlsHeader->AddStretchSpacer(1);
+    controlsHeader->Add(currentTimeLabel_, 0, wxALIGN_CENTER_VERTICAL);
+
+    nowPlayingLabel_ = new wxStaticText(panel, wxID_ANY, "Now playing: -");
+    wxFont nowPlayingFont = nowPlayingLabel_->GetFont();
+    nowPlayingFont.SetWeight(wxFONTWEIGHT_BOLD);
+    nowPlayingLabel_->SetFont(nowPlayingFont);
+    nowPlayingLabel_->SetForegroundColour(wxColour(40, 52, 66));
 
     controlStatusLabel_ = new wxStaticText(panel, wxID_ANY, "Scan stations to populate the list");
     controlStatusLabel_->SetForegroundColour(wxColour(95, 104, 116));
@@ -1290,7 +1308,8 @@ wxWindow *MainFrame::CreateBottomPanel(wxWindow *parent) {
     stopButton_->Bind(wxEVT_BUTTON, &MainFrame::OnStopButton, this);
     stationChoice_->Bind(wxEVT_CHOICE, &MainFrame::OnStationSelected, this);
 
-    controls->Add(title, 0, wxBOTTOM, 4);
+    controls->Add(controlsHeader, 0, wxEXPAND | wxBOTTOM, 4);
+    controls->Add(nowPlayingLabel_, 0, wxBOTTOM, 4);
     controls->Add(controlStatusLabel_, 0, wxBOTTOM, 14);
     controls->Add(stationLabel, 0, wxBOTTOM, 6);
     controls->Add(stationChoice_, 0, wxEXPAND | wxBOTTOM, 12);
@@ -1531,6 +1550,13 @@ void MainFrame::RefreshPlaybackStatus() {
                                       ? std::max(220, receiverStatusLabel_->GetClientSize().GetWidth())
                                       : 0;
 
+    if (currentTimeLabel_ != nullptr) {
+        const wxString timeLabel = wxDateTime::Now().Format("Time: %H:%M:%S");
+        if (currentTimeLabel_->GetLabel() != timeLabel) {
+            currentTimeLabel_->SetLabel(timeLabel);
+        }
+    }
+
     if (dab_gui_playback_get_status(&status) != 0) {
         return;
     }
@@ -1540,6 +1566,10 @@ void MainFrame::RefreshPlaybackStatus() {
     }
 
     if (!status.running) {
+        playbackWasRunning_ = false;
+        if (nowPlayingLabel_ != nullptr) {
+            nowPlayingLabel_->SetLabel("Now playing: -");
+        }
         if (receiverStatusLabel_ != nullptr) {
             receiverStatusLabel_->SetLabel("Receiver: idle");
         }
@@ -1548,6 +1578,27 @@ void MainFrame::RefreshPlaybackStatus() {
             lastLogoGeneration_ = 0u;
         }
         return;
+    }
+
+    if (!playbackWasRunning_) {
+        playbackStartedAt_ = std::chrono::steady_clock::now();
+        playbackWasRunning_ = true;
+    }
+
+    if (nowPlayingLabel_ != nullptr) {
+        const wxString nowPlaying = wxString::FromUTF8(status.now_playing);
+        if (nowPlaying.IsEmpty() &&
+            std::chrono::steady_clock::now() - playbackStartedAt_ >= std::chrono::seconds(10)) {
+            nowPlayingLabel_->SetLabel("Now playing: No song text received");
+        } else {
+            nowPlayingLabel_->SetLabel(
+                nowPlaying.IsEmpty() ? "Now playing: Waiting for station text..."
+                                     : "Now playing: " + nowPlaying);
+        }
+        const int wrapWidth = nowPlayingLabel_->GetClientSize().GetWidth();
+        if (wrapWidth > 0) {
+            nowPlayingLabel_->Wrap(wrapWidth);
+        }
     }
 
     if (stationLogoPanel != nullptr &&
