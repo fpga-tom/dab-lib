@@ -32,7 +32,7 @@
 
 #if defined(DAB_GUI_PLAYBACK_EMBEDDED)
 void dab_gui_embedded_audio_status_reset(void);
-void dab_gui_embedded_audio_ensemble_time_update(const dab_fic_database_t *database);
+void dab_gui_embedded_audio_ensemble_metadata_update(const dab_fic_database_t *database);
 void dab_gui_embedded_audio_status_update(int locked,
                                           int has_receiver_snr,
                                           float receiver_snr_db,
@@ -2464,7 +2464,7 @@ int dab_receiver_session_run(int argc, char **argv) {
                                                     DAB_TFRAME_FIC_SOFTBITS);
 #if defined(DAB_GUI_PLAYBACK_EMBEDDED)
                                                 if (fic_result == 0) {
-                                                    dab_gui_embedded_audio_ensemble_time_update(
+                                                    dab_gui_embedded_audio_ensemble_metadata_update(
                                                         &fic.repo.current);
                                                 }
 #endif

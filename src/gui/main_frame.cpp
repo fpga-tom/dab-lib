@@ -1269,6 +1269,8 @@ wxWindow *MainFrame::CreateBottomPanel(wxWindow *parent, bool showEnsembleTime) 
     titleFont.SetWeight(wxFONTWEIGHT_BOLD);
     title->SetFont(titleFont);
 
+    ensembleLabel_ = new wxStaticText(panel, wxID_ANY, "Ensemble: -");
+    ensembleLabel_->SetForegroundColour(wxColour(95, 104, 116));
     currentTimeLabel_ = new wxStaticText(
         panel,
         wxID_ANY,
@@ -1281,6 +1283,7 @@ wxWindow *MainFrame::CreateBottomPanel(wxWindow *parent, bool showEnsembleTime) 
     ensembleTimeLabel_->Show(showEnsembleTime);
     auto *clockLabels = new wxBoxSizer(wxVERTICAL);
     controlsHeader->Add(title, 0, wxALIGN_CENTER_VERTICAL);
+    controlsHeader->Add(ensembleLabel_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 12);
     controlsHeader->AddStretchSpacer(1);
     clockLabels->Add(ensembleTimeLabel_, 0, wxALIGN_RIGHT);
     clockLabels->Add(currentTimeLabel_, 0, wxALIGN_RIGHT);
@@ -1568,6 +1571,15 @@ void MainFrame::RefreshPlaybackStatus() {
         return;
     }
 
+    if (ensembleLabel_ != nullptr) {
+        const wxString ensembleLabel = status.has_ensemble_label != 0
+            ? "Ensemble: " + wxString::FromUTF8(status.ensemble_label)
+            : "Ensemble: -";
+        if (ensembleLabel_->GetLabel() != ensembleLabel) {
+            ensembleLabel_->SetLabel(ensembleLabel);
+        }
+    }
+
     if (ensembleTimeLabel_ != nullptr) {
         wxString ensembleTimeLabel = "Ensemble: --:--";
         if (status.has_ensemble_time != 0) {
@@ -1595,6 +1607,9 @@ void MainFrame::RefreshPlaybackStatus() {
 
     if (!status.running) {
         playbackWasRunning_ = false;
+        if (ensembleLabel_ != nullptr) {
+            ensembleLabel_->SetLabel("Ensemble: -");
+        }
         if (ensembleTimeLabel_ != nullptr) {
             ensembleTimeLabel_->SetLabel("Ensemble: --:--");
         }
