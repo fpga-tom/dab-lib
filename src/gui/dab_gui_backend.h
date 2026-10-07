@@ -24,6 +24,12 @@ typedef struct {
     uint64_t frequency_hz;
     uint32_t sid;
     char now_playing[256];
+    int has_ensemble_time;
+    int ensemble_time_utc;
+    int ensemble_time_has_seconds;
+    uint8_t ensemble_time_hour;
+    uint8_t ensemble_time_minute;
+    uint8_t ensemble_time_second;
 } dab_gui_playback_status_t;
 
 typedef struct {

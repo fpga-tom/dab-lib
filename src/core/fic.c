@@ -524,6 +524,63 @@ static int dab_fic_parse_fig0_ext0(dab_fic_repo_t *repo, const dab_fic_fig_view_
     return 0;
 }
 
+static int dab_fic_parse_fig0_ext10(dab_fic_repo_t *repo, const dab_fic_fig_view_t *view) {
+    dab_fic_database_t *db;
+    dab_fic_bit_reader_t reader;
+    uint32_t mjd;
+    uint32_t leap_second_indicator;
+    uint32_t confidence_indicator;
+    uint32_t utc;
+    uint32_t hour;
+    uint32_t minute;
+    const uint32_t has_seconds = view != 0 && view->data_len >= 5u;
+    const uint32_t has_milliseconds = view != 0 && view->data_len >= 6u;
+    uint32_t second = 0u;
+    uint32_t millisecond = 0u;
+
+    if (repo == 0 || view == 0 || view->oe != 0u || view->cn != 0u ||
+        view->data_len < 4u) {
+        return -1;
+    }
+    db = dab_fic_repo_target(repo, view->cn);
+    if (db == 0) {
+        return -1;
+    }
+
+    dab_fic_bit_reader_init(&reader, view->data, view->data_len);
+    if (dab_fic_bit_reader_get(&reader, 17u, &mjd) != 0 ||
+        dab_fic_bit_reader_get(&reader, 1u, &leap_second_indicator) != 0 ||
+        dab_fic_bit_reader_get(&reader, 1u, &confidence_indicator) != 0 ||
+        dab_fic_bit_reader_get(&reader, 1u, &utc) != 0 ||
+        dab_fic_bit_reader_get(&reader, 5u, &hour) != 0 ||
+        dab_fic_bit_reader_get(&reader, 6u, &minute) != 0 ||
+        hour > 23u || minute > 59u) {
+        return -1;
+    }
+    if (has_seconds != 0u) {
+        if (dab_fic_bit_reader_get(&reader, 6u, &second) != 0 || second > 60u) {
+            return -1;
+        }
+    }
+    if (has_milliseconds != 0u &&
+        dab_fic_bit_reader_get(&reader, 10u, &millisecond) != 0) {
+        return -1;
+    }
+
+    (void)leap_second_indicator;
+    (void)confidence_indicator;
+    db->ensemble_time_valid = 1u;
+    db->ensemble_time_utc = (uint8_t)utc;
+    db->ensemble_time_has_seconds = (uint8_t)has_seconds;
+    db->ensemble_time_has_milliseconds = (uint8_t)has_milliseconds;
+    db->ensemble_time_hour = (uint8_t)hour;
+    db->ensemble_time_minute = (uint8_t)minute;
+    db->ensemble_time_second = (uint8_t)second;
+    db->ensemble_time_millisecond = (uint16_t)millisecond;
+    db->ensemble_time_mjd = mjd;
+    return 0;
+}
+
 static int dab_fic_parse_fig0_ext1(dab_fic_repo_t *repo, const dab_fic_fig_view_t *view) {
     dab_fic_database_t *db;
     dab_fic_bit_reader_t reader;
@@ -961,6 +1018,8 @@ int dab_fic_parse_fib_payload(dab_fic_repo_t *repo, const uint8_t *fib_payload, 
                 (void)dab_fic_parse_fig0_ext2(repo, &view);
             } else if (view.ext == 3u) {
                 (void)dab_fic_parse_fig0_ext3(repo, &view);
+            } else if (view.ext == 10u) {
+                (void)dab_fic_parse_fig0_ext10(repo, &view);
             }
         } else if (view.type == DAB_FIC_FIG_TYPE_1) {
             (void)dab_fic_parse_fig1(repo, &view);

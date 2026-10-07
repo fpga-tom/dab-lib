@@ -19,7 +19,7 @@ class wxWindow;
 
 class MainFrame : public wxFrame {
 public:
-    MainFrame();
+    explicit MainFrame(bool showEnsembleTime);
 
 private:
     struct StationEntry {
@@ -35,7 +35,7 @@ private:
     void OnStationSelected(wxCommandEvent &event);
     void OnSdrSettings(wxCommandEvent &event);
     void OnSpectrumSettings(wxCommandEvent &event);
-    wxWindow *CreateBottomPanel(wxWindow *parent);
+    wxWindow *CreateBottomPanel(wxWindow *parent, bool showEnsembleTime);
     void LoadSdrSettings();
     void SaveSdrSettings();
     void LoadSpectrumSettings();
@@ -53,6 +53,7 @@ private:
     wxButton *startButton_ = nullptr;
     wxButton *stopButton_ = nullptr;
     wxStaticText *currentTimeLabel_ = nullptr;
+    wxStaticText *ensembleTimeLabel_ = nullptr;
     wxStaticText *nowPlayingLabel_ = nullptr;
     wxStaticText *controlStatusLabel_ = nullptr;
     wxStaticText *receiverStatusLabel_ = nullptr;

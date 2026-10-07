@@ -1125,7 +1125,7 @@ private:
 
 }  // namespace
 
-MainFrame::MainFrame()
+MainFrame::MainFrame(bool showEnsembleTime)
     : wxFrame(nullptr,
               wxID_ANY,
 #if defined(DAB_GUI_APP_VERSION)
@@ -1172,7 +1172,7 @@ MainFrame::MainFrame()
 
     layout->Add(new SpectrumPanel(root), 3, wxEXPAND | wxALL, 10);
     layout->Add(new EqualizerPanel(root), 4, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
-    layout->Add(CreateBottomPanel(root), 2, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
+    layout->Add(CreateBottomPanel(root, showEnsembleTime), 2, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
 
     root->SetSizer(layout);
     Centre();
@@ -1252,7 +1252,7 @@ wxString MainFrame::SdrSettingsSummary() const {
     return wxString::Format("%s, AGC off, gain %d dB", backend, sdrSettings_.gain_db);
 }
 
-wxWindow *MainFrame::CreateBottomPanel(wxWindow *parent) {
+wxWindow *MainFrame::CreateBottomPanel(wxWindow *parent, bool showEnsembleTime) {
     const bool showReceiverSection = EnvEnabled("DAB_GUI_SHOW_RECEIVER", false);
     auto *panel = new wxPanel(parent);
     panel->SetBackgroundColour(wxColour(223, 228, 234));
@@ -1272,12 +1272,19 @@ wxWindow *MainFrame::CreateBottomPanel(wxWindow *parent) {
     currentTimeLabel_ = new wxStaticText(
         panel,
         wxID_ANY,
-        wxDateTime::Now().Format("Time: %H:%M:%S"));
+        wxDateTime::Now().Format("System: %H:%M:%S"));
     currentTimeLabel_->SetFont(titleFont);
     currentTimeLabel_->SetForegroundColour(wxColour(95, 104, 116));
+    ensembleTimeLabel_ = new wxStaticText(panel, wxID_ANY, "Ensemble: --:--");
+    ensembleTimeLabel_->SetFont(titleFont);
+    ensembleTimeLabel_->SetForegroundColour(wxColour(95, 104, 116));
+    ensembleTimeLabel_->Show(showEnsembleTime);
+    auto *clockLabels = new wxBoxSizer(wxVERTICAL);
     controlsHeader->Add(title, 0, wxALIGN_CENTER_VERTICAL);
     controlsHeader->AddStretchSpacer(1);
-    controlsHeader->Add(currentTimeLabel_, 0, wxALIGN_CENTER_VERTICAL);
+    clockLabels->Add(ensembleTimeLabel_, 0, wxALIGN_RIGHT);
+    clockLabels->Add(currentTimeLabel_, 0, wxALIGN_RIGHT);
+    controlsHeader->Add(clockLabels, 0, wxALIGN_CENTER_VERTICAL);
 
     nowPlayingLabel_ = new wxStaticText(panel, wxID_ANY, "Now playing: -");
     wxFont nowPlayingFont = nowPlayingLabel_->GetFont();
@@ -1551,7 +1558,7 @@ void MainFrame::RefreshPlaybackStatus() {
                                       : 0;
 
     if (currentTimeLabel_ != nullptr) {
-        const wxString timeLabel = wxDateTime::Now().Format("Time: %H:%M:%S");
+        const wxString timeLabel = wxDateTime::Now().Format("System: %H:%M:%S");
         if (currentTimeLabel_->GetLabel() != timeLabel) {
             currentTimeLabel_->SetLabel(timeLabel);
         }
@@ -1561,12 +1568,36 @@ void MainFrame::RefreshPlaybackStatus() {
         return;
     }
 
+    if (ensembleTimeLabel_ != nullptr) {
+        wxString ensembleTimeLabel = "Ensemble: --:--";
+        if (status.has_ensemble_time != 0) {
+            const wxString timeZoneLabel =
+                status.ensemble_time_utc != 0 ? "Ensemble UTC: " : "Ensemble local: ";
+            ensembleTimeLabel = status.ensemble_time_has_seconds != 0
+                ? wxString::Format("%s%02u:%02u:%02u",
+                                   timeZoneLabel,
+                                   status.ensemble_time_hour,
+                                   status.ensemble_time_minute,
+                                   status.ensemble_time_second)
+                : wxString::Format("%s%02u:%02u",
+                                   timeZoneLabel,
+                                   status.ensemble_time_hour,
+                                   status.ensemble_time_minute);
+        }
+        if (ensembleTimeLabel_->GetLabel() != ensembleTimeLabel) {
+            ensembleTimeLabel_->SetLabel(ensembleTimeLabel);
+        }
+    }
+
     if (receiverWrapWidth > 0) {
         receiverStatusLabel_->Wrap(receiverWrapWidth);
     }
 
     if (!status.running) {
         playbackWasRunning_ = false;
+        if (ensembleTimeLabel_ != nullptr) {
+            ensembleTimeLabel_->SetLabel("Ensemble: --:--");
+        }
         if (nowPlayingLabel_ != nullptr) {
             nowPlayingLabel_->SetLabel("Now playing: -");
         }

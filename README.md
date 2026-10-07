@@ -47,6 +47,12 @@ The Inno Setup script is:
 The generated installer is written to:
 - `dist/installer`
 
+To show the multiplex-provided ensemble time in the GUI header, launch it with:
+
+```powershell
+.\dab_gui.exe --show-ensemble-time
+```
+
 The installer includes the project license and notices for bundled third-party
 libraries.
 

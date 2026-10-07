@@ -408,6 +408,35 @@ void test_fic_parse_payload_populates_repo(void) {
     TEST_ASSERT(repo.fig_stats[0].previous_raw[4] == 0xA1u);
 }
 
+void test_fic_parse_payload_populates_ensemble_time_from_fig0_ext10(void) {
+    dab_fic_repo_t repo = {0};
+    uint8_t fig0_ext10[8] = {0x07u, 0x0Au, 0u, 0u, 0u, 0u, 0u, 0u};
+    uint8_t payload[30] = {0};
+    uint32_t bit_pos = 16u;
+
+    test_fic_write_bits(fig0_ext10, &bit_pos, 60000u, 17u);
+    test_fic_write_bits(fig0_ext10, &bit_pos, 0u, 1u);
+    test_fic_write_bits(fig0_ext10, &bit_pos, 1u, 1u);
+    test_fic_write_bits(fig0_ext10, &bit_pos, 1u, 1u);
+    test_fic_write_bits(fig0_ext10, &bit_pos, 13u, 5u);
+    test_fic_write_bits(fig0_ext10, &bit_pos, 47u, 6u);
+    test_fic_write_bits(fig0_ext10, &bit_pos, 32u, 6u);
+    test_fic_write_bits(fig0_ext10, &bit_pos, 512u, 10u);
+    memcpy(payload, fig0_ext10, sizeof(fig0_ext10));
+    payload[sizeof(fig0_ext10)] = 0xFFu;
+
+    TEST_ASSERT(dab_fic_parse_fib_payload(&repo, payload, sizeof(payload)) == 0);
+    TEST_ASSERT(repo.current.ensemble_time_valid == 1u);
+    TEST_ASSERT(repo.current.ensemble_time_mjd == 60000u);
+    TEST_ASSERT(repo.current.ensemble_time_utc == 1u);
+    TEST_ASSERT(repo.current.ensemble_time_has_seconds == 1u);
+    TEST_ASSERT(repo.current.ensemble_time_hour == 13u);
+    TEST_ASSERT(repo.current.ensemble_time_minute == 47u);
+    TEST_ASSERT(repo.current.ensemble_time_second == 32u);
+    TEST_ASSERT(repo.current.ensemble_time_has_milliseconds == 1u);
+    TEST_ASSERT(repo.current.ensemble_time_millisecond == 512u);
+}
+
 void test_fic_parse_payload_populates_packet_component_from_fig0_ext3(void) {
     dab_fic_repo_t repo = {0};
     uint8_t fig0_ext2[] = {0x06u, 0x02u, 0x12u, 0x34u, 0x21u, 0xC1u, 0x23u};
