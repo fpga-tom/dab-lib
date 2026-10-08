@@ -528,13 +528,14 @@ void MainWindow::BuildPlaybackPanel(StackPanel const &parent) {
 
     StackPanel logoContainer;
     logoContainer.HorizontalAlignment(HorizontalAlignment::Stretch);
-    logoContainer.VerticalAlignment(VerticalAlignment::Stretch);
+    logoContainer.VerticalAlignment(VerticalAlignment::Center);
     logoContainer.Padding(Thickness{12.0, 12.0, 12.0, 12.0});
     logoContainer.Background(MakeBrush(24, 30, 38));
     stationLogo_ = Image();
-    stationLogo_.Stretch(Stretch::UniformToFill);
+    stationLogo_.Stretch(Stretch::Uniform);
+    stationLogo_.MaxHeight(180.0);
     stationLogo_.HorizontalAlignment(HorizontalAlignment::Stretch);
-    stationLogo_.VerticalAlignment(VerticalAlignment::Stretch);
+    stationLogo_.VerticalAlignment(VerticalAlignment::Center);
     stationLogo_.Visibility(Visibility::Collapsed);
     logoContainer.Children().Append(stationLogo_);
     content.Children().Append(logoContainer);
@@ -553,7 +554,7 @@ void MainWindow::BuildPlaybackPanel(StackPanel const &parent) {
     TextBlock playbackTitle = MakeText(L"Playback controls", 17.0, true);
     playbackTitle.Foreground(MakeBrush(46, 160, 82));
     stationIdentity.Children().Append(playbackTitle);
-    ensembleLabel_ = MakeText(L"Ensemble: -", 16.0);
+    ensembleLabel_ = MakeText(L"Ensemble: -", 13.0);
     ensembleLabel_.Foreground(MakeBrush(155, 172, 188));
     ensembleLabel_.VerticalAlignment(VerticalAlignment::Center);
     stationIdentity.Children().Append(ensembleLabel_);
@@ -575,7 +576,7 @@ void MainWindow::BuildPlaybackPanel(StackPanel const &parent) {
     nowPlayingLabel_.Foreground(MakeBrush(226, 234, 242));
     controls.Children().Append(nowPlayingLabel_);
 
-    controlStatusLabel_ = MakeText(L"Scan stations to populate the list", 14.0);
+    controlStatusLabel_ = MakeText(L"Scan stations to populate the list", 12.0);
     controlStatusLabel_.Foreground(MakeBrush(155, 172, 188));
     controls.Children().Append(controlStatusLabel_);
 
