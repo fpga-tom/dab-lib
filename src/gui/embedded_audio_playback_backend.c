@@ -1084,9 +1084,13 @@ static int dab_gui_playback_thread_main(void *arg) {
     dab_gui_setenv_value("DAB_SYNC_PROBE_GAIN_DB", gain_arg);
     dab_receiver_session_reset_stop();
     dab_gui_embedded_audio_status_reset();
+#if defined(DAB_HAVE_AUDIO_PLAYBACK)
     dab_audio_playback_set_spectrum_callback(&dab_gui_embedded_audio_spectrum_callback, 0);
+#endif
     (void)dab_receiver_session_run(9, argv);
+#if defined(DAB_HAVE_AUDIO_PLAYBACK)
     dab_audio_playback_set_spectrum_callback(0, 0);
+#endif
     dab_gui_mot_reset_state(&g_mot_state);
     dab_gui_dls_reset();
 
@@ -1231,6 +1235,11 @@ int dab_gui_playback_get_logo(dab_gui_playback_logo_t *logo) {
 }
 
 int dab_gui_playback_set_equalizer(const float *gains_db, uint32_t count) {
+#if defined(DAB_HAVE_AUDIO_PLAYBACK)
     dab_audio_playback_set_equalizer_gains(gains_db, count);
+#else
+    (void)gains_db;
+    (void)count;
+#endif
     return 0;
 }

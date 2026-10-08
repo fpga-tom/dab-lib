@@ -294,6 +294,12 @@ if(DAB_BUILD_GUI)
                 "The WinUI 3 GUI requires MSBuild.exe from the installed Visual Studio instance")
         endif()
 
+        set(DAB_GUI_MSBUILD_TOOLSET_ARGS)
+        if(CMAKE_GENERATOR MATCHES "^Visual Studio" AND CMAKE_VS_PLATFORM_TOOLSET)
+            list(APPEND DAB_GUI_MSBUILD_TOOLSET_ARGS
+                "/p:PlatformToolset=${CMAKE_VS_PLATFORM_TOOLSET}")
+        endif()
+
         set(DAB_GUI_AUDIO_INCLUDE_DIRS)
         set(DAB_GUI_AUDIO_LIBRARY_DIRS)
         set(DAB_GUI_AUDIO_LIBRARIES)
@@ -346,6 +352,7 @@ if(DAB_BUILD_GUI)
                 /nologo
                 "/p:Configuration=$<CONFIG>"
                 "/p:Platform=x64"
+                ${DAB_GUI_MSBUILD_TOOLSET_ARGS}
                 "/p:DabCMakeProps=${DAB_GUI_MSBUILD_PROPS}"
                 VERBATIM
             COMMAND "${CMAKE_COMMAND}"
