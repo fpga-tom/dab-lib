@@ -332,6 +332,7 @@ void MainWindow::BuildUi(bool showEnsembleTime) {
     heading.VerticalAlignment(VerticalAlignment::Center);
     heading.Spacing(12.0);
     TextBlock title = MakeText(L"dab-lib", 26.0, true);
+    title.Foreground(MakeBrush(76, 224, 118));
     heading.Children().Append(title);
     TextBlock subtitle = MakeText(L"DAB+ SDR receiver", 14.0);
     subtitle.Foreground(MakeBrush(155, 172, 188));
@@ -394,7 +395,9 @@ void MainWindow::BuildSpectrumPanel(StackPanel const &parent) {
     StackPanel heading;
     heading.Orientation(Orientation::Horizontal);
     heading.Spacing(10.0);
-    heading.Children().Append(MakeText(L"Spectrum analyzer", 17.0, true));
+    TextBlock spectrumTitle = MakeText(L"Spectrum analyzer", 17.0, true);
+    spectrumTitle.Foreground(MakeBrush(76, 224, 118));
+    heading.Children().Append(spectrumTitle);
     TextBlock mode = MakeText(L"LOG FREQUENCY  ·  dBFS", 12.0);
     mode.Foreground(MakeBrush(138, 158, 176));
     mode.VerticalAlignment(VerticalAlignment::Center);
@@ -419,13 +422,16 @@ void MainWindow::BuildEqualizerPanel(StackPanel const &parent) {
     ColumnDefinition presetColumn;
     presetColumn.Width(GridLength{1.0, GridUnitType::Auto});
     heading.ColumnDefinitions().Append(presetColumn);
-    heading.Children().Append(MakeText(L"Equalizer bands", 17.0, true));
+    TextBlock equalizerTitle = MakeText(L"Equalizer bands", 17.0, true);
+    equalizerTitle.Foreground(MakeBrush(76, 224, 118));
+    heading.Children().Append(equalizerTitle);
 
     StackPanel presetRow;
     presetRow.Orientation(Orientation::Horizontal);
     presetRow.Spacing(8.0);
     presetRow.VerticalAlignment(VerticalAlignment::Center);
     TextBlock presetTitle = MakeText(L"Preset", 13.0);
+    presetTitle.Foreground(MakeBrush(76, 224, 118));
     presetTitle.VerticalAlignment(VerticalAlignment::Center);
     presetRow.Children().Append(presetTitle);
     equalizerPresetChoice_ = ComboBox();
@@ -459,6 +465,7 @@ void MainWindow::BuildEqualizerPanel(StackPanel const &parent) {
         column.Spacing(4.0);
 
         TextBlock valueLabel = MakeText(L"0 dB", 12.0);
+        valueLabel.Foreground(MakeBrush(76, 224, 118));
         valueLabel.HorizontalAlignment(HorizontalAlignment::Center);
         equalizerValueLabels_.push_back(valueLabel);
         column.Children().Append(valueLabel);
@@ -540,7 +547,9 @@ void MainWindow::BuildPlaybackPanel(StackPanel const &parent) {
     StackPanel stationIdentity;
     stationIdentity.Orientation(Orientation::Horizontal);
     stationIdentity.Spacing(12.0);
-    stationIdentity.Children().Append(MakeText(L"Playback controls", 17.0, true));
+    TextBlock playbackTitle = MakeText(L"Playback controls", 17.0, true);
+    playbackTitle.Foreground(MakeBrush(76, 224, 118));
+    stationIdentity.Children().Append(playbackTitle);
     ensembleLabel_ = MakeText(L"Ensemble: -", 13.0);
     ensembleLabel_.Foreground(MakeBrush(155, 172, 188));
     ensembleLabel_.VerticalAlignment(VerticalAlignment::Center);
