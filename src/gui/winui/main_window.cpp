@@ -445,17 +445,18 @@ void MainWindow::BuildEqualizerPanel(StackPanel const &parent) {
     equalizerPresetDescription_.Foreground(MakeBrush(155, 172, 188));
     panel.Children().Append(equalizerPresetDescription_);
 
-    StackPanel sliders;
-    sliders.Orientation(Orientation::Horizontal);
+    Grid sliders;
     sliders.HorizontalAlignment(HorizontalAlignment::Stretch);
-    sliders.Spacing(4.0);
 
     for (size_t index = 0; index < kEqualizerBands.size(); ++index) {
+        ColumnDefinition bandColumn;
+        bandColumn.Width(GridLength{1.0, GridUnitType::Star});
+        sliders.ColumnDefinitions().Append(bandColumn);
+
         StackPanel column;
-        column.HorizontalAlignment(HorizontalAlignment::Center);
+        column.HorizontalAlignment(HorizontalAlignment::Stretch);
         column.VerticalAlignment(VerticalAlignment::Stretch);
         column.Spacing(4.0);
-        column.Width(82.0);
 
         TextBlock valueLabel = MakeText(L"0 dB", 12.0);
         valueLabel.HorizontalAlignment(HorizontalAlignment::Center);
@@ -488,6 +489,7 @@ void MainWindow::BuildEqualizerPanel(StackPanel const &parent) {
         band.HorizontalAlignment(HorizontalAlignment::Center);
         band.Foreground(MakeBrush(166, 180, 194));
         column.Children().Append(band);
+        Grid::SetColumn(column, static_cast<int>(index));
         sliders.Children().Append(column);
     }
     panel.Children().Append(sliders);
