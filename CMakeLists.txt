@@ -16,7 +16,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(DAB_BUILD_TESTS "Build unit tests" ON)
-option(DAB_BUILD_GUI "Build wxWidgets GUI prototype" ON)
+option(DAB_BUILD_GUI "Build WinUI 3 GUI" ON)
 option(DAB_BUILD_TOOLS "Build command-line tools" ON)
 option(DAB_ENABLE_AVX2 "Enable AVX2 backend when supported" ON)
 option(DAB_ENABLE_NEON "Enable NEON backend when supported" ON)
@@ -104,9 +104,6 @@ endfunction()
 set(DAB_AUDIO_PLAYBACK_AVAILABLE OFF)
 set(DAB_AUDIO_LINK_TARGETS "")
 set(DAB_AUDIO_RUNTIME_DLLS "")
-set(DAB_WXWIDGETS_FOUND OFF)
-set(DAB_WXWIDGETS_TARGET "")
-set(DAB_WXWIDGETS_RUNTIME_DLLS "")
 
 if(WIN32 AND DAB_USE_BUNDLED_WINDOWS_DEPS)
     if(EXISTS ${DAB_LIBS_DIR}/portaudio_x64.lib AND
@@ -141,69 +138,6 @@ if(WIN32 AND DAB_USE_BUNDLED_WINDOWS_DEPS)
         set(DAB_AUDIO_PLAYBACK_AVAILABLE ON)
     endif()
 
-    if(EXISTS ${DAB_LIBS_INCLUDE_DIR}/wx/wx.h)
-        set(DAB_WXWIDGETS_SETUP_SHIM_DIR ${CMAKE_CURRENT_BINARY_DIR}/wxwidgets-setup-shim)
-        file(MAKE_DIRECTORY ${DAB_WXWIDGETS_SETUP_SHIM_DIR}/wx)
-        file(WRITE ${DAB_WXWIDGETS_SETUP_SHIM_DIR}/wx/setup.h
-"#ifndef DAB_WX_SETUP_SHIM_H
-#define DAB_WX_SETUP_SHIM_H
-
-#include <wx/msw/setup.h>
-
-#endif
-")
-
-        add_library(dab_wxwidgets INTERFACE)
-        target_include_directories(dab_wxwidgets INTERFACE
-            ${DAB_WXWIDGETS_SETUP_SHIM_DIR}
-            ${DAB_LIBS_INCLUDE_DIR}
-        )
-        target_compile_definitions(dab_wxwidgets INTERFACE __WXMSW__ WXUSINGDLL UNICODE _UNICODE)
-        target_link_libraries(dab_wxwidgets INTERFACE
-            $<$<CONFIG:Debug>:${DAB_LIBS_DIR}/wxmsw32ud_adv.lib>
-            $<$<NOT:$<CONFIG:Debug>>:${DAB_LIBS_DIR}/wxmsw32u_adv.lib>
-            $<$<CONFIG:Debug>:${DAB_LIBS_DIR}/wxmsw32ud_core.lib>
-            $<$<NOT:$<CONFIG:Debug>>:${DAB_LIBS_DIR}/wxmsw32u_core.lib>
-            $<$<CONFIG:Debug>:${DAB_LIBS_DIR}/wxmsw32ud_gl.lib>
-            $<$<NOT:$<CONFIG:Debug>>:${DAB_LIBS_DIR}/wxmsw32u_gl.lib>
-            $<$<CONFIG:Debug>:${DAB_LIBS_DIR}/wxbase32ud.lib>
-            $<$<NOT:$<CONFIG:Debug>>:${DAB_LIBS_DIR}/wxbase32u.lib>
-            $<$<CONFIG:Debug>:${DAB_LIBS_DIR}/wxpngd.lib>
-            $<$<NOT:$<CONFIG:Debug>>:${DAB_LIBS_DIR}/wxpng.lib>
-            $<$<CONFIG:Debug>:${DAB_LIBS_DIR}/wxjpegd.lib>
-            $<$<NOT:$<CONFIG:Debug>>:${DAB_LIBS_DIR}/wxjpeg.lib>
-            $<$<CONFIG:Debug>:${DAB_LIBS_DIR}/wxtiffd.lib>
-            $<$<NOT:$<CONFIG:Debug>>:${DAB_LIBS_DIR}/wxtiff.lib>
-            $<$<CONFIG:Debug>:${DAB_LIBS_DIR}/wxzlibd.lib>
-            $<$<NOT:$<CONFIG:Debug>>:${DAB_LIBS_DIR}/wxzlib.lib>
-            $<$<CONFIG:Debug>:${DAB_LIBS_DIR}/wxregexud.lib>
-            $<$<NOT:$<CONFIG:Debug>>:${DAB_LIBS_DIR}/wxregexu.lib>
-            $<$<CONFIG:Debug>:${DAB_LIBS_DIR}/wxexpatd.lib>
-            $<$<NOT:$<CONFIG:Debug>>:${DAB_LIBS_DIR}/wxexpat.lib>
-            comctl32
-            rpcrt4
-            shlwapi
-            uxtheme
-            version
-            winmm
-            imm32
-            oleacc
-            ole32
-            uuid
-        )
-        set(DAB_WXWIDGETS_FOUND ON)
-        set(DAB_WXWIDGETS_TARGET dab_wxwidgets)
-        set(DAB_WXWIDGETS_RUNTIME_DLLS
-            $<$<CONFIG:Debug>:${DAB_LIBS_DIR}/wxbase32ud_vc14x_x64.dll>
-            $<$<NOT:$<CONFIG:Debug>>:${DAB_LIBS_DIR}/wxbase32u_vc14x_x64.dll>
-            $<$<CONFIG:Debug>:${DAB_LIBS_DIR}/wxmsw32ud_adv_vc14x_x64.dll>
-            $<$<NOT:$<CONFIG:Debug>>:${DAB_LIBS_DIR}/wxmsw32u_adv_vc14x_x64.dll>
-            $<$<CONFIG:Debug>:${DAB_LIBS_DIR}/wxmsw32ud_core_vc14x_x64.dll>
-            $<$<NOT:$<CONFIG:Debug>>:${DAB_LIBS_DIR}/wxmsw32u_core_vc14x_x64.dll>
-            $<$<CONFIG:Debug>:${DAB_LIBS_DIR}/wxmsw32ud_gl_vc14x_x64.dll>
-            $<$<NOT:$<CONFIG:Debug>>:${DAB_LIBS_DIR}/wxmsw32u_gl_vc14x_x64.dll>
-        )
-    endif()
 elseif(PkgConfig_FOUND)
     pkg_check_modules(FDK_AAC IMPORTED_TARGET QUIET fdk-aac)
     pkg_check_modules(FAAD2 IMPORTED_TARGET QUIET faad2)
@@ -217,6 +151,26 @@ elseif(PkgConfig_FOUND)
         endif()
         if(FAAD2_FOUND)
             list(APPEND DAB_AUDIO_LINK_TARGETS PkgConfig::FAAD2)
+            if(WIN32)
+                find_file(DAB_FAAD2_RUNTIME_DLL
+                    NAMES faad-2.dll libfaad-2.dll libfaad2_dll.dll
+                    PATHS "${FAAD2_PREFIX}/bin"
+                    NO_DEFAULT_PATH
+                )
+                if(DAB_FAAD2_RUNTIME_DLL)
+                    list(APPEND DAB_AUDIO_RUNTIME_DLLS "${DAB_FAAD2_RUNTIME_DLL}")
+                endif()
+            endif()
+        endif()
+        if(WIN32)
+            find_file(DAB_PORTAUDIO_RUNTIME_DLL
+                NAMES portaudio.dll portaudio_x64.dll
+                PATHS "${PORTAUDIO_PREFIX}/bin"
+                NO_DEFAULT_PATH
+            )
+            if(DAB_PORTAUDIO_RUNTIME_DLL)
+                list(APPEND DAB_AUDIO_RUNTIME_DLLS "${DAB_PORTAUDIO_RUNTIME_DLL}")
+            endif()
         endif()
     endif()
 endif()
@@ -284,20 +238,8 @@ if(NOT WIN32)
 endif()
 
 if(DAB_BUILD_GUI)
-    find_package(OpenGL QUIET)
-    if(NOT WIN32 OR NOT DAB_USE_BUNDLED_WINDOWS_DEPS)
-        find_package(wxWidgets QUIET COMPONENTS core base gl)
-        if(wxWidgets_FOUND)
-            include(${wxWidgets_USE_FILE})
-            set(DAB_WXWIDGETS_FOUND ON)
-            set(DAB_WXWIDGETS_TARGET ${wxWidgets_LIBRARIES})
-        endif()
-    endif()
-
-    if(DAB_WXWIDGETS_FOUND)
-        add_executable(dab_gui WIN32
-            src/gui/main.cpp
-            src/gui/main_frame.cpp
+    if(WIN32 AND MSVC)
+        add_library(dab_gui_backend STATIC
             src/gui/dab_gui_settings.c
             src/gui/embedded_audio_playback_backend.c
             src/gui/embedded_audio_scan_backend.c
@@ -305,35 +247,113 @@ if(DAB_BUILD_GUI)
             tools/audio_playback.c
         )
 
-        target_include_directories(dab_gui PRIVATE
+        target_include_directories(dab_gui_backend PUBLIC
             ${CMAKE_CURRENT_SOURCE_DIR}/include
             ${CMAKE_CURRENT_SOURCE_DIR}/src/receive
             ${CMAKE_CURRENT_SOURCE_DIR}/src/gui
             ${CMAKE_CURRENT_SOURCE_DIR}/tools
         )
-        target_compile_definitions(dab_gui PRIVATE
-            DAB_GUI_APP_VERSION="${DAB_APP_VERSION}"
+        target_compile_definitions(dab_gui_backend PRIVATE
             DAB_GUI_PLAYBACK_EMBEDDED=1
             DAB_RECEIVER_SESSION_EMBEDDED=1
         )
-
-        target_link_libraries(dab_gui PRIVATE dab ${DAB_WXWIDGETS_TARGET})
-        if(OpenGL_FOUND)
-            target_link_libraries(dab_gui PRIVATE OpenGL::GL)
-        endif()
+        target_link_libraries(dab_gui_backend PUBLIC dab)
         if(DAB_AUDIO_PLAYBACK_AVAILABLE)
-            target_compile_definitions(dab_gui PRIVATE DAB_HAVE_AUDIO_PLAYBACK=1)
-            target_link_libraries(dab_gui PRIVATE ${DAB_AUDIO_LINK_TARGETS})
+            target_compile_definitions(dab_gui_backend PRIVATE DAB_HAVE_AUDIO_PLAYBACK=1)
+            target_link_libraries(dab_gui_backend PUBLIC ${DAB_AUDIO_LINK_TARGETS})
             if(FDK_AAC_FOUND)
-                target_compile_definitions(dab_gui PRIVATE DAB_HAVE_FDK_AAC=1)
+                target_compile_definitions(dab_gui_backend PRIVATE DAB_HAVE_FDK_AAC=1)
             endif()
             if(DAB_FAAD2_FOUND OR FAAD2_FOUND)
-                target_compile_definitions(dab_gui PRIVATE DAB_HAVE_FAAD2=1)
+                target_compile_definitions(dab_gui_backend PRIVATE DAB_HAVE_FAAD2=1)
             endif()
         endif()
-        dab_set_windows_stack_size(dab_gui 8388608)
-        dab_copy_runtime_dlls(dab_gui ${DAB_AUDIO_RUNTIME_DLLS} ${DAB_WXWIDGETS_RUNTIME_DLLS})
-        install(TARGETS dab_gui RUNTIME DESTINATION . COMPONENT gui)
+
+        find_program(DAB_MSBUILD_EXECUTABLE MSBuild.exe
+            HINTS
+                "$ENV{VSINSTALLDIR}/MSBuild/Current/Bin"
+                "$ENV{ProgramFiles}/Microsoft Visual Studio/2022/Community/MSBuild/Current/Bin"
+                "$ENV{ProgramFiles}/Microsoft Visual Studio/2022/BuildTools/MSBuild/Current/Bin"
+            REQUIRED
+        )
+
+        set(DAB_GUI_AUDIO_INCLUDE_DIRS)
+        set(DAB_GUI_AUDIO_LIBRARY_DIRS)
+        set(DAB_GUI_AUDIO_LIBRARIES)
+        if(DAB_AUDIO_PLAYBACK_AVAILABLE)
+            foreach(audio_package PORTAUDIO FDK_AAC FAAD2)
+                if(${audio_package}_FOUND)
+                    list(APPEND DAB_GUI_AUDIO_INCLUDE_DIRS ${${audio_package}_INCLUDE_DIRS})
+                    list(APPEND DAB_GUI_AUDIO_LIBRARY_DIRS ${${audio_package}_LIBRARY_DIRS})
+                    foreach(audio_library IN LISTS ${audio_package}_LIBRARIES)
+                        if(audio_library MATCHES "\\.lib$")
+                            list(APPEND DAB_GUI_AUDIO_LIBRARIES "${audio_library}")
+                        else()
+                            list(APPEND DAB_GUI_AUDIO_LIBRARIES "${audio_library}.lib")
+                        endif()
+                    endforeach()
+                endif()
+            endforeach()
+        endif()
+        list(REMOVE_DUPLICATES DAB_GUI_AUDIO_INCLUDE_DIRS)
+        list(REMOVE_DUPLICATES DAB_GUI_AUDIO_LIBRARY_DIRS)
+        list(REMOVE_DUPLICATES DAB_GUI_AUDIO_LIBRARIES)
+
+        set(DAB_GUI_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/winui/$<CONFIG>")
+        set(DAB_GUI_OUTPUT_EXE "${DAB_GUI_OUTPUT_DIR}/dab_gui.exe")
+        set(DAB_GUI_MSBUILD_PROPS "${CMAKE_CURRENT_BINARY_DIR}/dab_gui-$<CONFIG>.props")
+        set(DAB_GUI_RUNTIME_LIST "${CMAKE_CURRENT_BINARY_DIR}/dab_gui-$<CONFIG>-runtime-dlls.cmake")
+        dab_generate_runtime_dll_list("${DAB_GUI_RUNTIME_LIST}" ${DAB_AUDIO_RUNTIME_DLLS})
+        file(GENERATE OUTPUT "${DAB_GUI_MSBUILD_PROPS}" CONTENT
+"<Project xmlns=\"http://schemas.microsoft.com/developer/msbuild/2003\">
+  <PropertyGroup>
+    <DabSourceDir>${CMAKE_CURRENT_SOURCE_DIR}</DabSourceDir>
+    <DabBackendLibrary>$<TARGET_FILE:dab_gui_backend></DabBackendLibrary>
+    <DabCoreLibrary>$<TARGET_FILE:dab></DabCoreLibrary>
+    <DabGuiOutputDir>${DAB_GUI_OUTPUT_DIR}</DabGuiOutputDir>
+    <DabGuiIncludeDirs>${CMAKE_CURRENT_SOURCE_DIR}/include;${CMAKE_CURRENT_SOURCE_DIR}/src/gui;${DAB_GUI_AUDIO_INCLUDE_DIRS}</DabGuiIncludeDirs>
+    <DabGuiLibraryDirs>${DAB_GUI_AUDIO_LIBRARY_DIRS}</DabGuiLibraryDirs>
+    <DabGuiAudioLibraries>${DAB_GUI_AUDIO_LIBRARIES}</DabGuiAudioLibraries>
+    <DabGuiAudioEnabled>$<IF:$<BOOL:${DAB_AUDIO_PLAYBACK_AVAILABLE}>,1,0></DabGuiAudioEnabled>
+    <DabGuiAppVersion>${DAB_APP_VERSION}</DabGuiAppVersion>
+  </PropertyGroup>
+</Project>
+")
+
+        add_custom_command(
+            OUTPUT "${DAB_GUI_OUTPUT_EXE}"
+            COMMAND "${CMAKE_COMMAND}" -E make_directory "${DAB_GUI_OUTPUT_DIR}"
+            COMMAND "${DAB_MSBUILD_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/src/gui/winui/dab_gui.vcxproj"
+                /restore
+                /nologo
+                "/p:Configuration=$<CONFIG>"
+                "/p:Platform=x64"
+                "/p:DabCMakeProps=${DAB_GUI_MSBUILD_PROPS}"
+                VERBATIM
+            COMMAND "${CMAKE_COMMAND}"
+                "-Dtarget_dir=${DAB_GUI_OUTPUT_DIR}"
+                "-Druntime_list_file=${DAB_GUI_RUNTIME_LIST}"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CopyRuntimeDlls.cmake"
+            DEPENDS
+                dab_gui_backend
+                "${CMAKE_CURRENT_SOURCE_DIR}/src/gui/winui/dab_gui.vcxproj"
+                "${CMAKE_CURRENT_SOURCE_DIR}/src/gui/winui/App.xaml"
+                "${CMAKE_CURRENT_SOURCE_DIR}/src/gui/winui/App.xaml.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/src/gui/winui/App.xaml.h"
+                "${CMAKE_CURRENT_SOURCE_DIR}/src/gui/winui/RemoveXamlMetadataSelfReference.ps1"
+                "${CMAKE_CURRENT_SOURCE_DIR}/src/gui/winui/main_window.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/src/gui/winui/main_window.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/src/gui/winui/pch.h"
+            COMMENT "Building WinUI 3 GUI with MSBuild"
+            VERBATIM
+        )
+        add_custom_target(dab_gui ALL DEPENDS "${DAB_GUI_OUTPUT_EXE}")
+        install(DIRECTORY "${DAB_GUI_OUTPUT_DIR}/"
+            DESTINATION .
+            COMPONENT gui
+            FILES_MATCHING PATTERN "*"
+        )
         install(FILES
             ${CMAKE_CURRENT_SOURCE_DIR}/INSTALL.md
             ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE
@@ -345,9 +365,9 @@ if(DAB_BUILD_GUI)
         install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/LICENSES
                 DESTINATION .
                 COMPONENT gui)
-        dab_install_runtime_dlls(gui ${DAB_AUDIO_RUNTIME_DLLS} ${DAB_WXWIDGETS_RUNTIME_DLLS})
+        dab_install_runtime_dlls(gui ${DAB_AUDIO_RUNTIME_DLLS})
     else()
-        message(WARNING "wxWidgets not found; dab_gui target will not be built")
+        message(WARNING "The WinUI 3 GUI requires Windows and the MSVC toolchain")
     endif()
 endif()
 
