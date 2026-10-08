@@ -1,6 +1,6 @@
 # DAB+ Measurement Workbench — WinUI proof of concept
 
-This is a Windows-only C++/WinUI 3 shell for the measurement system. It is deliberately separate from the existing wxWidgets receiver GUI.
+This is a Windows-only C++/WinUI 3 shell for the measurement system. It is deliberately separate from the main DAB receiver GUI.
 
 The current proof of concept includes:
 

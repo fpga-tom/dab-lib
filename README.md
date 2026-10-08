@@ -26,7 +26,11 @@ the depth, for example `cmake -S . -B build -DDAB_CAPTURE_BLOCK_COUNT=64`.
 
 ## Windows Installer
 
-To stage the GUI application and build an installer on Windows:
+The GUI is a native C++/WinRT WinUI 3 application. Build it from Windows with
+Visual Studio 2022/MSVC and the Windows App SDK; the first build restores the
+WinUI NuGet packages.
+
+To stage the GUI application and build an installer:
 
 ```powershell
 cmake --build build-win --config Release --target dab_gui
@@ -36,9 +40,7 @@ powershell -ExecutionPolicy Bypass -File .\installer\build_installer.ps1 -Config
 
 This packages:
 - `dab_gui.exe`
-- the required wxWidgets runtime DLLs
-- `portaudio_x64.dll`
-- `libfaad2_dll.dll`
+- the required PortAudio and AAC decoder runtime DLLs
 - `INSTALL.md`
 
 The Inno Setup script is:

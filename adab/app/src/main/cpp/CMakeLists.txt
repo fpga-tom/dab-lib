@@ -4,7 +4,7 @@ project("adab")
 
 get_filename_component(DAB_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../../../.." ABSOLUTE)
 
-set(DAB_BUILD_GUI OFF CACHE BOOL "Build wxWidgets GUI prototype" FORCE)
+set(DAB_BUILD_GUI OFF CACHE BOOL "Build the Windows WinUI 3 GUI" FORCE)
 set(DAB_BUILD_TESTS OFF CACHE BOOL "Build unit tests" FORCE)
 set(DAB_BUILD_TOOLS OFF CACHE BOOL "Build command-line tools" FORCE)
 set(DAB_ENABLE_AVX2 OFF CACHE BOOL "Enable AVX2 backend when supported" FORCE)
