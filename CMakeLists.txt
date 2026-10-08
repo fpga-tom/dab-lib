@@ -423,6 +423,7 @@ if(DAB_BUILD_TOOLS)
     add_executable(dab_gen_mode_i_prs_table
         tools/gen_mode_i_prs_table.c
     )
+    dab_target_link_math(dab_gen_mode_i_prs_table)
 
     add_executable(dab_fic_dump_analyze
         tools/dab_fic_dump_analyze.c
@@ -489,6 +490,7 @@ if(DAB_BUILD_TOOLS)
         tools/dab_prs_active_compare.c
     )
 
+    dab_target_link_math(dab_prs_active_compare)
     target_include_directories(dab_prs_active_compare PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
 
     add_executable(dab_prs_fft_compare
@@ -526,22 +528,27 @@ if(DAB_BUILD_TOOLS)
     add_executable(dab_symbol_dump_compare
         tools/dab_symbol_dump_compare.c
     )
+    dab_target_link_math(dab_symbol_dump_compare)
 
     add_executable(dab_carrier_dump_compare
         tools/dab_carrier_dump_compare.c
     )
+    dab_target_link_math(dab_carrier_dump_compare)
 
     add_executable(dab_diff_dump_compare
         tools/dab_diff_dump_compare.c
     )
+    dab_target_link_math(dab_diff_dump_compare)
 
     add_executable(dab_active_dump_compare
         tools/dab_active_dump_compare.c
     )
+    dab_target_link_math(dab_active_dump_compare)
 
     add_executable(dab_raw_active_compare
         tools/dab_raw_active_compare.c
     )
+    dab_target_link_math(dab_raw_active_compare)
 
     add_executable(dab_fft_offset_scan_compare
         tools/dab_fft_offset_scan_compare.c
