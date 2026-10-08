@@ -269,13 +269,30 @@ if(DAB_BUILD_GUI)
             endif()
         endif()
 
-        find_program(DAB_MSBUILD_EXECUTABLE MSBuild.exe
-            HINTS
-                "$ENV{VSINSTALLDIR}/MSBuild/Current/Bin"
-                "$ENV{ProgramFiles}/Microsoft Visual Studio/2022/Community/MSBuild/Current/Bin"
-                "$ENV{ProgramFiles}/Microsoft Visual Studio/2022/BuildTools/MSBuild/Current/Bin"
-            REQUIRED
-        )
+        if(CMAKE_GENERATOR MATCHES "^Visual Studio" AND
+           EXISTS "${CMAKE_MAKE_PROGRAM}")
+            set(DAB_MSBUILD_EXECUTABLE "${CMAKE_MAKE_PROGRAM}")
+        else()
+            set(DAB_MSBUILD_SEARCH_DIR "${CMAKE_CXX_COMPILER}")
+            foreach(_msbuild_search_level RANGE 0 10)
+                get_filename_component(DAB_MSBUILD_SEARCH_DIR
+                    "${DAB_MSBUILD_SEARCH_DIR}" DIRECTORY)
+                if(EXISTS "${DAB_MSBUILD_SEARCH_DIR}/MSBuild/Current/Bin/MSBuild.exe")
+                    set(DAB_MSBUILD_EXECUTABLE
+                        "${DAB_MSBUILD_SEARCH_DIR}/MSBuild/Current/Bin/MSBuild.exe")
+                    break()
+                endif()
+            endforeach()
+            if(NOT DAB_MSBUILD_EXECUTABLE)
+                find_program(DAB_MSBUILD_EXECUTABLE MSBuild.exe
+                    HINTS "$ENV{VSINSTALLDIR}/MSBuild/Current/Bin"
+                )
+            endif()
+        endif()
+        if(NOT DAB_MSBUILD_EXECUTABLE)
+            message(FATAL_ERROR
+                "The WinUI 3 GUI requires MSBuild.exe from the installed Visual Studio instance")
+        endif()
 
         set(DAB_GUI_AUDIO_INCLUDE_DIRS)
         set(DAB_GUI_AUDIO_LIBRARY_DIRS)
