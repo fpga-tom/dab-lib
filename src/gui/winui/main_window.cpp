@@ -398,7 +398,7 @@ void MainWindow::BuildSpectrumPanel(StackPanel const &parent) {
     TextBlock spectrumTitle = MakeText(L"Spectrum analyzer", 17.0, true);
     spectrumTitle.Foreground(MakeBrush(46, 160, 82));
     heading.Children().Append(spectrumTitle);
-    TextBlock mode = MakeText(L"LOG FREQUENCY  .  dBFS", 12.0);
+    TextBlock mode = MakeText(L"LOG FREQUENCY  •  dBFS", 12.0);
     mode.Foreground(MakeBrush(138, 158, 176));
     mode.VerticalAlignment(VerticalAlignment::Center);
     heading.Children().Append(mode);
@@ -565,6 +565,7 @@ void MainWindow::BuildPlaybackPanel(StackPanel const &parent) {
     ensembleTimeLabel_ = MakeText(L"Ensemble: --:--", 12.0);
     ensembleTimeLabel_.HorizontalAlignment(HorizontalAlignment::Right);
     currentTimeLabel_ = MakeText(L"System: --:--:--", 12.0);
+    currentTimeLabel_.Foreground(MakeBrush(46, 160, 82));
     currentTimeLabel_.HorizontalAlignment(HorizontalAlignment::Right);
     clocks.Children().Append(ensembleTimeLabel_);
     clocks.Children().Append(currentTimeLabel_);
@@ -581,6 +582,7 @@ void MainWindow::BuildPlaybackPanel(StackPanel const &parent) {
     controls.Children().Append(controlStatusLabel_);
 
     TextBlock stationLabel = MakeText(L"Station", 12.0, true);
+    stationLabel.Foreground(MakeBrush(46, 160, 82));
     stationLabel.Margin(Thickness{0.0, 4.0, 0.0, 0.0});
     controls.Children().Append(stationLabel);
     stationChoice_ = ComboBox();
