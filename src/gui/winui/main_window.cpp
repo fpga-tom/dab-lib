@@ -1,6 +1,7 @@
 #include "main_window.hpp"
 
 #include "dab/core/audio_eq.h"
+#include "resource.h"
 
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Storage.Streams.h>
@@ -12,6 +13,7 @@
 #include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>
 #include <winrt/Microsoft.UI.Xaml.Shapes.h>
 
+#include <microsoft.ui.xaml.window.h>
 #include <windows.h>
 #include <shlobj.h>
 
@@ -72,6 +74,20 @@ constexpr std::array<float, 10> kFrequencyMarkers = {
 
 constexpr int kDbLabels[] = {0, -12, -24, -36, -48, -60, -70};
 constexpr wchar_t kSettingsRegistryPath[] = L"Software\\dab-lib\\WinUI";
+
+void ApplyWindowIcon(Window const &window) {
+    HWND hwnd{};
+    auto windowNative = window.as<IWindowNative>();
+    winrt::check_hresult(windowNative->get_WindowHandle(&hwnd));
+
+    HICON icon = LoadIconW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_DAB_GUI));
+    if (icon == nullptr) {
+        winrt::throw_hresult(HRESULT_FROM_WIN32(GetLastError()));
+    }
+
+    SendMessageW(hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(icon));
+    SendMessageW(hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(icon));
+}
 
 Windows::UI::Color Rgb(uint8_t red, uint8_t green, uint8_t blue, uint8_t alpha = 255) {
     return Windows::UI::Color{alpha, red, green, blue};
@@ -255,6 +271,7 @@ MainWindow::MainWindow(bool showEnsembleTime)
     ApplySdrSettings();
     OutputDebugStringW(L"MainWindow: building UI\n");
     BuildUi(showEnsembleTime);
+    ApplyWindowIcon(window_);
     OutputDebugStringW(L"MainWindow: UI built\n");
 
     statusTimer_ = DispatcherTimer();

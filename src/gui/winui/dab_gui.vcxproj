@@ -85,7 +85,10 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="pch.h" />
+    <ClInclude Include="resource.h" />
     <ApplicationDefinition Include="App.xaml" />
+    <ResourceCompile Include="dab_gui.rc" />
+    <None Include="dab_gui.svg" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="App.xaml.h">
