@@ -43,7 +43,7 @@ private:
     void BuildSpectrumPanel(winrt::Microsoft::UI::Xaml::Controls::StackPanel const &parent);
     void BuildEqualizerPanel(winrt::Microsoft::UI::Xaml::Controls::StackPanel const &parent);
     void BuildPlaybackPanel(winrt::Microsoft::UI::Xaml::Controls::StackPanel const &parent);
-    void BuildScanPanel(winrt::Microsoft::UI::Xaml::Controls::StackPanel const &parent);
+    void BuildScanPanel();
     void DrawSpectrum();
     void RefreshPlaybackStatus();
     void DrainScanEvents();
@@ -89,7 +89,7 @@ private:
     winrt::Microsoft::UI::Xaml::Controls::TextBlock scanStatusLabel_{nullptr};
     winrt::Microsoft::UI::Xaml::Controls::TextBlock scanChannelLabel_{nullptr};
     winrt::Microsoft::UI::Xaml::Controls::ProgressBar scanProgress_{nullptr};
-    winrt::Microsoft::UI::Xaml::Controls::Border scanPanel_{nullptr};
+    winrt::Microsoft::UI::Xaml::Controls::ContentDialog scanDialog_{nullptr};
     winrt::Microsoft::UI::Xaml::DispatcherTimer statusTimer_{nullptr};
     winrt::Microsoft::UI::Xaml::DispatcherTimer spectrumTimer_{nullptr};
     std::vector<winrt::Microsoft::UI::Xaml::Controls::Slider> equalizerSliders_;
