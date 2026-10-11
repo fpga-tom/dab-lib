@@ -391,7 +391,7 @@ void MainWindow::BuildUi(bool showEnsembleTime) {
     OutputDebugStringW(L"BuildUi: playback\n");
     BuildPlaybackPanel(content);
     OutputDebugStringW(L"BuildUi: scan\n");
-    BuildScanPanel(content);
+    BuildScanPanel();
     OutputDebugStringW(L"BuildUi: compose\n");
 
     ScrollViewer scrollViewer;
@@ -664,10 +664,9 @@ void MainWindow::BuildPlaybackPanel(StackPanel const &parent) {
     parent.Children().Append(MakeCard(content, 14.0));
 }
 
-void MainWindow::BuildScanPanel(StackPanel const &parent) {
+void MainWindow::BuildScanPanel() {
     StackPanel content;
     content.Spacing(8.0);
-    content.Children().Append(MakeText(L"Channel scan", 16.0, true));
     scanStatusLabel_ = MakeText(L"Preparing tuner...", 13.0);
     content.Children().Append(scanStatusLabel_);
     scanChannelLabel_ = MakeText(L"Channel: --", 12.0);
@@ -686,9 +685,15 @@ void MainWindow::BuildScanPanel(StackPanel const &parent) {
         CancelScan();
     });
     content.Children().Append(scanCancelButton_);
-    scanPanel_ = MakeCard(content, 14.0);
-    scanPanel_.Visibility(Visibility::Collapsed);
-    parent.Children().Append(scanPanel_);
+    scanDialog_ = ContentDialog();
+    scanDialog_.Title(box_value(L"Channel scan"));
+    scanDialog_.Content(content);
+    scanDialog_.Closing([this](IInspectable const &, ContentDialogClosingEventArgs const &args) {
+        if (scanWorker_.joinable() && !scanFinished_.load()) {
+            args.Cancel(true);
+            CancelScan();
+        }
+    });
 
     const std::wstring localData = LocalAppDataPath();
     if (localData.empty()) {
@@ -1083,10 +1088,11 @@ void MainWindow::StartScan() {
                               ? L"Opening RTL-SDR backend..."
                               : L"Opening SDRplay backend...");
     scanChannelLabel_.Text(L"Channel: --");
-    scanPanel_.Visibility(Visibility::Visible);
     scanButton_.Content(box_value(L"Cancel scan"));
     scanCancelButton_.Content(box_value(L"Cancel scan"));
     controlStatusLabel_.Text(L"Scanning DAB channels...");
+    scanDialog_.XamlRoot(window_.Content().XamlRoot());
+    (void)scanDialog_.ShowAsync();
     const std::string outputPath = winrt::to_string(hstring(scanResultsPath_));
     scanWorker_ = std::thread([this, outputPath]() {
         const int result = dab_gui_scan_run(outputPath.c_str(), &MainWindow::OnScanEvent, this);
@@ -1103,10 +1109,10 @@ void MainWindow::CancelScan() {
         dab_gui_scan_cancel_current();
         return;
     }
-    scanPanel_.Visibility(Visibility::Collapsed);
     scanCancelButton_.IsEnabled(true);
     scanButton_.IsEnabled(true);
     scanButton_.Content(box_value(L"Scan"));
+    scanDialog_.Hide();
 }
 
 void MainWindow::StopScanWorker() {
