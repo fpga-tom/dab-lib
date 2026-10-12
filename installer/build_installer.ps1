@@ -3,7 +3,7 @@ param(
     [string]$Config = "Release",
     [string]$StageDir = "",
     [string]$OutputDir = "",
-    [string]$AppVersion = "0.1.4"
+    [string]$AppVersion = "0.1.5"
 )
 
 $ErrorActionPreference = "Stop"
@@ -22,6 +22,8 @@ $scriptPath = Join-Path $PSScriptRoot "dab_gui.iss"
 
 New-Item -ItemType Directory -Force -Path $StageDir | Out-Null
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
+$StageDir = (Resolve-Path -LiteralPath $StageDir).Path
+$OutputDir = (Resolve-Path -LiteralPath $OutputDir).Path
 
 Get-ChildItem -Path $StageDir -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
 
