@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap desktop rescap">
+  <Identity
+    Name="DabLib.DabSdrGui"
+    Publisher="CN=dab-lib"
+    Version="@PACKAGE_VERSION@"
+    ProcessorArchitecture="x64" />
+  <Properties>
+    <DisplayName>DAB SDR GUI</DisplayName>
+    <PublisherDisplayName>dab-lib</PublisherDisplayName>
+    <Description>DAB+ software-defined radio receiver</Description>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+  <Dependencies>
+    <TargetDeviceFamily
+      Name="Windows.Desktop"
+      MinVersion="10.0.19041.0"
+      MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+  <Applications>
+    <Application
+      Id="DabSdrGui"
+      Executable="dab_gui.exe"
+      EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="DAB SDR GUI"
+        Description="DAB+ software-defined radio receiver"
+        BackgroundColor="#101820"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png" />
+      <Extensions>
+        <desktop:Extension
+          Category="windows.fullTrustProcess"
+          Executable="dab_gui.exe"
+          EntryPoint="Windows.FullTrustApplication" />
+      </Extensions>
+    </Application>
+  </Applications>
+</Package>

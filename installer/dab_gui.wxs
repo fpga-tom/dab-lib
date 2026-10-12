@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="DAB SDR GUI"
+    Manufacturer="dab-lib"
+    Version="$(var.PackageVersion)"
+    UpgradeCode="{B6B81D8C-209A-4AAC-9F0A-5546968DD549}"
+    Scope="perMachine">
+    <SummaryInformation Description="DAB SDR GUI installer" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of DAB SDR GUI is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="DAB SDR GUI" />
+    </StandardDirectory>
+
+    <Feature Id="MainFeature" Title="DAB SDR GUI" Level="1">
+      <ComponentGroupRef Id="GuiFiles" />
+    </Feature>
+  </Package>
+
+  <Fragment>
+    <ComponentGroup Id="GuiFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.StageDir)\**" />
+    </ComponentGroup>
+  </Fragment>
+</Wix>

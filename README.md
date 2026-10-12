@@ -49,6 +49,35 @@ The Inno Setup script is:
 The generated installer is written to:
 - `dist/installer`
 
+To build an MSI instead, install the WiX 5 command-line tool and run:
+
+```powershell
+dotnet tool install wix --tool-path out\tools\wix5 --version 5.0.2
+powershell -ExecutionPolicy Bypass -File .\installer\build_msi.ps1 -BuildDir out\build\winui-v015 -Config Release -AppVersion 0.1.5
+```
+
+The MSI is written to `dist/installer/dab-sdr-gui-0.1.5-x64.msi`.
+
+To build a sideloadable MSIX package:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\installer\build_msix.ps1 -BuildDir out\build\winui-v015 -Config Release -AppVersion 0.1.5
+```
+
+This creates `dist/installer/dab-sdr-gui-0.1.5-x64.msix` and exports the
+development signing certificate as `dist/installer/dab-sdr-gui-test-certificate.cer`.
+The package is signed with a self-signed certificate whose private key remains
+in the current user's certificate store. Before installing, trust that
+certificate on the target machine, then run:
+
+```powershell
+Import-Certificate -FilePath .\dist\installer\dab-sdr-gui-test-certificate.cer -CertStoreLocation Cert:\CurrentUser\Root
+Add-AppxPackage -Path .\dist\installer\dab-sdr-gui-0.1.5-x64.msix
+```
+
+The self-signed certificate is for development and local testing, not public
+distribution.
+
 To show the multiplex-provided ensemble time in the GUI header, launch it with:
 
 ```powershell
