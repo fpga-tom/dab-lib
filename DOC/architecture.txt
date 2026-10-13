@@ -1,0 +1,3 @@
+Architecture of dab-lib
+
+The dab-lib is composed of layers. HAL, DSP, DRIVER, GUI. HAL is in directories hal and os. In hal are sdr drivers for sdrplay and rtl-sdr and abstractions for samples file access. In DSP is math for manipulating digital samples into audio units. It is in directory core. Math vector instructions are in simd directory. Simd contains kernels for fft, null symbol detector, Viterbi decoder.
